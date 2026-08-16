@@ -1,0 +1,9 @@
+[build]
+  command = "bash build.sh"
+  publish = "."
+
+# קישור מקוצר לטופס מודעות הלוח: /luach → הטופס (ה-URL נשאר /luach)
+[[redirects]]
+  from = "/luach"
+  to = "/portal/luach.html"
+  status = 200
