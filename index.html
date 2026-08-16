@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>@@PAPER_NAME@@ — מערכת ניהול</title>
+<!-- גופן עברי איכותי -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- PWA: פתיחה מהטלפון כאפליקציה -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="@@COLOR_DARK@@">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="@@PAPER_NAME@@">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css?v=1786825933">
+<!-- ספריית Supabase (מסד הנתונים) -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- ספריית קריאת קובצי אקסל (לייבוא לקוחות ולידים) -->
+<script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<!-- ===== מסך 1: הגדרה ראשונית (חד-פעמי) ===== -->
+<div id="setupScreen" class="center-screen hidden">
+<div class="auth-card">
+<div class="paper-name">@@PAPER_NAME@@</div>
+<div class="paper-sub">חיבור ראשוני למסד הנתונים — לפי הוראות ההתקנה</div>
+<div class="field"><label>Project URL</label><input id="cfgUrl" dir="ltr" placeholder="https://xxxx.supabase.co"></div>
+<div class="field"><label>anon public key</label><input id="cfgKey" dir="ltr" placeholder="eyJ..."></div>
+<button class="btn btn-block" onclick="saveConfig()">שמור והתחל</button>
+<div class="auth-err" id="cfgErr"></div>
+</div>
+</div>
+
+<!-- ===== מסך 2: כניסה / הרשמה ===== -->
+<div id="authScreen" class="center-screen hidden">
+<div class="auth-card">
+<div class="paper-name paper-name-slot">@@PAPER_NAME@@</div>
+<div class="paper-sub">מערכת ניהול המקומון</div>
+<div class="field hidden" id="nameField"><label>שם מלא</label><input id="authName"></div>
+<div class="field"><label>אימייל</label><input id="authEmail" type="email" dir="ltr"></div>
+<div class="field"><label>סיסמה</label><input id="authPass" type="password" dir="ltr"
+onkeydown="if(event.key==='Enter')doAuth()"></div>
+<button class="btn btn-block" id="authBtn" onclick="doAuth()">כניסה</button>
+<div class="auth-err" id="authErr"></div>
+<div class="auth-toggle" id="authToggle">אין לך חשבון? <a onclick="toggleAuthMode()">הרשמה</a></div>
+</div>
+</div>
+
+<!-- ===== מסך 3: ממתין לאישור מנהל ===== -->
+<div id="pendingScreen" class="center-screen hidden">
+<div class="auth-card" style="text-align:center">
+<div class="paper-name">ממתין לאישור</div>
+<p class="paper-sub" style="margin-top:12px">
+החשבון נוצר בהצלחה.<br>מנהל המערכת צריך לאשר אותך ולהקצות תפקיד לפני הכניסה.
+</p>
+<button class="btn btn-ghost" onclick="logout()">התנתקות</button>
+</div>
+</div>
+
+<!-- ===== מסך 4: המערכת ===== -->
+<div id="app" class="layout hidden">
+
+<!-- תפריט צד -->
+<aside class="sidebar">
+<div class="brand paper-name-slot">@@PAPER_NAME@@<small>מערכת ניהול המקומון</small></div>
+<nav id="sideNav"></nav>
+<div class="user-box">
+<div class="name" id="userName"></div>
+<div class="role" id="userRole"></div>
+<div class="actions">
+<button id="clockBtn" onclick="toggleClock()">▶ כניסה</button>
+<button onclick="logout()">התנתקות</button>
+</div>
+</div>
+</aside>
+
+<!-- אזור ראשי -->
+<div class="main">
+<div class="topbar">
+<h1 id="pageTitle"></h1>
+<div class="notif-wrap">
+<button id="notifBell" class="notif-bell" onclick="notifToggle()" title="התראות" aria-label="התראות">🔔<span id="notifCount" class="notif-badge hidden">0</span></button>
+<div id="notifDrop" class="notif-drop hidden"></div>
+</div>
+<div class="search-wrap">
+<span class="icon">🔎</span>
+<input id="searchInput" placeholder="חיפוש בכל המערכת..." oninput="globalSearch(this.value)" autocomplete="off">
+<div id="searchResults" class="search-results hidden"></div>
+</div>
+</div>
+<div class="content" id="content"></div>
+</div>
+</div>
+
+<!-- ===== מודאל טפסים משותף ===== -->
+<div class="modal-back" id="modalBack" onclick="if(event.target===this)closeForm()">
+<div class="modal">
+<h3 id="modalTitle"></h3>
+<div id="modalFields" class="grid2"></div>
+<div class="m-actions">
+<button class="btn" onclick="submitForm()">שמירה</button>
+<button class="btn btn-ghost" onclick="closeForm()">ביטול</button>
+</div>
+</div>
+</div>
+
+<!-- ===== מודאל תוכן חופשי (כרטיסים, פירוט) ===== -->
+<div class="modal-back" id="viewBack" onclick="if(event.target===this)this.classList.remove('open')">
+<div class="modal wide" id="viewModal"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ============ קבצי המערכת — לפי סדר טעינה ============
+api.js — תשתית משותפת (חייב ראשון)
+app.js — התחברות, ניווט, דשבורד
+שאר הקבצים — מודול לכל תחום, אפשר לערוך כל אחד בנפרד -->
+<script defer src="app.bundle.js?v=1786825933"></script>
+
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
+</body>
+</html>
