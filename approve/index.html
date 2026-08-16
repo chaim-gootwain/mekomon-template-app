@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>@@PAPER_NAME@@ — אישור עיצוב</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root { --brand:@@COLOR_BRAND@@; --brand-dark:@@COLOR_DARK@@; --accent:@@COLOR_GRAD@@; --ok:#1e7e34; --warn:#d35400; --bg:@@COLOR_BG@@; --line:#dfe2f0; --muted:#64748b; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Heebo','Segoe UI',Arial,sans-serif; background:var(--bg); color:#1c2438; min-height:100vh; }
+.top { background:var(--brand-dark); color:#fff; padding:22px 16px; text-align:center; }
+.top .logo { font-size:1.6rem; font-weight:800; }
+.top .logo span { color:#ff6b6e; }
+.top .sub { font-size:.85rem; opacity:.75; margin-top:2px; }
+.wrap { max-width:520px; margin:0 auto; padding:20px 16px 60px; }
+.card { background:#fff; border-radius:14px; box-shadow:0 2px 12px rgba(29,39,101,.08); padding:24px; margin-top:16px; }
+h2 { color:var(--brand-dark); font-size:1.15rem; margin-bottom:10px; }
+.facts { font-size:.95rem; line-height:1.9; margin:8px 0 6px; }
+.facts b { color:var(--brand-dark); }
+.note { font-size:.86rem; color:var(--muted); background:#f6f7fd; border-radius:10px; padding:12px; margin:14px 0; }
+label { display:block; font-size:.85rem; color:var(--muted); margin:12px 0 4px; }
+textarea { width:100%; font-family:inherit; font-size:1rem; padding:11px 12px; border:1px solid var(--line); border-radius:9px; }
+.btn { width:100%; border:none; border-radius:10px; padding:14px; font-size:1.05rem; font-weight:700; font-family:inherit; cursor:pointer; margin-top:10px; }
+.btn-ok { background:var(--ok); color:#fff; }
+.btn-fix { background:#fff; color:var(--accent); border:1.5px solid var(--accent); }
+.btn:disabled { opacity:.6; }
+.center-msg { text-align:center; padding:56px 20px; color:var(--muted); }
+.result { text-align:center; padding:22px; border-radius:12px; font-size:1.05rem; font-weight:700; }
+.result.ok { background:#e6f4ea; color:var(--ok); }
+.result.fix { background:#fdf1e3; color:var(--warn); }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="top"><div class="logo">@@PAPER_NAME@@</div><div class="sub">אישור עיצוב מודעה</div></div>
+<div class="wrap">
+  <div id="loading" class="center-msg">טוען...</div>
+  <div id="invalid" class="center-msg hidden"><h2>הקישור אינו תקף</h2>ייתכן שהעיצוב כבר טופל. לפרטים: @@PAPER_PHONE@@</div>
+
+  <div id="panel" class="hidden">
+    <div class="card">
+      <h2>אישור העיצוב שלך</h2>
+      <div class="facts">
+        מודעה: <b id="pTitle"></b><br>
+        עבור: <b id="pCust"></b><br>
+        <span id="pIssueWrap">גיליון: <b id="pIssue"></b></span>
+      </div>
+      <div class="note">📎 העיצוב נשלח אליך בהודעה (וואטסאפ / מייל). אנא בדוק אותו, ואז אשר כאן — או בקש תיקון.</div>
+      <button class="btn btn-ok" id="okBtn" onclick="decide('approve')">✓ מאשר את העיצוב</button>
+      <div id="fixArea" class="hidden">
+        <label>מה צריך לתקן?</label>
+        <textarea id="fixNote" rows="3" placeholder="כתוב כאן את ההערות שלך..."></textarea>
+        <button class="btn btn-fix" onclick="submitFix()">שליחת בקשת התיקון</button>
+      </div>
+      <button class="btn btn-fix" id="fixBtn" onclick="document.getElementById('fixArea').classList.remove('hidden');this.classList.add('hidden')">✎ מבקש תיקון</button>
+    </div>
+  </div>
+
+  <div id="doneOk" class="hidden"><div class="card"><div class="result ok">✓ תודה! העיצוב אושר ויוכנס לגיליון.</div></div></div>
+  <div id="doneFix" class="hidden"><div class="card"><div class="result fix">✎ בקשת התיקון נשלחה לגרפיקאית. נעדכן אותך כשהעיצוב המתוקן יהיה מוכן.</div></div></div>
+</div>
+
+<script>
+'use strict';
+const SUPABASE_URL = '@@SUPABASE_URL@@';
+const SUPABASE_KEY = '@@SUPABASE_KEY@@';
+const token = new URLSearchParams(location.search).get('t');
+let db = null;
+
+function show(id){ ['loading','invalid','panel','doneOk','doneFix'].forEach(x=>document.getElementById(x).classList.toggle('hidden', x!==id)); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function init(){
+  if(!token){ show('invalid'); return; }
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data, error } = await db.rpc('proof_by_token', { p_token: token });
+  const row = Array.isArray(data) ? data[0] : data;
+  if(error || !row){ show('invalid'); return; }
+  if(row.ad_status !== 'proof'){ show('invalid'); return; }
+  document.getElementById('pTitle').textContent = row.title || '—';
+  document.getElementById('pCust').textContent = row.customer_name || '—';
+  if(row.issue){ document.getElementById('pIssue').textContent = row.issue; }
+  else { document.getElementById('pIssueWrap').style.display='none'; }
+  show('panel');
+}
+
+async function decide(kind, note){
+  const btn = document.getElementById('okBtn'); if(btn) btn.disabled = true;
+  const { data, error } = await db.rpc('proof_customer_decision', { p_token: token, p_decision: kind, p_note: note || null });
+  if(error){ alert('שגיאה: ' + error.message); if(btn) btn.disabled=false; return; }
+  if(data === 'not_pending' || data === 'not_found'){ show('invalid'); return; }
+  show(kind === 'approve' ? 'doneOk' : 'doneFix');
+}
+function submitFix(){
+  const note = document.getElementById('fixNote').value.trim();
+  if(!note){ alert('נא לכתוב מה צריך לתקן'); return; }
+  decide('revise', note);
+}
+init();
+</script>
+</body>
+</html>
