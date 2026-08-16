@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>@@PAPER_NAME@@ — הגשת מודעת לוח</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --brand:@@COLOR_BRAND@@; --brand-dark:@@COLOR_DARK@@; --accent:@@COLOR_GRAD@@; --accent-dark:@@COLOR_GRAD@@;
+  --lav:@@COLOR_LIGHT@@; --lav-deep:#d7d9ee; --line:#d5d8ee; --muted:#6b7392; --ink:#1c2036;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Heebo','Segoe UI',Arial,sans-serif;color:var(--ink);
+  background:var(--lav);min-height:100vh;}
+/* כותרת — פס נייבי עם משיחת אדום */
+.top{background:var(--brand-dark);color:#fff;padding:26px 16px 30px;text-align:center;position:relative;overflow:hidden;}
+.top .logo{font-size:1.9rem;font-weight:900;letter-spacing:-.5px;}
+.top .logo b{color:#fff;}
+.top .logo span{color:#ff5a5e;}
+.top .brush{display:inline-block;margin-top:10px;background:var(--accent);color:#fff;
+  font-weight:800;font-size:1rem;padding:6px 20px;border-radius:4px 14px 4px 14px;transform:rotate(-1deg);
+  box-shadow:0 3px 0 rgba(0,0,0,.15);}
+.top .sub{font-size:.82rem;opacity:.7;margin-top:12px;}
+.wrap{max-width:600px;margin:0 auto;padding:18px 14px 70px;}
+.card{background:#fff;border-radius:16px;box-shadow:0 4px 18px rgba(29,39,101,.10);padding:20px;margin-top:16px;}
+.card h2{color:var(--brand-dark);font-size:1.12rem;margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+.card .hint{font-size:.86rem;color:var(--muted);margin-bottom:14px;line-height:1.5;}
+label{display:block;font-size:.85rem;font-weight:700;color:var(--brand-dark);margin-bottom:6px;}
+.field{margin-bottom:15px;}
+input,select,textarea{width:100%;font-family:inherit;font-size:1rem;padding:12px 13px;
+  border:1.5px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(43,57,144,.12);}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+/* בורר סוג — כרטיסים */
+.types{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+.type-opt{border:1.5px solid var(--line);border-radius:12px;padding:12px 8px;text-align:center;cursor:pointer;
+  background:#fff;transition:.15s;user-select:none;}
+.type-opt .t{font-weight:800;color:var(--brand-dark);font-size:.95rem;}
+.type-opt .p{font-size:.8rem;color:var(--muted);margin-top:2px;}
+.type-opt.sel{border-color:var(--brand);background:#f3f4fc;box-shadow:0 0 0 3px rgba(43,57,144,.10);}
+.type-opt.sel .p{color:var(--accent);font-weight:700;}
+/* תיבת מחיר גדולה */
+.price-box{background:linear-gradient(0deg,#fff,#fff);border:2px dashed var(--lav-deep);border-radius:14px;
+  padding:16px;display:flex;align-items:center;justify-content:space-between;margin:4px 0 10px;}
+.price-box .lbl{font-weight:700;color:var(--brand-dark);}
+.price-box .amt{font-size:2rem;font-weight:900;color:var(--brand-dark);line-height:1;}
+.price-box .amt .cur{color:var(--accent);font-size:1.3rem;margin-inline-start:3px;}
+.price-box .note{font-size:.72rem;color:var(--muted);margin-top:3px;text-align:center;}
+.pkg{display:flex;gap:10px;align-items:center;background:#fbf3f3;border:1.5px solid #f3d4d5;border-radius:12px;
+  padding:11px 13px;margin-bottom:12px;cursor:pointer;}
+.pkg input{width:20px;height:20px;flex:0 0 auto;}
+.pkg .txt{font-size:.9rem;} .pkg .txt b{color:var(--accent-dark);}
+.file-drop{border:2px dashed var(--line);border-radius:12px;padding:16px;text-align:center;
+  color:var(--muted);font-size:.9rem;cursor:pointer;}
+.file-drop.has{border-color:var(--brand);color:var(--brand);background:#f4f5fc;font-weight:700;}
+.btn{width:100%;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:15px;
+  font-size:1.1rem;font-weight:800;font-family:inherit;cursor:pointer;box-shadow:0 4px 0 var(--brand-dark);transition:.1s;}
+.btn:active{transform:translateY(2px);box-shadow:0 2px 0 var(--brand-dark);}
+.btn:disabled{opacity:.6;box-shadow:none;}
+.msg{text-align:center;padding:15px;border-radius:12px;margin-top:14px;font-size:.98rem;display:none;line-height:1.6;}
+.msg.ok{background:#e7f5ec;color:#1c7a3f;border:1.5px solid #b6e0c4;display:block;}
+.msg.err{background:#fdecec;color:#c0392b;border:1.5px solid #f3c2c2;display:block;}
+.foot{text-align:center;color:var(--muted);font-size:.8rem;margin-top:22px;line-height:1.8;}
+.foot b{color:var(--brand-dark);}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="logo">@@PAPER_NAME@@</div>
+  <div class="brush">לוח פרסום — הבמה הכי מוכרת בעיר</div>
+  <div class="sub">מגישים מודעה ללוח · ממלאים · שולחים · ואנחנו ממשיכים משם</div>
+</div>
+
+<div class="wrap">
+  <div id="loading" style="text-align:center;padding:50px;color:var(--muted)">טוען...</div>
+
+  <div id="form" style="display:none">
+    <div class="card">
+      <h2>📇 פרטי המפרסם</h2>
+      <div class="grid2">
+        <div class="field"><label>שם</label><input id="fName" placeholder="שם מלא / שם העסק"></div>
+        <div class="field"><label>טלפון *</label><input id="fPhone" type="tel" inputmode="tel" placeholder="05X-XXXXXXX"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📝 המודעה</h2>
+      <div class="field">
+        <label>קטגוריה</label>
+        <select id="fCat"></select>
+      </div>
+
+      <div class="field">
+        <label>סוג המודעה</label>
+        <div class="types" id="fTypes">
+          <div class="type-opt sel" data-type="regular"><div class="t">רגיל</div><div class="p" data-price="regular"></div></div>
+          <div class="type-opt" data-type="bold"><div class="t">מודגש</div><div class="p" data-price="bold"></div></div>
+          <div class="type-opt" data-type="image"><div class="t">עם תמונה</div><div class="p" data-price="image"></div></div>
+        </div>
+      </div>
+
+      <div class="field" id="imgField" style="display:none">
+        <label>קובץ התמונה</label>
+        <input type="file" id="fImg" accept="image/*" style="display:none" onchange="imgChosen()">
+        <div class="file-drop" id="imgDrop" onclick="document.getElementById('fImg').click()">📷 לחצו לבחירת תמונה</div>
+      </div>
+
+      <div class="field">
+        <label>נוסח המודעה *</label>
+        <textarea id="fBody" rows="4" placeholder="לדוגמה: למכירה סלון מעור במצב מצוין, מחיר גמיש. לפרטים 05X-XXXXXXX"></textarea>
+      </div>
+
+      <div class="field">
+        <label>לאיזה גיליון?</label>
+        <select id="fIssue"></select>
+      </div>
+
+      <label class="pkg" id="fPkg">
+        <input type="checkbox" id="fPkgChk">
+        <span class="txt"><b>מסלול 4+1 חיסכון</b> — 5 גיליונות במחיר 4 (הגיליון החמישי מתנה!)</span>
+      </label>
+
+      <div class="price-box">
+        <div>
+          <div class="lbl">לתשלום</div>
+          <div class="note">עד 10 מילים במחיר הבסיס</div>
+        </div>
+        <div class="amt"><span id="priceVal">—</span><span class="cur">₪</span></div>
+      </div>
+
+      <label class="pkg" id="fPaidWrap" style="border-color:var(--brand)">
+        <input type="checkbox" id="fPaidChk">
+        <span class="txt"><b>התשלום הוסדר ✓</b> — סמן/י לאישור שסידרת את התשלום. חובה לצורך שליחה.</span>
+      </label>
+
+      <button class="btn" id="sendBtn" onclick="submitAd()" disabled>שליחת המודעה ✈</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>@@PAPER_NAME@@</b> · לוח פרסום<br>
+    לשאלות: @@PAPER_PHONE@@
+  </div>
+</div>
+
+<script>
+'use strict';
+const SUPABASE_URL = '@@SUPABASE_URL@@';
+const SUPABASE_KEY = '@@SUPABASE_KEY@@';
+let db, META = null, TYPE = 'regular', IMG_FILE = null;
+
+const CATS = [
+  ['sale','מכירה'],['rent','להשכיר / נדל״ן'],['jobs','דרושים / ביקוש עבודה'],
+  ['gemach','גמ״חים'],['lost','השבת אבידה'],['other','שונות']
+];
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function wc(t){return String(t||'').trim().split(/\s+/).filter(Boolean).length;}
+
+function unitPrice(){
+  const p = META.prices, w = wc(document.getElementById('fBody').value);
+  const base = TYPE==='image'?+p.image : TYPE==='bold'?+p.bold : +p.regular;
+  if(w <= +p.free_words) return base;
+  const blocks = Math.ceil((w - +p.free_words)/10);
+  return base + blocks*(+p.extra);
+}
+function recalc(){
+  if(!META) return;
+  const pkg = document.getElementById('fPkgChk').checked;
+  const total = pkg ? unitPrice()*4 : unitPrice();
+  document.getElementById('priceVal').textContent = total.toLocaleString('he-IL');
+}
+
+async function init(){
+  if(SUPABASE_URL.startsWith('PASTE')){document.getElementById('loading').textContent='שגיאת הגדרה';return;}
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const {data, error} = await db.rpc('portal_classified_meta');
+  if(error||!data){document.getElementById('loading').textContent='שגיאה בטעינה — נסו לרענן';return;}
+  META = data;
+  // קטגוריות
+  document.getElementById('fCat').innerHTML = CATS.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join('');
+  // מחירי סוג
+  document.querySelectorAll('#fTypes .p').forEach(el=>{
+    const k = el.dataset.price; el.textContent = (+META.prices[k]).toLocaleString('he-IL')+' ₪';
+  });
+  // גיליונות
+  const iss = META.issues||[];
+  document.getElementById('fIssue').innerHTML = iss.length
+    ? iss.map((x,idx)=>`<option value="${x.id}">גיליון ${x.num}${x.date?' · '+new Date(x.date).toLocaleDateString('he-IL'):''}</option>`).join('')
+    : '<option value="">אין גיליון פתוח כרגע</option>';
+  // בורר סוג
+  document.querySelectorAll('#fTypes .type-opt').forEach(opt=>{
+    opt.addEventListener('click',()=>{
+      document.querySelectorAll('#fTypes .type-opt').forEach(o=>o.classList.remove('sel'));
+      opt.classList.add('sel'); TYPE = opt.dataset.type;
+      document.getElementById('imgField').style.display = TYPE==='image'?'block':'none';
+      recalc();
+    });
+  });
+  document.getElementById('fBody').addEventListener('input', recalc);
+  document.getElementById('fPkgChk').addEventListener('change', recalc);
+  document.getElementById('fPaidChk').addEventListener('change', updateSendGate);
+  updateSendGate();
+  recalc();
+  document.getElementById('loading').style.display='none';
+  document.getElementById('form').style.display='block';
+}
+
+function imgChosen(){
+  IMG_FILE = document.getElementById('fImg').files[0]||null;
+  const d = document.getElementById('imgDrop');
+  d.textContent = IMG_FILE ? '✓ '+IMG_FILE.name : '📷 לחצו לבחירת תמונה';
+  d.classList.toggle('has', !!IMG_FILE);
+}
+
+function updateSendGate(){
+  const c=document.getElementById('fPaidChk'), b=document.getElementById('sendBtn');
+  if(b) b.disabled = !(c && c.checked);
+}
+
+async function submitAd(){
+  const btn=document.getElementById('sendBtn'), msg=document.getElementById('msg');
+  const name=document.getElementById('fName').value.trim();
+  const phone=document.getElementById('fPhone').value.trim();
+  const body=document.getElementById('fBody').value.trim();
+  const cat=document.getElementById('fCat').value;
+  const issue=document.getElementById('fIssue').value;
+  const pkg=document.getElementById('fPkgChk').checked;
+  msg.className='msg';
+  if(phone.replace(/\D/g,'').length<7){msg.textContent='נא למלא מספר טלפון תקין';msg.classList.add('err');return;}
+  if(!body){msg.textContent='נא לכתוב את נוסח המודעה';msg.classList.add('err');return;}
+  if(TYPE==='image' && !IMG_FILE){msg.textContent='בחרתם "עם תמונה" — נא לצרף קובץ תמונה';msg.classList.add('err');return;}
+  if(!document.getElementById('fPaidChk').checked){msg.textContent='נא לסמן "התשלום הוסדר" כדי לשלוח';msg.classList.add('err');return;}
+
+  btn.disabled=true; btn.textContent='שולח...';
+  try{
+    let imgPath='';
+    if(TYPE==='image' && IMG_FILE){
+      if(IMG_FILE.size>10*1024*1024) throw new Error('התמונה גדולה מדי (עד 10MB)');
+      imgPath = 'classified/'+phone.replace(/\D/g,'')+'_'+Date.now()+'_'+IMG_FILE.name;
+      const {error:upErr} = await db.storage.from('ad-files').upload(imgPath, IMG_FILE);
+      if(upErr) throw new Error('העלאת התמונה נכשלה — נסו שוב או בחרו ללא תמונה');
+    }
+    const {data,error} = await db.rpc('portal_submit_classified',{
+      p_name:name, p_phone:phone, p_category:cat, p_ad_type:TYPE,
+      p_body:body, p_issue_id:issue?Number(issue):null, p_package:pkg,
+      p_image_path:imgPath||null
+    });
+    if(error) throw error;
+    const price = pkg ? (data.price*4) : data.price;
+    msg.innerHTML = '✓ המודעה התקבלה!<br>לתשלום: <b>'+Number(price).toLocaleString('he-IL')+' ₪</b>'
+      + (pkg?' (מסלול 4+1)':'') + '<br>המודעה ממתינה לאישור ותפורסם בגיליון '+esc(String(data.issue))+'.';
+    msg.classList.add('ok');
+    document.getElementById('fBody').value=''; IMG_FILE=null; imgChosen();
+    document.getElementById('fPkgChk').checked=false; recalc();
+    document.getElementById('fPaidChk').checked=false;
+    btn.textContent='נשלח ✓';
+    setTimeout(()=>{btn.textContent='שליחת מודעה נוספת ✈'; updateSendGate();},1500);
+  }catch(e){
+    const m=(e&&e.message)||String(e);
+    const he = m.includes('phone_invalid')?'מספר טלפון לא תקין'
+      : m.includes('body_required')?'נא לכתוב את נוסח המודעה'
+      : m.includes('no_open_issue')?'אין כרגע גיליון פתוח להגשה'
+      : m.includes('not_enough_issues')?'אין מספיק גיליונות פתוחים למסלול 4+1'
+      : m;
+    msg.textContent='שגיאה: '+he; msg.classList.add('err');
+    btn.disabled=false; btn.textContent='שליחת המודעה ✈';
+  }
+}
+init();
+</script>
+</body>
+</html>
