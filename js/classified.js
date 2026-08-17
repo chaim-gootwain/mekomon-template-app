@@ -63,81 +63,66 @@ function _clQueueHtml(rows) {
           <td><b>${money(total)}</b></td>
           <td style="white-space:nowrap">
             <button class="btn btn-sm" style="background:var(--ok);color:#fff" onclick="classifiedApprove(${r.id}, true)" title="אישור + סימון שהתשלום הוסדר">✓ אשר + שולם</button>
-            <button class="btn btn-sm btn-ghost" onclick="classifiedApprove(${r.id}, false)" title="אישור, החוב נשאר פתוח">אשר (חוב פתוח)</button>
+            <button class="btn btn-sm btn-ghost" onclick="classifiedApprove(${r.id}, false)" title="אישור, התשלום טרם הוסדר">אשר (טרם שולם)</button>
+            <button class="btn btn-sm btn-ghost" style="color:var(--brand)" onclick="classifiedApproveFree(${r.id})" title="אישור בלי לגבות תשלום כלל — מודעה חינם">🆓 אשר ללא תשלום</button>
             <button class="btn btn-sm btn-ghost" style="color:#c0392b" onclick="classifiedReject(${r.id})">דחה</button>
           </td></tr>`;
   }).join('')}</tbody>
     </table></div></div>`;
 }
-function _clPayMethod() { return (typeof _icPayMethod === 'function') ? _icPayMethod() : 'cash'; }
+/* הערה: בתבנית הגנרית הזו מצב תשלום (payment_status) הוא דגל פשוט על המודעה עצמה —
+   בלי שום קישור לטבלאות חיוב/גבייה (charges/payments). כל עסק שמשתמש בתבנית יכול לחבר
+   מנגנון גבייה משלו בנפרד אם ירצה; ברירת המחדל כאן היא ניהול מודעות לוח עצמאי לגמרי. */
 
 async function classifiedApprove(id, settled) {
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
     const usePkg = !!r.package_id;
-    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
     const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: settled ? 'settled' : 'pending' };
     if (usePkg) await db.from('classified_ads').update(upd).eq('package_id', r.package_id);
     else await db.from('classified_ads').update(upd).eq('id', id);
-    if (settled) {
-      for (const a of grp) {
-        if (a.charge_id && Number(a.price) > 0) {
-          await db.from('charges').update({ status: 'paid' }).eq('id', a.charge_id);
-          await db.from('payments').insert({ charge_id: a.charge_id, customer_id: a.customer_id, amount: a.price, method: _clPayMethod(), paid_date: today(), notes: 'מודעת לוח (פורטל) — התשלום הוסדר', created_by: profile.id });
-        }
-      }
-    }
-    try { await addInteraction('customer', r.customer_id, '🗒️ מודעת לוח אושרה' + (settled ? ' + התשלום הוסדר' : ' (חוב פתוח)')); } catch (e) { }
+    try { await addInteraction('customer', r.customer_id, '🗒️ מודעת לוח אושרה' + (settled ? ' + שולם' : ' (טרם שולם)')); } catch (e) { }
     toast('✓ המודעה אושרה' + (settled ? ' + סומן שולם' : ''));
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
 }
 
+/* אישור בלי לגבות תשלום כלל — למשל מודעה חינם/קהילתית. המודעה נכנסת לגיליון (payment_status='settled'),
+   והמחיר מתאפס כדי לשקף שלא ייגבה עבורה דבר. */
+async function classifiedApproveFree(id) {
+  try {
+    const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
+    if (!r) { toast('מודעה לא נמצאה', true); return; }
+    const usePkg = !!r.package_id;
+    const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: 'settled', price: 0 };
+    if (usePkg) await db.from('classified_ads').update(upd).eq('package_id', r.package_id);
+    else await db.from('classified_ads').update(upd).eq('id', id);
+    try { await addInteraction('customer', r.customer_id, '🆓 מודעת לוח אושרה ללא תשלום (נכנסת לגיליון)'); } catch (e) { }
+    toast('✓ אושר ללא תשלום — המודעה נכנסת לגיליון');
+    openPage('classified');
+  } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+}
+
 async function classifiedReject(id) {
-  if (!confirm('לדחות את המודעה? (החוב שנוצר יבוטל)')) return;
+  if (!confirm('לדחות את המודעה?')) return;
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     const usePkg = !!(r && r.package_id);
-    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
     if (usePkg) await db.from('classified_ads').update({ status: 'rejected' }).eq('package_id', r.package_id);
     else await db.from('classified_ads').update({ status: 'rejected' }).eq('id', id);
-    for (const a of grp) { if (a && a.charge_id) await db.from('charges').update({ status: 'cancelled', notes: 'בוטל — מודעת לוח נדחתה' }).eq('id', a.charge_id); }
     toast('המודעה נדחתה');
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
 }
 
-/* סימון מודעת לוח כ"שולם" — רק אז היא נכנסת לגיליון/מדור */
+/* סימון מודעת לוח כ"שולם" — רק אז היא נכנסת לגיליון/מדור. דגל מקומי בלבד, בלי חיוב/תשלום בפועל */
 async function classifiedMarkPaid(id) {
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
     if (r.payment_status === 'settled') { toast('כבר סומן כשולם'); return; }
     const usePkg = !!r.package_id;
-    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
-    for (const a of grp) {
-      if (Number(a.price) > 0) {
-        let chargeId = a.charge_id;
-        if (!chargeId) {
-          const cust = (cache.customers || []).find(x => x.id === a.customer_id) || {};
-          const ins = await run(db.from('charges').insert({
-            customer_id: a.customer_id, amount: a.price,
-            description: 'מודעת לוח — גיליון ' + ((cache.issues.find(i => i.id === a.issue_id) || {}).issue_number || ''),
-            issued_date: today(), due_date: today(), status: 'paid', invoice_number: null,
-            agent_id: cust.agent_id || null, notes: 'מודעת לוח — שולם #cl' + a.id,
-          }).select('id').single());
-          chargeId = ins.id;
-          await db.from('classified_ads').update({ charge_id: chargeId }).eq('id', a.id);
-        } else {
-          await db.from('charges').update({ status: 'paid' }).eq('id', chargeId);
-        }
-        const existP = (await db.from('payments').select('id').eq('charge_id', chargeId).limit(1)).data;
-        if (!existP || !existP.length) {
-          await db.from('payments').insert({ charge_id: chargeId, customer_id: a.customer_id, amount: a.price, method: _clPayMethod(), paid_date: today(), notes: 'מודעת לוח — שולם', created_by: profile.id });
-        }
-      }
-    }
     if (usePkg) await db.from('classified_ads').update({ payment_status: 'settled' }).eq('package_id', r.package_id);
     else await db.from('classified_ads').update({ payment_status: 'settled' }).eq('id', id);
     try { await addInteraction('customer', r.customer_id, '💰 מודעת לוח — סומן שולם (נכנס לגיליון)'); } catch (e) { }
