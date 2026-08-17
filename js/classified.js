@@ -446,7 +446,7 @@ body{font-family:'Heebo',Arial,sans-serif;background:var(--lav);color:var(--ink)
   <div class="head">
     <div class="badge">שווה<br>לך</div>
     <div class="hlogo">הלוח</div>
-    <div class="hsub">לוח המודעות של <b>עמנואל <span>שלי</span></b> · גיליון ${esc(String(issue.issue_number || ''))}${dateHe ? ' · ' + esc(dateHe) : ''}</div>
+    <div class="hsub">לוח המודעות של <b>@@PAPER_NAME@@</b> · גיליון ${esc(String(issue.issue_number || ''))}${dateHe ? ' · ' + esc(dateHe) : ''}</div>
   </div>
   <div class="pricebar">מחירון: עד 10 מילים <b>${pReg} ₪</b> · מודגש <b>${pBold} ₪</b> · כל 10 מילים נוספות +10 ₪ · המחירים כוללים מע"מ &nbsp;|&nbsp; לשליחת מודעה: @@PAPER_PHONE@@</div>
   <div class="tagrow">${tagRow}</div>
