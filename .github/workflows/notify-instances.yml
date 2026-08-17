@@ -1,0 +1,36 @@
+# .github/workflows/notify-instances.yml  (בריפו התבנית mekomon-template-app)
+# push ל-main בתבנית ⇒ שולח repository_dispatch לכל מופע רשום.
+# הפעלה ידנית (workflow_dispatch) שולחת לכל המופעים בכל מקרה — שימושי כדי
+# להפיץ למופעים האחרים שינוי שהגיע במקור ממופע אחד.
+name: Notify instances of template update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # מניעת הד: merge של PR סנכרון שהגיע ממופע לא מפעיל הפצה אוטומטית חזרה
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (!contains(github.event.head_commit.message, '[from-instance]') &&
+       !contains(github.event.head_commit.message, '[auto-sync]') &&
+       !contains(github.event.head_commit.message, 'sync/'))
+    strategy:
+      fail-fast: false
+      matrix:
+        # רשימת המופעים הרשומים — לעדכן כאן כשמוסיפים מופע חדש
+        instance: [imanuel-sheli, emtzash]
+    steps:
+      - name: Dispatch template-updated to ${{ matrix.instance }}
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.SYNC_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/chaim-gootwain/${{ matrix.instance }}/dispatches" \
+            -d '{"event_type":"template-updated","client_payload":{"sha":"${{ github.sha }}"}}'
