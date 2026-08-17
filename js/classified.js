@@ -47,7 +47,7 @@ function _clQueueHtml(rows) {
     items.push({ r, grp });
   });
   return `<div class="card card-pad" style="margin-bottom:12px;border-right:4px solid @@COLOR_GRAD@@">
-    <b style="color:@@COLOR_GRAD@@">🔔 ממתין לאישור מנהל (${items.length})</b>
+    <b style="color:#b31f24">🔔 ממתין לאישור מנהל (${items.length})</b>
     <p class="muted" style="font-size:.83rem;margin:2px 0 10px">מודעות שהוגשו דרך הפורטל. אשר/י ובחר/י אם התשלום כבר הוסדר.</p>
     <div class="table-wrap"><table class="data">
       <thead><tr><th>מפרסם</th><th>קטגוריה · סוג</th><th>טקסט</th><th>גיליון</th><th>סכום</th><th></th></tr></thead>
@@ -63,41 +63,52 @@ function _clQueueHtml(rows) {
           <td><b>${money(total)}</b></td>
           <td style="white-space:nowrap">
             <button class="btn btn-sm" style="background:var(--ok);color:#fff" onclick="classifiedApprove(${r.id}, true)" title="אישור + סימון שהתשלום הוסדר">✓ אשר + שולם</button>
-            <button class="btn btn-sm btn-ghost" onclick="classifiedApprove(${r.id}, false)" title="אישור, התשלום טרם הוסדר">אשר (טרם שולם)</button>
-            <button class="btn btn-sm btn-ghost" style="color:var(--brand)" onclick="classifiedApproveFree(${r.id})" title="אישור בלי לגבות תשלום כלל — מודעה חינם">🆓 אשר ללא תשלום</button>
+            <button class="btn btn-sm btn-ghost" onclick="classifiedApprove(${r.id}, false)" title="אישור, החוב נשאר פתוח">אשר (חוב פתוח)</button>
+            <button class="btn btn-sm btn-ghost" style="color:var(--brand)" onclick="classifiedApproveFree(${r.id})" title="אישור בלי לגבות תשלום כלל — מבטל את החוב שנוצר (למשל מודעות גמ״ח)">🆓 אשר ללא תשלום</button>
             <button class="btn btn-sm btn-ghost" style="color:#c0392b" onclick="classifiedReject(${r.id})">דחה</button>
           </td></tr>`;
   }).join('')}</tbody>
     </table></div></div>`;
 }
-/* הערה: בתבנית הגנרית הזו מצב תשלום (payment_status) הוא דגל פשוט על המודעה עצמה —
-   בלי שום קישור לטבלאות חיוב/גבייה (charges/payments). כל עסק שמשתמש בתבנית יכול לחבר
-   מנגנון גבייה משלו בנפרד אם ירצה; ברירת המחדל כאן היא ניהול מודעות לוח עצמאי לגמרי. */
+function _clPayMethod() { return (typeof _icPayMethod === 'function') ? _icPayMethod() : 'cash'; }
 
 async function classifiedApprove(id, settled) {
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
     const usePkg = !!r.package_id;
+    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
     const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: settled ? 'settled' : 'pending' };
     if (usePkg) await db.from('classified_ads').update(upd).eq('package_id', r.package_id);
     else await db.from('classified_ads').update(upd).eq('id', id);
-    try { await addInteraction('customer', r.customer_id, '🗒️ מודעת לוח אושרה' + (settled ? ' + שולם' : ' (טרם שולם)')); } catch (e) { }
+    if (settled) {
+      for (const a of grp) {
+        if (a.charge_id && Number(a.price) > 0) {
+          await db.from('charges').update({ status: 'paid' }).eq('id', a.charge_id);
+          await db.from('payments').insert({ charge_id: a.charge_id, customer_id: a.customer_id, amount: a.price, method: _clPayMethod(), paid_date: today(), notes: 'מודעת לוח (פורטל) — התשלום הוסדר', created_by: profile.id });
+        }
+      }
+    }
+    try { await addInteraction('customer', r.customer_id, '🗒️ מודעת לוח אושרה' + (settled ? ' + התשלום הוסדר' : ' (חוב פתוח)')); } catch (e) { }
     toast('✓ המודעה אושרה' + (settled ? ' + סומן שולם' : ''));
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
 }
 
-/* אישור בלי לגבות תשלום כלל — למשל מודעה חינם/קהילתית. המודעה נכנסת לגיליון (payment_status='settled'),
-   והמחיר מתאפס כדי לשקף שלא ייגבה עבורה דבר. */
+/* אישור בלי לגבות תשלום כלל — למשל מודעות גמ"ח. המודעה נכנסת לגיליון (payment_status='settled'),
+   אבל החוב שנוצר בעבורה מבוטל ולא נרשם שום תשלום בפועל. */
 async function classifiedApproveFree(id) {
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
     const usePkg = !!r.package_id;
-    const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: 'settled', price: 0 };
+    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
+    const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: 'settled' };
     if (usePkg) await db.from('classified_ads').update(upd).eq('package_id', r.package_id);
     else await db.from('classified_ads').update(upd).eq('id', id);
+    for (const a of grp) {
+      if (a.charge_id) await db.from('charges').update({ status: 'cancelled', notes: 'בוטל — מודעת לוח אושרה ללא תשלום' }).eq('id', a.charge_id);
+    }
     try { await addInteraction('customer', r.customer_id, '🆓 מודעת לוח אושרה ללא תשלום (נכנסת לגיליון)'); } catch (e) { }
     toast('✓ אושר ללא תשלום — המודעה נכנסת לגיליון');
     openPage('classified');
@@ -105,24 +116,49 @@ async function classifiedApproveFree(id) {
 }
 
 async function classifiedReject(id) {
-  if (!confirm('לדחות את המודעה?')) return;
+  if (!confirm('לדחות את המודעה? (החוב שנוצר יבוטל)')) return;
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     const usePkg = !!(r && r.package_id);
+    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
     if (usePkg) await db.from('classified_ads').update({ status: 'rejected' }).eq('package_id', r.package_id);
     else await db.from('classified_ads').update({ status: 'rejected' }).eq('id', id);
+    for (const a of grp) { if (a && a.charge_id) await db.from('charges').update({ status: 'cancelled', notes: 'בוטל — מודעת לוח נדחתה' }).eq('id', a.charge_id); }
     toast('המודעה נדחתה');
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
 }
 
-/* סימון מודעת לוח כ"שולם" — רק אז היא נכנסת לגיליון/מדור. דגל מקומי בלבד, בלי חיוב/תשלום בפועל */
+/* סימון מודעת לוח כ"שולם" — רק אז היא נכנסת לגיליון/מדור */
 async function classifiedMarkPaid(id) {
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
     if (r.payment_status === 'settled') { toast('כבר סומן כשולם'); return; }
     const usePkg = !!r.package_id;
+    const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
+    for (const a of grp) {
+      if (Number(a.price) > 0) {
+        let chargeId = a.charge_id;
+        if (!chargeId) {
+          const cust = (cache.customers || []).find(x => x.id === a.customer_id) || {};
+          const ins = await run(db.from('charges').insert({
+            customer_id: a.customer_id, amount: a.price,
+            description: 'מודעת לוח — גיליון ' + ((cache.issues.find(i => i.id === a.issue_id) || {}).issue_number || ''),
+            issued_date: today(), due_date: today(), status: 'paid', invoice_number: null,
+            agent_id: cust.agent_id || null, notes: 'מודעת לוח — שולם #cl' + a.id,
+          }).select('id').single());
+          chargeId = ins.id;
+          await db.from('classified_ads').update({ charge_id: chargeId }).eq('id', a.id);
+        } else {
+          await db.from('charges').update({ status: 'paid' }).eq('id', chargeId);
+        }
+        const existP = (await db.from('payments').select('id').eq('charge_id', chargeId).limit(1)).data;
+        if (!existP || !existP.length) {
+          await db.from('payments').insert({ charge_id: chargeId, customer_id: a.customer_id, amount: a.price, method: _clPayMethod(), paid_date: today(), notes: 'מודעת לוח — שולם', created_by: profile.id });
+        }
+      }
+    }
     if (usePkg) await db.from('classified_ads').update({ payment_status: 'settled' }).eq('package_id', r.package_id);
     else await db.from('classified_ads').update({ payment_status: 'settled' }).eq('id', id);
     try { await addInteraction('customer', r.customer_id, '💰 מודעת לוח — סומן שולם (נכנס לגיליון)'); } catch (e) { }
@@ -200,7 +236,7 @@ function classifiedAdd(existingId) {
       <textarea id="clBody" rows="3" oninput="classifiedRecalc()" placeholder="לדוגמה: למכירה סלון מעור במצב מצוין, טלפון 05X-XXXXXXX"></textarea></div>
     <div class="card card-pad" style="background:#fbfdff;display:flex;justify-content:space-between;align-items:center;margin:6px 0">
       <span><b>מילים:</b> <span id="clWords">0</span></span>
-      <span style="font-size:1.15rem"><b>מחיר (כולל מע"מ): <span id="clPrice" style="color:@@COLOR_DARK@@">${money(clBaseRegular())}</span></b></span>
+      <span style="font-size:1.15rem"><b>מחיר (כולל מע"מ): <span id="clPrice" style="color:@@COLOR_BRAND@@">${money(clBaseRegular())}</span></b></span>
     </div>
     <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="clPackage" onchange="classifiedRecalc()"> מסלול 4+1 (5 גיליונות במחיר 4)</label>
     <div id="clPkgNote" class="hidden muted" style="font-size:.82rem;margin-bottom:6px"></div>
@@ -350,7 +386,7 @@ async function classifiedSectionDesigned(issueId) {
   }
   const byCat = {}; rows.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
   const activeCats = CL_CATEGORIES.filter(c => (byCat[c.v] || []).length);
-  const CATCOLORS = ['@@COLOR_DARK@@', '@@COLOR_GRAD@@', '@@COLOR_BRAND@@', '@@COLOR_GRAD@@', '@@COLOR_GRAD@@', '@@COLOR_BRAND@@'];
+  const CATCOLORS = ['@@COLOR_DARK@@', '@@COLOR_GRAD@@', '@@COLOR_BRAND@@', '#b31f24', '#3b3a7a', '#33409e'];
   const catColor = i => CATCOLORS[i % CATCOLORS.length];
   const catBlocks = activeCats.map((c, i) => {
     const ads = byCat[c.v].map(r => {
@@ -371,7 +407,7 @@ async function classifiedSectionDesigned(issueId) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap" rel="stylesheet">
 <style>
-:root{--navy:@@COLOR_DARK@@;--brand:@@COLOR_BRAND@@;--red:@@COLOR_GRAD@@;--lav:@@COLOR_LIGHT@@;--ink:#1c2036;--line:#d5d8ee;}
+:root{--navy:@@COLOR_DARK@@;--brand:@@COLOR_BRAND@@;--red:@@COLOR_GRAD@@;--lav:#e9eaf7;--ink:#1c2036;--line:#d5d8ee;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Heebo',Arial,sans-serif;background:var(--lav);color:var(--ink);}
 .toolbar{position:sticky;top:0;background:var(--navy);padding:9px;text-align:center;z-index:9;}
@@ -410,7 +446,7 @@ body{font-family:'Heebo',Arial,sans-serif;background:var(--lav);color:var(--ink)
   <div class="head">
     <div class="badge">שווה<br>לך</div>
     <div class="hlogo">הלוח</div>
-    <div class="hsub">לוח המודעות של <b>@@PAPER_NAME@@</b> · גיליון ${esc(String(issue.issue_number || ''))}${dateHe ? ' · ' + esc(dateHe) : ''}</div>
+    <div class="hsub">לוח המודעות של <b>עמנואל <span>שלי</span></b> · גיליון ${esc(String(issue.issue_number || ''))}${dateHe ? ' · ' + esc(dateHe) : ''}</div>
   </div>
   <div class="pricebar">מחירון: עד 10 מילים <b>${pReg} ₪</b> · מודגש <b>${pBold} ₪</b> · כל 10 מילים נוספות +10 ₪ · המחירים כוללים מע"מ &nbsp;|&nbsp; לשליחת מודעה: @@PAPER_PHONE@@</div>
   <div class="tagrow">${tagRow}</div>

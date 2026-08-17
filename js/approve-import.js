@@ -60,7 +60,11 @@ function aqRender(item) {
   emuEnsureStyles();
   const total = _aqState.items.length;
   const doneN = _aqState.items.filter(it => it.done).length;
-  let matchId = aqMatchCustomer(item.title);
+  let matchId;
+  const _note = (item.note || '').trim();
+  if (_note === 'מועצה') matchId = ((cache.customers || []).find(c => c.name === 'מועצה מקומית עמנואל') || {}).id;
+  else if (_note === 'מועצה דתית') matchId = ((cache.customers || []).find(c => c.name === 'מועצה דתית עמנואל') || {}).id;
+  if (!matchId) matchId = aqMatchCustomer(item.title);
   const custOpts = `<option value="new" ${!matchId ? 'selected' : ''}>➕ צור לקוח חדש: "${esc(item.title)}"</option>`
     + (cache.customers || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
       .map(c => `<option value="${c.id}" ${c.id === matchId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');

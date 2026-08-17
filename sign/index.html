@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>@@PAPER_NAME@@ — חתימה על הצעת מחיר</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root { --brand:@@COLOR_BRAND@@; --brand-dark:@@COLOR_DARK@@; --accent:@@COLOR_GRAD@@; --ok:#1e7e34; --warn:#d35400; --bg:@@COLOR_BG@@; --line:#dfe2f0; --muted:#64748b; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Heebo','Segoe UI',Arial,sans-serif; background:var(--bg); color:#1c2438; min-height:100vh; }
+.top { background:var(--brand-dark); color:#fff; padding:22px 16px; text-align:center; }
+.top .logo { font-size:1.6rem; font-weight:800; }
+.top .logo span { color:#ff6b6e; }
+.top .sub { font-size:.85rem; opacity:.75; margin-top:2px; }
+.wrap { max-width:560px; margin:0 auto; padding:20px 16px 60px; }
+.card { background:#fff; border-radius:14px; box-shadow:0 2px 12px rgba(29,39,101,.08); padding:22px; margin-top:16px; }
+h2 { color:var(--brand-dark); font-size:1.15rem; margin-bottom:10px; }
+.meta { font-size:.9rem; color:var(--muted); line-height:1.8; margin-bottom:8px; }
+.meta b { color:var(--brand-dark); }
+table { width:100%; border-collapse:collapse; margin-top:8px; font-size:.9rem; }
+th { background:#eef0fa; color:var(--brand-dark); padding:8px; text-align:right; border:1px solid var(--line); }
+td { padding:8px; border:1px solid #edf0f7; }
+.tot td { font-weight:700; }
+.tot .big { color:var(--brand); }
+label { display:block; font-size:.85rem; color:var(--muted); margin:14px 0 4px; }
+input[type=text] { width:100%; font-family:inherit; font-size:1rem; padding:11px 12px; border:1px solid var(--line); border-radius:9px; }
+.pad-wrap { position:relative; margin-top:6px; }
+canvas { width:100%; height:190px; background:#fff; border:1.5px dashed var(--line); border-radius:10px; touch-action:none; display:block; }
+.pad-hint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#c3c8dd; font-size:.9rem; pointer-events:none; }
+.clear { background:none; border:none; color:var(--accent); font-size:.85rem; font-family:inherit; cursor:pointer; margin-top:6px; }
+.btn { width:100%; border:none; border-radius:10px; padding:14px; font-size:1.05rem; font-weight:700; font-family:inherit; cursor:pointer; margin-top:14px; }
+.btn-ok { background:var(--ok); color:#fff; }
+.btn:disabled { opacity:.55; }
+.center-msg { text-align:center; padding:56px 20px; color:var(--muted); }
+.result { text-align:center; padding:22px; border-radius:12px; font-size:1.05rem; font-weight:700; background:#e6f4ea; color:var(--ok); }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="top"><div class="logo">עמנואל <span>שלי</span></div><div class="sub">חתימה על הצעת מחיר</div></div>
+<div class="wrap">
+  <div id="loading" class="center-msg">טוען...</div>
+  <div id="invalid" class="center-msg hidden"><h2>הקישור אינו תקף</h2>ייתכן שההצעה כבר טופלה. לפרטים: @@PAPER_PHONE@@</div>
+
+  <div id="panel" class="hidden">
+    <div class="card">
+      <h2>הצעת מחיר לאישור</h2>
+      <div class="meta">לכבוד: <b id="pName"></b></div>
+      <div id="pItems"></div>
+      <label>שם החותם/ת</label>
+      <input type="text" id="signer" placeholder="שם מלא">
+      <label>חתימה (חתום/חתמי עם האצבע או העכבר)</label>
+      <div class="pad-wrap">
+        <canvas id="pad" width="520" height="190"></canvas>
+        <div class="pad-hint" id="padHint">✍️ חתום/חתמי כאן</div>
+      </div>
+      <button class="clear" onclick="clearPad()">נקה חתימה</button>
+      <button class="btn btn-ok" id="okBtn" onclick="submitSign()">✓ אשר וחתום על ההצעה</button>
+    </div>
+  </div>
+
+  <div id="done" class="hidden"><div class="card"><div class="result">✓ תודה! ההצעה נחתמה ואושרה. עותק נשמר במערכת.</div></div></div>
+</div>
+
+<script>
+'use strict';
+const SUPABASE_URL = '@@SUPABASE_URL@@';
+const SUPABASE_KEY = '@@SUPABASE_KEY@@';
+const VAT_PCT = 18;
+const token = new URLSearchParams(location.search).get('t');
+let db = null, hasInk = false;
+
+function show(id){ ['loading','invalid','panel','done'].forEach(x=>document.getElementById(x).classList.toggle('hidden', x!==id)); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function money(n){ return '₪' + (Math.round(Number(n||0)*100)/100).toLocaleString('he-IL'); }
+function heDate(s){ if(!s) return ''; const d=new Date(s); return d.toLocaleDateString('he-IL'); }
+
+function renderItems(q){
+  const items = q.items || [];
+  const sum = items.reduce((s,i)=> s + (i.type==='text'?0:Number(i.price||0)*Number(i.qty||0)), 0);
+  const total = Math.max(0, sum - Number(q.discount||0));
+  const vat = Math.round(total*VAT_PCT)/100;
+  const rows = items.map(i => i.type==='text'
+    ? `<tr><td colspan="4" style="font-style:italic;color:#475569">${esc(i.name)}</td></tr>`
+    : `<tr><td>${esc(i.name)}</td><td>${money(i.price)}</td><td>${esc(i.qty)}</td><td>${money(Number(i.price)*Number(i.qty))}</td></tr>`).join('');
+  document.getElementById('pItems').innerHTML = `
+    <table><thead><tr><th>פריט</th><th>מחיר</th><th>כמות</th><th>סה"כ</th></tr></thead><tbody>
+    ${rows}
+    ${q.discount>0 ? `<tr><td colspan="3">הנחה</td><td>-${money(q.discount)}</td></tr>` : ''}
+    <tr class="tot"><td colspan="3">סה"כ לפני מע"מ</td><td>${money(total)}</td></tr>
+    <tr><td colspan="3">מע"מ ${VAT_PCT}%</td><td>${money(vat)}</td></tr>
+    <tr class="tot"><td colspan="3">סה"כ לתשלום</td><td class="big">${money(total+vat)}</td></tr>
+    </tbody></table>`;
+}
+
+// ---- Signature pad ----
+const canvas = document.getElementById('pad');
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+ctx.strokeStyle = '#12203f'; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+let drawing = false, last = null;
+function pt(e){ const r=canvas.getBoundingClientRect(); const t=e.touches?e.touches[0]:e; return { x:(t.clientX-r.left)*(canvas.width/r.width), y:(t.clientY-r.top)*(canvas.height/r.height) }; }
+function down(e){ e.preventDefault(); drawing=true; last=pt(e); }
+function move(e){ if(!drawing) return; e.preventDefault(); const p=pt(e); ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke(); last=p; hasInk=true; document.getElementById('padHint').style.display='none'; }
+function up(){ drawing=false; }
+canvas.addEventListener('mousedown',down); canvas.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+canvas.addEventListener('touchstart',down,{passive:false}); canvas.addEventListener('touchmove',move,{passive:false}); canvas.addEventListener('touchend',up);
+function clearPad(){ ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); hasInk=false; document.getElementById('padHint').style.display='flex'; }
+
+async function init(){
+  if(!token){ show('invalid'); return; }
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data, error } = await db.rpc('quote_by_token', { p_token: token });
+  const q = Array.isArray(data) ? data[0] : data;
+  if(error || !q){ show('invalid'); return; }
+  if(q.signed_at){ show('done'); return; }
+  document.getElementById('pName').textContent = q.recipient_name || '—';
+  document.getElementById('signer').value = q.recipient_name || '';
+  renderItems(q);
+  show('panel');
+}
+
+async function submitSign(){
+  const name = document.getElementById('signer').value.trim();
+  if(!name){ alert('נא למלא שם'); return; }
+  if(!hasInk){ alert('נא לחתום במסגרת'); return; }
+  const btn = document.getElementById('okBtn'); btn.disabled = true;
+  const sig = canvas.toDataURL('image/png');
+  const { data, error } = await db.rpc('quote_sign', { p_token: token, p_name: name, p_signature: sig });
+  if(error){ alert('שגיאה: ' + error.message); btn.disabled=false; return; }
+  if(data === 'not_found'){ show('invalid'); return; }
+  show('done');
+}
+init();
+</script>
+</body>
+</html>

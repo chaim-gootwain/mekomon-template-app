@@ -5,11 +5,11 @@
 משנים רק את עשר השורות הבאות, וכל המערכת מתעדכנת.
 ============================================================ */
 :root {
-/* צבעי המותג — מוזרקים ע"י setup_instance מקובץ הקונפיג */
---brand: @@COLOR_BRAND@@; /* צבע ראשי — כפתורים, קישורים, הדגשות */
---brand-dark: @@COLOR_DARK@@; /* כהה — כותרות, תפריט צד */
+/* הצבעים לפי הלוגו והמחירון של "@@PAPER_NAME@@" */
+--brand: @@COLOR_BRAND@@; /* כחול רויאל — הצבע הראשי של הלוגו */
+--brand-dark: @@COLOR_DARK@@; /* כחול כהה לכותרות ולתפריט */
 --brand-light: @@COLOR_LIGHT@@; /* רקע בהיר בגוון המותג */
---accent: @@COLOR_GRAD@@; /* צבע הדגשה משני */
+--accent: @@COLOR_GRAD@@; /* אדום הלוגו — הדגשות */
 --bg: @@COLOR_BG@@; /* רקע כללי — כמו רקע המחירון */
 --card: #ffffff; /* רקע כרטיסים */
 --ink: #1c2438; /* טקסט ראשי */
@@ -55,7 +55,7 @@ transition: background .15s;
 
 /* ---------- מסכי כניסה ---------- */
 .center-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
-background: linear-gradient(160deg, var(--brand-dark) 0%, var(--brand) 60%, @@COLOR_GRAD@@ 100%); }
+background: linear-gradient(160deg, var(--brand-dark) 0%, var(--brand) 60%, @@COLOR_ACCENT@@ 100%); }
 .auth-card { background: var(--card); border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.25);
 padding: 36px; width: 100%; max-width: 420px; }
 .auth-card .paper-name { font-size: 1.6rem; font-weight: 800; color: var(--brand-dark); text-align: center; }

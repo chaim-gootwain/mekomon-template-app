@@ -27,13 +27,13 @@ function invEnsureStyles() {
   s.id = 'invFxStyles';
   s.textContent = `
   .inv-panel{margin-top:16px;border:1px solid var(--line,#e5e7eb);border-radius:14px;padding:14px;background:#fbfdff}
-  .inv-head{font-weight:800;color:@@COLOR_DARK@@;margin-bottom:8px}
+  .inv-head{font-weight:800;color:@@COLOR_BRAND@@;margin-bottom:8px}
   .inv-banner{background:#fff7e6;border:1px solid #ffe0a3;border-radius:10px;padding:10px 12px;margin-bottom:8px;
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#8a5a00}
   .inv-ov{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
     background:rgba(17,20,40,.55);backdrop-filter:blur(2px);padding:16px;overflow:auto}
   .inv-box{background:#fff;border-radius:16px;max-width:640px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:92vh;overflow:auto}
-  .inv-box h3{margin:0 0 12px;color:@@COLOR_DARK@@}
+  .inv-box h3{margin:0 0 12px;color:@@COLOR_BRAND@@}
   .inv-line{display:grid;grid-template-columns:1fr 70px 90px 30px;gap:6px;align-items:center;margin-bottom:6px}
   .inv-line input{padding:6px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;width:100%}
   .inv-line .rm{cursor:pointer;color:#c0392b;font-weight:900;text-align:center}
@@ -260,8 +260,8 @@ function invRenderModal() {
       <button class="btn btn-sm btn-ghost" onclick="invAddLine()">+ הוסף שורה</button>
       ${(_inMonthWindow() || (typeof isMonthlyCustomer === 'function' && isMonthlyCustomer(s.cid))) ? `<button class="btn btn-sm btn-ghost" onclick="invMonthSummary()">📅 סיכום חודש</button>` : ''}
     </div>
-    ${(function(){let r=Number((cache.settings||{}).vat_rate); if(isNaN(r)||(cache.settings||{}).vat_rate==null) r=0.18; if(r>1)r=r/100; return r===0;})() ? '' : `<label style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
-      <input type="checkbox" ${s.vatInc ? 'checked' : ''} onchange="_invState.vatInc=this.checked; invUpdateTotal()" style="width:18px;height:18px"> המחירים כוללים מע"מ</label>`}
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
+      <input type="checkbox" ${s.vatInc ? 'checked' : ''} onchange="_invState.vatInc=this.checked; invUpdateTotal()" style="width:18px;height:18px"> המחירים כוללים מע"מ</label>
     ${payFields}
     <div class="inv-total" id="invTotal" style="display:block;text-align:right">${_invTotalsHtml()}</div>
     <div class="m-actions" style="justify-content:flex-start;gap:8px">
@@ -274,26 +274,17 @@ function invLineSet(i, k, v) { if (_invState && _invState.lines[i]) { _invState.
 /* פירוט מלא: בסיס / מע"מ / סה"כ — משתנה חי לפי "כולל מע"מ" (תצוגה מקדימה) */
 function _invTotals() {
   const s = _invState; let net = 0; (s ? s.lines : []).forEach(l => net += (Number(l.amount) || 0) * (Number(l.price) || 0));
-  let rate = Number((cache.settings || {}).vat_rate);
-  if (isNaN(rate) || (cache.settings || {}).vat_rate == null) rate = 0.18;
-  if (rate > 1) rate = rate / 100;
-  let base, vat, total;
-  if (rate === 0) { base = net; vat = 0; total = net; }
-  else if (s && s.vatInc) { total = net; base = Math.round(net / (1 + rate) * 100) / 100; vat = Math.round((total - base) * 100) / 100; }
+  const rate = 0.18; let base, vat, total;
+  if (s && s.vatInc) { total = net; base = Math.round(net / (1 + rate) * 100) / 100; vat = Math.round((total - base) * 100) / 100; }
   else { base = net; vat = Math.round(net * rate * 100) / 100; total = Math.round((net + vat) * 100) / 100; }
-  return { base, vat, total, vatInc: !!(s && s.vatInc), rate };
+  return { base, vat, total, vatInc: !!(s && s.vatInc) };
 }
 function _invTotalsHtml() {
   const b = _invTotals();
-  if (b.rate === 0) {
-    return `<div style="display:flex;justify-content:space-between;font-weight:800;font-size:1.1rem"><span>סה"כ</span><span>${money(b.total)}</span></div>
-      <div class="muted" style="font-size:.75rem;margin-top:4px">עוסק פטור — ללא מע"מ</div>`;
-  }
-  const _p = Math.round(b.rate * 100);
   return `<div style="display:flex;justify-content:space-between;font-size:.9rem;color:#555"><span>בסיס (לפני מע"מ)</span><span>${money(b.base)}</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:.9rem;color:#555;margin-top:2px"><span>מע"מ ${_p}%</span><span>${money(b.vat)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:.9rem;color:#555;margin-top:2px"><span>מע"מ 18%</span><span>${money(b.vat)}</span></div>
     <div style="display:flex;justify-content:space-between;font-weight:800;font-size:1.1rem;margin-top:6px;padding-top:6px;border-top:1px solid var(--line,#e5e7eb)"><span>סה"כ לתשלום</span><span>${money(b.total)}</span></div>
-    <div class="muted" style="font-size:.75rem;margin-top:4px">${b.vatInc ? 'המחירים שהוזנו כוללים מע"מ (המע"מ מחולץ מתוכם)' : 'המחירים שהוזנו לפני מע"מ — מתווסף ' + _p + '%'}</div>`;
+    <div class="muted" style="font-size:.75rem;margin-top:4px">${b.vatInc ? 'המחירים שהוזנו כוללים מע"מ (המע"מ מחולץ מתוכם)' : 'המחירים שהוזנו לפני מע"מ — מתווסף 18%'}</div>`;
 }
 function invUpdateTotal() {
   const el = document.getElementById('invTotal');
@@ -332,8 +323,7 @@ async function invSubmit() {
     // אם המחירים "פלוס מע"מ" (vatInc=false) — EZcount יוסיף 18% לשורות, אז גם הקבלה חייבת לכלול מע"מ.
     let base = 0; items.forEach(it => base += it.amount * it.price);
     // קבלה בלבד: הסכום שהוזן הוא הסכום הסופי (אין שורות מע"מ). חשבונית מס-קבלה: מגלמים מע"מ אם המחירים "פלוס מע"מ".
-    let _r = Number((cache.settings || {}).vat_rate); if (isNaN(_r) || (cache.settings || {}).vat_rate == null) _r = 0.18; if (_r > 1) _r = _r / 100;
-    const gross = (s.vatInc || s.kind === 'receipt' || _r === 0) ? base : Math.round(base * (1 + _r) * 100) / 100;
+    const gross = (s.vatInc || s.kind === 'receipt') ? base : Math.round(base * 1.18 * 100) / 100;
     body.payment = { method: s.method, sum: gross, date: _ezDate(s.date) };
     if (s.kind === 'receipt') delete body.items; // קבלה בלבד — בלי פירוט חשבונית
   }
@@ -388,7 +378,7 @@ async function invCredit(docId) {
 async function invCall(body) {
   toast('מפיק מסמך...');
   try {
-    const { data, error } = await db.functions.invoke('green-invoice-doc', { body });
+    const { data, error } = await db.functions.invoke('ezcount-doc', { body });
     if (error) {
       let msg = 'שגיאה';
       try { if (error.context && typeof error.context.json === 'function') { const j = await error.context.json(); msg = j.detail || j.error || msg; } } catch (e) { }
