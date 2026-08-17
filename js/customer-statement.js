@@ -122,7 +122,7 @@ function _csBuildHtml(data) {
     <button class="sec" onclick="window.close()">סגור</button>
   </div>
   <div class="top">
-    <div class="brand">@@PAPER_NAME@@<small>העיתון השבועי של עמנואל</small></div>
+    <div class="brand">@@PAPER_NAME@@<small>@@PAPER_SUB@@</small></div>
     <div class="doc-title"><h1>כרטסת לקוח / דו"ח חוב</h1><span>הופק בתאריך ${_csEsc(dateStr)}</span></div>
   </div>
   <div class="who">
