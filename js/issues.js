@@ -394,16 +394,11 @@ window.fpPrevAdsList = async function () {
 };
 
 async function _fpCopyAd(src) {
-  const gfxNote = src.graphics_note || null;
   const rec = {
     title: src.title || nameOf('customers', src.customer_id) || 'מודעה',
     customer_id: src.customer_id, issue_id: _fpIssue.id,
     price_item_id: src.price_item_id || null, page_number: null,
-    // מודעת מערכת (is_system) ממשיכה לדלג ישר ל-approved; מודעה רגילה מנותבת
-    // לפי הנחיית העיצוב שהייתה למודעה המקורית — מלא=לגרפיקה, ריק=לוועדה
-    status: src.is_system ? 'approved' : (gfxNote ? 'in_graphics' : 'committee'),
-    graphics_note: src.is_system ? null : gfxNote,
-    source: 'manual', created_by: profile.id,
+    status: 'approved', source: 'manual', created_by: profile.id,
     price: src.is_system ? 0 : (Number(src.price) || 0), discount: Number(src.discount) || 0,
     is_system: !!src.is_system, deal_stage: null,
   };

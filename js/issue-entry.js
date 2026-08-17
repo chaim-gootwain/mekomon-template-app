@@ -61,7 +61,6 @@ ${canWrite ? `<div class="card card-pad" style="margin-bottom:16px">
 <div class="field"><label>שלב עסקה</label><select id="ieStage">${stageOpts}</select></div>
 <div class="field"><label>עסקה: סה"כ פרסומים (רק אם פותחים עסקה חדשה)</label><input id="ieDealTotal" type="number" dir="ltr" placeholder="למשל 10"></div>
 <div class="field"><label>הערה / מיקום מבוקש (מוצג בריחוף — לא בשם המודעה)</label><input id="ieDesc"></div>
-<div class="field"><label>הנחיה לעיצוב (אם נשאר ריק — המודעה תעבור לוועדה במקום לגרפיקה)</label><textarea id="ieGfxNote" rows="2" placeholder="למשל: לפי הפרסום הקודם / קובץ מצורף / הנחיות ללקוח..."></textarea></div>
 </div>
 <div class="m-actions" style="margin-top:10px">
 <button class="btn" onclick="ieAddAd()">＋ הוסף מודעה לגיליון</button>
@@ -171,7 +170,6 @@ async function ieAddAd() {
   const page = Number(document.getElementById('iePage').value) || null;
   const stage = document.getElementById('ieStage').value || 'in_progress';
   const desc = (document.getElementById('ieDesc').value || '').trim();
-  const gfxNote = (document.getElementById('ieGfxNote') ? document.getElementById('ieGfxNote').value : '' || '').trim();
   const _title = (document.getElementById('ieTitle') ? document.getElementById('ieTitle').value : '' || '').trim();
   let discount = 0;
   if (typeof custFixedDiscountAmount === 'function') discount = custFixedDiscountAmount(_ieCust.id, price) || 0;
@@ -193,8 +191,7 @@ async function ieAddAd() {
     requested_placement: desc || null,
     issue_id: _ieIssue.id,
     page_number: page,
-    status: page ? 'placed' : (gfxNote ? 'in_graphics' : 'committee'),
-    graphics_note: gfxNote || null,
+    status: page ? 'placed' : 'approved',
     deal_stage: stage,
     contract_id: _contractId,
     created_by: profile.id,

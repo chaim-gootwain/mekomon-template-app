@@ -131,10 +131,7 @@ async function subContractSave(id) {
   if (res.error) { toast('שגיאה: ' + res.error.message, true); return; }
   const newId = id || (res.data && res.data.id);
   if (!id) { try { await addInteraction('customer', rec.customer_id, `נחתם חוזה: ${_subCadenceHe(cad)} — ${nameOf('priceList', rec.price_item_id)} × ${rec.total_inserts}`); } catch (e) { } }
-  // חוזה חדש → פותח ישר את טופס "מודעה חדשה" עם פרטי החוזה ממולאים מראש,
-  // כך שהמשתמש עצמו יזין את הנחיית העיצוב (וכל פרט אחר) — החוזה עצמו נשאר ללא שינוי.
-  // (אלא אם סומן "דלג על הקרוב", או שאין גיליון פתוח שמתאים לתדירות החוזה)
-  let _subPendingAdPrefill = null;
+  // חוזה חדש → יצירת מודעה אוטומטית לגיליון הקרוב (אלא אם סומן "דלג על הקרוב")
   if (!id && newId && rec.active && !rec.skip_next) {
     try {
       const openIssues = await run(db.from('issues').select('id,issue_number,publish_date,print_date,status')
@@ -143,22 +140,13 @@ async function subContractSave(id) {
       const upcoming = openIssues.find(i => (i.publish_date || '') >= T) || openIssues[0];
       const c = await run(db.from('contracts').select('*').eq('id', newId).single());
       if (upcoming && c && subIssueMatches(upcoming, c, openIssues)) {
-        const perInsert = c.total_inserts ? Math.round(Number(c.total_price) / c.total_inserts * 100) / 100 : Number(c.total_price);
-        _subPendingAdPrefill = {
-          customer_id: c.customer_id, price_item_id: c.price_item_id, issue_id: upcoming.id,
-          price: perInsert, contract_id: c.id, source: 'contract',
-          title: (nameOf('customers', c.customer_id) || 'לקוח') + ' — חוזה',
-        };
+        const ok = await subInsertOne(newId, upcoming.id);
+        if (ok) toast('✓ נוספה מודעה מהחוזה לגיליון ' + upcoming.issue_number);
       }
-    } catch (e) { console.error('prep contract ad prefill', e); }
+    } catch (e) { console.error('auto-insert contract ad', e); }
   }
   document.getElementById('viewBack').classList.remove('open');
-  if (_subPendingAdPrefill && typeof adAdd === 'function') {
-    toast('החוזה נשמר — נא להשלים את פרטי המודעה הראשונה');
-    setTimeout(() => adAdd(_subPendingAdPrefill), 50);
-  } else {
-    openPage('contracts');
-  }
+  openPage('contracts');
 }
 
 /* עוקף את הטופס הישן */
@@ -210,9 +198,7 @@ async function contractGenerateForIssue(issueId) {
     const rec = {
       customer_id: c.customer_id, agent_id: c.agent_id, price_item_id: c.price_item_id,
       price: perInsert, discount: 0, issue_id: issueId, contract_id: c.id,
-      // יצירה אוטומטית בכמות (כל החוזים הפעילים בבת אחת) — אין מקום להזין הנחיית עיצוב פר-מודעה,
-      // אז כמו כל מודעה ללא הנחיה — הולכת לוועדה ולא ישר ל-approved
-      source: 'contract', status: 'committee',
+      source: 'contract', status: 'approved',
       title: (nameOf('customers', c.customer_id) || 'לקוח') + ' — חוזה', created_by: profile.id,
     };
     if (c.commission_pct != null) rec.commission_pct = c.commission_pct;
@@ -232,8 +218,7 @@ async function subInsertOne(contractId, issueId) {
   const rec = {
     customer_id: c.customer_id, agent_id: c.agent_id, price_item_id: c.price_item_id,
     price: perInsert, discount: 0, issue_id: issueId, contract_id: c.id,
-    // הכנסה אוטומטית מהתזכורת — אין הזדמנות להזין הנחיית עיצוב כאן, אז לוועדה כברירת מחדל
-    source: 'contract', status: 'committee',
+    source: 'contract', status: 'approved',
     title: (nameOf('customers', c.customer_id) || 'לקוח') + ' — חוזה', created_by: profile.id,
   };
   if (c.commission_pct != null) rec.commission_pct = c.commission_pct;
