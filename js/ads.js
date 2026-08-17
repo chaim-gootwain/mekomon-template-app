@@ -89,11 +89,13 @@ openForm('מודעה חדשה', [
 { name: 'price_item_id', label: 'גודל (מהמחירון)', type: 'select', options: 'priceList' },
 { name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues' },
 { name: 'requested_placement', label: 'מיקום מבוקש' },
+{ name: 'graphics_note', label: 'הנחיה לעיצוב (ריק = המודעה תעבור לוועדה במקום לגרפיקה)', type: 'textarea' },
 { name: 'price', label: 'מחיר (₪, ריק = לפי המחירון)', type: 'number' },
 { name: 'discount', label: 'הנחה (₪)', type: 'number', default: 0 },
 { name: 'commission_pct', label: '% עמלה מיוחד (ריק = לפי הסוכן)', type: 'number' },
 { name: 'notes', label: 'הערות', type: 'textarea' },
 ], prefill || {}, async (rec) => {
+if (prefill && prefill.contract_id) { rec.contract_id = prefill.contract_id; rec.source = prefill.source || 'contract'; }
 const cust = cache.customers.find(c => c.id === rec.customer_id);
 if (cust) rec.agent_id = cust.agent_id;
 if (typeof checkDebtGate === 'function') { const _okDebt = await checkDebtGate(rec.customer_id, 'הכנסת מודעה חדשה'); if (!_okDebt) throw new Error('debt-gate-cancel'); }
@@ -106,9 +108,10 @@ rec.price = rec.price || 0;
 if ((!rec.discount || Number(rec.discount) === 0) && typeof custFixedDiscountAmount === 'function') rec.discount = custFixedDiscountAmount(rec.customer_id, rec.price);
 rec.discount = rec.discount || 0;
 rec.created_by = profile.id;
+rec.status = (rec.graphics_note && rec.graphics_note.trim()) ? 'in_graphics' : 'committee';
 const data = await run(db.from('ads').insert(rec).select().single());
-await addInteraction('ad', data.id, 'המודעה נוצרה ידנית');
-toast('המודעה נוספה');
+await addInteraction('ad', data.id, rec.status === 'in_graphics' ? 'המודעה נוצרה ונותבה אוטומטית לגרפיקה' : 'המודעה נוצרה ונותבה אוטומטית לוועדה (ללא הנחיית עיצוב)');
+toast('המודעה נוספה' + (rec.status === 'in_graphics' ? ' — לגרפיקה' : ' — לוועדה'));
 openPage('ads');
 });
 }
@@ -179,7 +182,7 @@ onclick="document.getElementById('viewBack').classList.remove('open')">סגיר�
 document.getElementById('viewBack').classList.add('open');
 }
 
-/* --- ניתוב: קריאה אחת לשרת, שמתעדת ואוכפת --- */
+/* --- ניתוב: קריאה אחת לשרת, שמתעדת ואוכפת */
 async function adRoute(id, action, askNote = false) {
 let note = '';
 if (askNote) {
@@ -304,4 +307,3 @@ await run(db.rpc('route_ad', { p_ad_id: id, p_action: approve ? 'committee_appro
 toast(approve ? 'אושר' : 'נדחה');
 openPage('committee');
 }
-
