@@ -1,0 +1,42 @@
+# בדיקת שומר אוטומטית על כל PR: זליגת ערכים ממופע אחר, טוקנים שלא פוענחו, call-dial.
+# נכשל = X אדום בעמוד ה-PR עם הסבר. לא ממזג ולא חוסם — רק מסמן.
+name: PR guard
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check added lines
+        run: |
+          set -e
+          BASE="origin/${{ github.base_ref }}"
+          git fetch origin ${{ github.base_ref }} --quiet
+          ADDED=$(git diff "$BASE"...HEAD -- . ':!app.bundle.js' | grep '^+' | grep -v '^+++' || true)
+          FILES=$(git diff --name-only "$BASE"...HEAD)
+          FAIL=0
+          # 1) קבצים אסורים
+          if echo "$FILES" | grep -qi 'call-dial'; then
+            echo "::error::ה-PR נוגע ב-call-dial (טלפוניה) — אסור! לא למזג."; FAIL=1; fi
+          # 2) זליגת ערכים של מופע אחר (אמצעש) לתוך עמנואל
+          LEAK=$(echo "$ADDED" | grep -inE 'עמנואל שלי|אמצעש|hkbstegusfdjtkjxkmjc|lnpvebpqtogwegvudvou|2b3990|f26622|058-322-1232|053-412-0800' || true)
+          if [ -n "$LEAK" ]; then
+            echo "::error::נמצאו ערכים אמיתיים של מופע בתוך התבנית (אמורים להיות רק טוקנים):"; echo "$LEAK" | head -10; FAIL=1; fi
+          # 3) (בתבנית טוקנים דווקא תקינים — בדיקה זו לא רלוונטית)
+          TOK=""
+          if [ -n "$TOK" ]; then
+            echo "::error::נשארו טוקנים לא מפוענחים בקוד המופע:"; echo "$TOK" | head -10; FAIL=1; fi
+          # סיכום
+          if [ "$FAIL" = "1" ]; then
+            echo "❌ בדיקת השומר נכשלה — לא למזג לפני בירור." >> "$GITHUB_STEP_SUMMARY"; exit 1
+          fi
+          echo "✅ בדיקת השומר עברה: אין זליגת ערכים, אין טוקנים, אין נגיעה ב-call-dial." >> "$GITHUB_STEP_SUMMARY"
