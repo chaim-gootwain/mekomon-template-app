@@ -194,6 +194,7 @@ const soldAmount = _fpAds.reduce((s, a) => s + Number(a.price) - Number(a.discou
 const placedAds = _fpAds.filter(a => a.page_number);
 const unplacedAds = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status));
 const unplacedArticles = _fpArticles.filter(a => !a.page_number && ['ready', 'placed'].includes(a.status));
+const inProcessAds = _fpAds.filter(a => !a.page_number && ['received', 'in_graphics', 'proof', 'committee'].includes(a.status));
 const warnings = [];
 if (unplacedAds.length) warnings.push(`${unplacedAds.length} מודעות מאושרות שטרם שובצו לעמוד`);
 const noGraphics = _fpAds.filter(a => a.status === 'in_graphics').length;
@@ -265,6 +266,12 @@ ${unplacedAds.map(a => fpChip(a, 'ad')).join('')}
 ${unplacedArticles.map(a => fpChip(a, 'article')).join('')}
 ${!unplacedAds.length && !unplacedArticles.length ? '<p class="muted" style="font-size:.85rem">הכל שובץ 👍</p>' : ''}
 </div>
+${inProcessAds.length ? `
+<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
+<b style="font-size:.85rem">⏳ בתהליך — טרם זמינות לשיבוץ (${inProcessAds.length})</b>
+<p class="muted" style="font-size:.72rem;margin:2px 0 6px">יופיעו לשיבוץ אחרי אישור ועדה/גרפיקה · הקשה פותחת את הכרטיס</p>
+${inProcessAds.map(a => fpPendingChip(a)).join('')}
+</div>` : ''}
 </div>
 <div class="card card-pad">
 <b>צ'קליסט סגירה</b>
@@ -283,6 +290,13 @@ onchange="checklistToggle(${c.id}, this.checked)">
 <div class="flatplan" style="margin-top:10px" id="fpGrid">${fpGridHtml(canEdit)}</div>
 </div>
 </div>`;
+}
+
+/* פריט "בתהליך" — מודעה שטרם אושרה לשיבוץ (ועדה/גרפיקה/פרוף) — תצוגה בלבד, הקשה פותחת כרטיס */
+function fpPendingChip(a) {
+const base = _adLabel(a);
+return `<div class="fp-item ad" style="margin-bottom:6px;opacity:.55;cursor:pointer" onclick="openAdCard(${a.id})"
+title="${esc(base)} — ${esc((STATUS.ad[a.status] || [a.status])[0])}">${esc(base.length > 22 ? base.slice(0, 22) + '…' : base)} ${pill('ad', a.status)}</div>`;
 }
 
 /* פריט בעמודת ההמתנה — גרירה או הקשה לבחירה */
