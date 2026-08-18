@@ -47,6 +47,9 @@ async function weeklyReviewCheckPending() {
       .or('deal_stage.is.null,deal_stage.eq.invoiced,deal_stage.eq.agreed')
       .gt('price', 0).not('status', 'in', '("cancelled","rejected")');
     let ads = (data || []).filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
+    const _wrMine = (typeof myAgentId === 'function') ? myAgentId() : null;
+    const _wrCA = {}; (cache.customers || []).forEach(c => _wrCA[c.id] = c.agent_id);
+    ads = ads.filter(a => _wrCA[a.customer_id] === _wrMine);
     if (!ads.length) return false;
 
     const snoozed = _wrSnoozed();
@@ -103,7 +106,7 @@ function _wrRender() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,40,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:99997;padding:16px;overflow:auto;direction:rtl';
   ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:16px;padding:20px;max-width:680px;width:96%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <h3 style="margin:0;color:@@COLOR_DARK@@">🗓️ סבב מעקב שבועי</h3>
+      <h3 style="margin:0;color:@@COLOR_BRAND@@">🗓️ סבב מעקב שבועי</h3>
       <span class="muted" style="font-size:.85rem">לקוח ${_wrIdx + 1} מתוך ${_wrData.length}</span>
     </div>
     <div style="margin-top:10px;padding:10px 12px;background:#f6f8fc;border-radius:10px">
@@ -216,7 +219,7 @@ function _wrFinish() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,40,.5);display:flex;align-items:center;justify-content:center;z-index:99997;direction:rtl';
   ov.innerHTML = `<div style="background:#fff;border-radius:16px;padding:28px;text-align:center;max-width:360px">
     <div style="font-size:2rem">🎉</div>
-    <h3 style="margin:8px 0 4px;color:@@COLOR_DARK@@">סיימת את הסבב השבועי</h3>
+    <h3 style="margin:8px 0 4px;color:@@COLOR_BRAND@@">סיימת את הסבב השבועי</h3>
     <p class="muted" style="font-size:.86rem">נתראה בשבוע הבא (יום שני).</p>
     <button class="btn" onclick="weeklyReviewClose(true)" style="margin-top:8px">סגירה</button></div>`;
   document.body.appendChild(ov);

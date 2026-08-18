@@ -18,62 +18,62 @@ const _AD_FULL_PRICE = 500; // בסיס לאומדן שווי שטח (מחיר �
 
 /* חלק-השטח שמודעה תופסת בעמוד: לפי המחירון (area_fraction) או לפי שם הגודל */
 function _plFraction(pl) {
-  if (pl && pl.area_fraction != null && !isNaN(pl.area_fraction)) return Number(pl.area_fraction);
-  const n = (pl && pl.name) || '';
-  if (/שמינית/.test(n)) return 0.125;
-  if (/רבע\s+עמוד/.test(n)) return 0.25;
-  if (/חצי\s+עמוד/.test(n)) return 0.5;
-  return 1;
+if (pl && pl.area_fraction != null && !isNaN(pl.area_fraction)) return Number(pl.area_fraction);
+const n = (pl && pl.name) || '';
+if (/שמינית/.test(n)) return 0.125;
+if (/רבע\s+עמוד/.test(n)) return 0.25;
+if (/חצי\s+עמוד/.test(n)) return 0.5;
+return 1;
 }
 function _adFraction(a) {
-  if (!a || !a.price_item_id) return 0.25;
-  return _plFraction((cache.priceList || []).find(p => p.id === a.price_item_id));
+if (!a || !a.price_item_id) return 0.25;
+return _plFraction((cache.priceList || []).find(p => p.id === a.price_item_id));
 }
 function _pageFill(p) { return _fpAds.filter(a => a.page_number === p).reduce((s, a) => s + _adFraction(a), 0); }
 
 /* תווית מודעה לתצוגה: תמיד מזהה את הלקוח (לפי customer_id); שם המודעה = תוספת אופציונלית */
 function _adLabel(a) {
-  if (a && a.is_system) return '🏛 ' + (((a.title || '').trim()) || 'תוכן מערכת');
-  const cn = (typeof nameOf === 'function') ? (nameOf('customers', a.customer_id) || '') : '';
-  const t = (a.title || '').trim();
-  if (cn && t && t !== cn) return cn + ' · ' + t;
-  return cn || t || 'מודעה';
+if (a && a.is_system) return '🏛 ' + (((a.title || '').trim()) || 'תוכן מערכת');
+const cn = (typeof nameOf === 'function') ? (nameOf('customers', a.customer_id) || '') : '';
+const t = (a.title || '').trim();
+if (cn && t && t !== cn) return cn + ' · ' + t;
+return cn || t || 'מודעה';
 }
 
 /* באנר מוכנוּת + ספירה לדדליין המודעות */
 function _fpDeadlineBanner() {
-  const dl = _fpIssue.ads_deadline; if (!dl) return '';
-  const ms = new Date(dl).getTime() - Date.now();
-  const past = ms < 0;
-  const abs = Math.abs(ms), hrs = Math.round(abs / 36e5);
-  const when = hrs < 48 ? hrs + ' שעות' : Math.round(hrs / 24) + ' ימים';
-  const head = past ? ('❗ עבר דדליין המודעות (לפני ' + when + ')') : ('⏳ דדליין מודעות בעוד ' + when);
-  const blk = [];
-  if (_fpWarnings.length) blk.push(_fpWarnings.length + ' אזהרות פתוחות');
-  if (_fpChecklistIncomplete) blk.push(_fpChecklistIncomplete + " פריטי צ'קליסט חסרים");
-  const ok = !past && !blk.length;
-  const bg = ok ? '#f0fdf4' : past ? '#fef2f2' : '#fffbeb';
-  const bd = ok ? '#bbf7d0' : past ? '#fecaca' : '#fde68a';
-  const col = ok ? '#15803d' : past ? '#991b1b' : '#92400e';
-  return '<div style="margin-bottom:14px;padding:10px 14px;border-radius:10px;background:' + bg + ';border:1px solid ' + bd + ';color:' + col + ';font-size:.9rem"><b>' + head + '</b>' + (blk.length ? ' — ' + blk.join(' · ') : (ok ? " · הכל מוכן לסגירה ✓" : '')) + '</div>';
+const dl = _fpIssue.ads_deadline; if (!dl) return '';
+const ms = new Date(dl).getTime() - Date.now();
+const past = ms < 0;
+const abs = Math.abs(ms), hrs = Math.round(abs / 36e5);
+const when = hrs < 48 ? hrs + ' שעות' : Math.round(hrs / 24) + ' ימים';
+const head = past ? ('❗ עבר דדליין המודעות (לפני ' + when + ')') : ('⏳ דדליין מודעות בעוד ' + when);
+const blk = [];
+if (_fpWarnings.length) blk.push(_fpWarnings.length + ' אזהרות פתוחות');
+if (_fpChecklistIncomplete) blk.push(_fpChecklistIncomplete + " פריטי צ'קליסט חסרים");
+const ok = !past && !blk.length;
+const bg = ok ? '#f0fdf4' : past ? '#fef2f2' : '#fffbeb';
+const bd = ok ? '#bbf7d0' : past ? '#fecaca' : '#fde68a';
+const col = ok ? '#15803d' : past ? '#991b1b' : '#92400e';
+return '<div style="margin-bottom:14px;padding:10px 14px;border-radius:10px;background:' + bg + ';border:1px solid ' + bd + ';color:' + col + ';font-size:.9rem"><b>' + head + '</b>' + (blk.length ? ' — ' + blk.join(' · ') : (ok ? " · הכל מוכן לסגירה ✓" : '')) + '</div>';
 }
 
 /* שיבוץ אוטומטי לפי מיקומי הגיליון הקודם (אותו לקוח + אותו גודל) */
 async function fpPlaceLikePrev() {
-  if (!['admin', 'editor'].includes(profile.role)) return;
-  const prev = (cache.issues || []).filter(i => i.issue_number < _fpIssue.issue_number).sort((a, b) => b.issue_number - a.issue_number)[0];
-  if (!prev) { toast('אין גיליון קודם במטמון', true); return; }
-  const prevAds = await run(db.from('ads').select('customer_id,price_item_id,page_number').eq('issue_id', prev.id).not('page_number', 'is', null));
-  if (!prevAds.length) { toast('בגיליון ' + prev.issue_number + ' אין מודעות משובצות', true); return; }
-  const key = a => a.customer_id + '|' + a.price_item_id;
-  const prevMap = {}; prevAds.forEach(a => { if (prevMap[key(a)] == null) prevMap[key(a)] = a.page_number; });
-  const targets = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status) && prevMap[key(a)] != null && prevMap[key(a)] <= _fpIssue.pages_count);
-  if (!targets.length) { toast('לא נמצאו מודעות עם התאמה לגיליון הקודם', true); return; }
-  if (!confirm('לשבץ ' + targets.length + ' מודעות לאותם עמודים כמו בגיליון ' + prev.issue_number + '?')) return;
-  for (const a of targets) { a.page_number = prevMap[key(a)]; a.status = 'placed'; }
-  _fpPaint();
-  for (const a of targets) await run(db.from('ads').update({ page_number: a.page_number, status: 'placed' }).eq('id', a.id));
-  toast('✓ שובצו ' + targets.length + ' מודעות כמו בגיליון ' + prev.issue_number);
+if (!['admin', 'editor'].includes(profile.role)) return;
+const prev = (cache.issues || []).filter(i => i.issue_number < _fpIssue.issue_number).sort((a, b) => b.issue_number - a.issue_number)[0];
+if (!prev) { toast('אין גיליון קודם במטמון', true); return; }
+const prevAds = await run(db.from('ads').select('customer_id,price_item_id,page_number').eq('issue_id', prev.id).not('page_number', 'is', null));
+if (!prevAds.length) { toast('בגיליון ' + prev.issue_number + ' אין מודעות משובצות', true); return; }
+const key = a => a.customer_id + '|' + a.price_item_id;
+const prevMap = {}; prevAds.forEach(a => { if (prevMap[key(a)] == null) prevMap[key(a)] = a.page_number; });
+const targets = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status) && prevMap[key(a)] != null && prevMap[key(a)] <= _fpIssue.pages_count);
+if (!targets.length) { toast('לא נמצאו מודעות עם התאמה לגיליון הקודם', true); return; }
+if (!confirm('לשבץ ' + targets.length + ' מודעות לאותם עמודים כמו בגיליון ' + prev.issue_number + '?')) return;
+for (const a of targets) { a.page_number = prevMap[key(a)]; a.status = 'placed'; }
+_fpPaint();
+for (const a of targets) await run(db.from('ads').update({ page_number: a.page_number, status: 'placed' }).eq('id', a.id));
+toast('✓ שובצו ' + targets.length + ' מודעות כמו בגיליון ' + prev.issue_number);
 }
 
 Pages.issues = {
@@ -94,20 +94,20 @@ if (_pub.length) { try { await run(db.from('issues').update({ status: 'published
 const _canFin = ['admin', 'sales'].includes(profile.role);
 let _revByIssue = {}, _costByIssue = {};
 if (_canFin) {
-  try {
-    const [_adsF, _expF] = await Promise.all([
-      run(db.from('ads').select('issue_id,price,discount,status').limit(8000)),
-      run(db.from('expenses').select('notes').ilike('notes', '%#issue:%').limit(4000)),
-    ]);
-    (_adsF || []).forEach(a => {
-      if (!a.issue_id || ['cancelled', 'rejected'].includes(a.status)) return;
-      _revByIssue[a.issue_id] = (_revByIssue[a.issue_id] || 0) + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
-    });
-    (_expF || []).forEach(e => {
-      const mi = String(e.notes || '').match(/#issue:(\d+);/); const mn = String(e.notes || '').match(/#net:([0-9.]+)/);
-      if (mi) _costByIssue[mi[1]] = (_costByIssue[mi[1]] || 0) + (mn ? Number(mn[1]) : 0);
-    });
-  } catch (e) {}
+try {
+const [_adsF, _expF] = await Promise.all([
+run(db.from('ads').select('issue_id,price,discount,status').limit(8000)),
+run(db.from('expenses').select('notes').ilike('notes', '%#issue:%').limit(4000)),
+]);
+(_adsF || []).forEach(a => {
+if (!a.issue_id || ['cancelled', 'rejected'].includes(a.status)) return;
+_revByIssue[a.issue_id] = (_revByIssue[a.issue_id] || 0) + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
+});
+(_expF || []).forEach(e => {
+const mi = String(e.notes || '').match(/#issue:(\d+);/); const mn = String(e.notes || '').match(/#net:([0-9.]+)/);
+if (mi) _costByIssue[mi[1]] = (_costByIssue[mi[1]] || 0) + (mn ? Number(mn[1]) : 0);
+});
+} catch (e) {}
 }
 const canEdit = ['admin', 'editor'].includes(profile.role);
 el.innerHTML = `
@@ -226,6 +226,8 @@ el.innerHTML = `
 ${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpPlaceLikePrev()">↩ כמו קודם</button>` : ''}
 ${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpAutoArrange()">🧩 סידור אוטומטי</button>` : ''}
 <button class="btn btn-sm btn-ghost" onclick="fpPrint()">🖨 הדפסה</button>
+<button class="btn btn-sm btn-ghost" onclick="fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>
+${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="openPrintVerify(${_fpIssue.id})">🖨️ אמת מול מודפס</button>` : ''}
 ${canEdit ? `<button class="btn btn-sm" onclick="openIssueEntry(${_fpIssue.id})">＋ הזנת מודעות</button>` : ''}
 ${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpPrevAdsList()">📋 מגיליון קודם</button>` : ''}
 ${canEdit && _fpAds.filter(a => a.deal_stage === 'in_progress').length ? `<button class="btn btn-sm btn-ghost" onclick="dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpAds.filter(a => a.deal_stage === 'in_progress').length})</button>` : ''}
@@ -361,93 +363,93 @@ _fpPaint();
 
 /* רשימת מודעות מהגיליון הקודם — עם הוספה מהירה לגיליון הנוכחי (חזרת מפרסמים קבועים) */
 window.fpPrevAdsList = async function () {
-  if (!['admin', 'editor', 'sales'].includes(profile.role)) return;
-  const curNum = _fpIssue.issue_number;
-  const prev = (cache.issues || []).filter(i => i.issue_number < curNum).sort((a, b) => b.issue_number - a.issue_number)[0];
-  if (!prev) { toast('אין גיליון קודם', true); return; }
-  toast('טוען מגיליון ' + prev.issue_number + '...');
-  const prevAds = await run(db.from('ads').select('*').eq('issue_id', prev.id).not('status', 'in', '("cancelled","rejected")').order('page_number', { ascending: true }));
-  if (!prevAds || !prevAds.length) { toast('אין מודעות בגיליון ' + prev.issue_number, true); return; }
-  const curCust = new Set((_fpAds || []).map(a => a.customer_id));
-  window._fpPrev = { prevNum: prev.issue_number, ads: prevAds };
-  const rows = prevAds.map(a => {
-    const already = a.customer_id && curCust.has(a.customer_id);
-    const nm = nameOf('customers', a.customer_id) || a.title || '—';
-    const sz = nameOf('priceList', a.price_item_id) || '';
-    const pr = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
-    return `<tr id="fpp-row-${a.id}">
-      <td><b>${esc(nm)}</b>${a.title && a.title !== nm ? ' <span class="muted" style="font-size:.8rem">' + esc(a.title) + '</span>' : ''}</td>
-      <td>${esc(sz)}</td>
-      <td style="white-space:nowrap">${a.is_system ? '<span class="pill">מערכת</span>' : money(pr)}</td>
-      <td style="white-space:nowrap">${already ? '<span class="pill green">כבר בגיליון</span>' : `<button class="btn btn-sm" onclick="fpAddFromPrev(${a.id}, this)">➕ הוסף</button>`}</td>
-    </tr>`;
-  }).join('');
-  const newCount = prevAds.filter(a => !(a.customer_id && curCust.has(a.customer_id))).length;
-  document.getElementById('viewModal').innerHTML = `
-    <h3>📋 מודעות מגיליון ${prev.issue_number} → הוספה לגיליון ${curNum}</h3>
-    <p class="muted" style="font-size:.83rem">מפרסמים שהיו בגיליון הקודם. "הוסף" מעתיק את המודעה (לקוח, גודל, מחיר) לגיליון הנוכחי — ללא שיבוץ עמוד, לבחירת סטטוס בהמשך.</p>
-    <div style="margin:8px 0">${newCount ? `<button class="btn btn-sm" onclick="fpAddAllPrev(this)">➕ הוסף את כל ה-${newCount} החדשים</button>` : '<span class="muted">כל המפרסמים כבר בגיליון</span>'}</div>
-    <div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="data">
-      <thead><tr><th>לקוח / מודעה</th><th>גודל</th><th>מחיר</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="m-actions" style="margin-top:12px"><button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open'); openFlatplan(${_fpIssue.id})">סגירה ורענון</button></div>`;
-  document.getElementById('viewBack').classList.add('open');
+if (!['admin', 'editor', 'sales'].includes(profile.role)) return;
+const curNum = _fpIssue.issue_number;
+const prev = (cache.issues || []).filter(i => i.issue_number < curNum).sort((a, b) => b.issue_number - a.issue_number)[0];
+if (!prev) { toast('אין גיליון קודם', true); return; }
+toast('טוען מגיליון ' + prev.issue_number + '...');
+const prevAds = await run(db.from('ads').select('*').eq('issue_id', prev.id).not('status', 'in', '("cancelled","rejected")').order('page_number', { ascending: true }));
+if (!prevAds || !prevAds.length) { toast('אין מודעות בגיליון ' + prev.issue_number, true); return; }
+const curCust = new Set((_fpAds || []).map(a => a.customer_id));
+window._fpPrev = { prevNum: prev.issue_number, ads: prevAds };
+const rows = prevAds.map(a => {
+const already = a.customer_id && curCust.has(a.customer_id);
+const nm = nameOf('customers', a.customer_id) || a.title || '—';
+const sz = nameOf('priceList', a.price_item_id) || '';
+const pr = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
+return `<tr id="fpp-row-${a.id}">
+<td><b>${esc(nm)}</b>${a.title && a.title !== nm ? ' <span class="muted" style="font-size:.8rem">' + esc(a.title) + '</span>' : ''}</td>
+<td>${esc(sz)}</td>
+<td style="white-space:nowrap">${a.is_system ? '<span class="pill">מערכת</span>' : money(pr)}</td>
+<td style="white-space:nowrap">${already ? '<span class="pill green">כבר בגיליון</span>' : `<button class="btn btn-sm" onclick="fpAddFromPrev(${a.id}, this)">➕ הוסף</button>`}</td>
+</tr>`;
+}).join('');
+const newCount = prevAds.filter(a => !(a.customer_id && curCust.has(a.customer_id))).length;
+document.getElementById('viewModal').innerHTML = `
+<h3>📋 מודעות מגיליון ${prev.issue_number} → הוספה לגיליון ${curNum}</h3>
+<p class="muted" style="font-size:.83rem">מפרסמים שהיו בגיליון הקודם. "הוסף" מעתיק את המודעה (לקוח, גודל, מחיר) לגיליון הנוכחי — ללא שיבוץ עמוד, לבחירת סטטוס בהמשך.</p>
+<div style="margin:8px 0">${newCount ? `<button class="btn btn-sm" onclick="fpAddAllPrev(this)">➕ הוסף את כל ה-${newCount} החדשים</button>` : '<span class="muted">כל המפרסמים כבר בגיליון</span>'}</div>
+<div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="data">
+<thead><tr><th>לקוח / מודעה</th><th>גודל</th><th>מחיר</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+<div class="m-actions" style="margin-top:12px"><button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open'); openFlatplan(${_fpIssue.id})">סגירה ורענון</button></div>`;
+document.getElementById('viewBack').classList.add('open');
 };
 
 async function _fpCopyAd(src) {
-  const gfxNote = src.graphics_note || null;
-  const rec = {
-    title: src.title || nameOf('customers', src.customer_id) || 'מודעה',
-    customer_id: src.customer_id, issue_id: _fpIssue.id,
-    price_item_id: src.price_item_id || null, page_number: null,
-    // מודעת מערכת (is_system) ממשיכה לדלג ישר ל-approved; מודעה רגילה מנותבת
-    // לפי הנחיית העיצוב שהייתה למודעה המקורית — מלא=לגרפיקה, ריק=לוועדה
-    status: src.is_system ? 'approved' : (gfxNote ? 'in_graphics' : 'committee'),
-    graphics_note: src.is_system ? null : gfxNote,
-    source: 'manual', created_by: profile.id,
-    price: src.is_system ? 0 : (Number(src.price) || 0), discount: Number(src.discount) || 0,
-    is_system: !!src.is_system, deal_stage: null,
-  };
-  if (src.agent_id) rec.agent_id = src.agent_id;
-  const ins = await db.from('ads').insert(rec).select('id').single();
-  if (ins.error) throw new Error(ins.error.message);
-  return ins.data.id;
+const gfxNote = src.graphics_note || null;
+const rec = {
+title: src.title || nameOf('customers', src.customer_id) || 'מודעה',
+customer_id: src.customer_id, issue_id: _fpIssue.id,
+price_item_id: src.price_item_id || null, page_number: null,
+// מודעת מערכת (is_system) ממשיכה לדלג ישר ל-approved; מודעה רגילה מנותבת
+// לפי הנחיית העיצוב שהייתה למודעה המקורית — מלא=לגרפיקה, ריק=לוועדה
+status: src.is_system ? 'approved' : (gfxNote ? 'in_graphics' : 'committee'),
+graphics_note: src.is_system ? null : gfxNote,
+source: 'manual', created_by: profile.id,
+price: src.is_system ? 0 : (Number(src.price) || 0), discount: Number(src.discount) || 0,
+is_system: !!src.is_system, deal_stage: null,
+};
+if (src.agent_id) rec.agent_id = src.agent_id;
+const ins = await db.from('ads').insert(rec).select('id').single();
+if (ins.error) throw new Error(ins.error.message);
+return ins.data.id;
 }
 window.fpAddFromPrev = async function (prevAdId, btn) {
-  const src = (window._fpPrev && window._fpPrev.ads || []).find(a => a.id === prevAdId);
-  if (!src) { toast('לא נמצא', true); return; }
-  if (btn) { btn.disabled = true; btn.textContent = '...'; }
-  try {
-    await _fpCopyAd(src);
-    if (btn) { const td = btn.closest('td'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; }
-    toast('✓ נוסף: ' + (nameOf('customers', src.customer_id) || src.title));
-  } catch (e) { toast('שגיאה: ' + (e.message || e), true); if (btn) { btn.disabled = false; btn.textContent = '➕ הוסף'; } }
+const src = (window._fpPrev && window._fpPrev.ads || []).find(a => a.id === prevAdId);
+if (!src) { toast('לא נמצא', true); return; }
+if (btn) { btn.disabled = true; btn.textContent = '...'; }
+try {
+await _fpCopyAd(src);
+if (btn) { const td = btn.closest('td'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; }
+toast('✓ נוסף: ' + (nameOf('customers', src.customer_id) || src.title));
+} catch (e) { toast('שגיאה: ' + (e.message || e), true); if (btn) { btn.disabled = false; btn.textContent = '➕ הוסף'; } }
 };
 window.fpAddAllPrev = async function (btn) {
-  if (!window._fpPrev) return;
-  const curCust = new Set((_fpAds || []).map(a => a.customer_id));
-  const toAdd = window._fpPrev.ads.filter(a => !(a.customer_id && curCust.has(a.customer_id)));
-  if (!toAdd.length) { toast('אין חדשים להוספה'); return; }
-  if (!confirm('להוסיף ' + toAdd.length + ' מודעות מגיליון ' + window._fpPrev.prevNum + ' לגיליון הנוכחי?')) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'מוסיף...'; }
-  let ok = 0;
-  for (const a of toAdd) { try { await _fpCopyAd(a); ok++; const td = document.querySelector('#fpp-row-' + a.id + ' td:last-child'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; } catch (e) { console.error('copy', e); } }
-  toast('✓ נוספו ' + ok + ' מודעות');
-  if (btn) { btn.textContent = '✓ נוספו ' + ok; }
+if (!window._fpPrev) return;
+const curCust = new Set((_fpAds || []).map(a => a.customer_id));
+const toAdd = window._fpPrev.ads.filter(a => !(a.customer_id && curCust.has(a.customer_id)));
+if (!toAdd.length) { toast('אין חדשים להוספה'); return; }
+if (!confirm('להוסיף ' + toAdd.length + ' מודעות מגיליון ' + window._fpPrev.prevNum + ' לגיליון הנוכחי?')) return;
+if (btn) { btn.disabled = true; btn.textContent = 'מוסיף...'; }
+let ok = 0;
+for (const a of toAdd) { try { await _fpCopyAd(a); ok++; const td = document.querySelector('#fpp-row-' + a.id + ' td:last-child'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; } catch (e) { console.error('copy', e); } }
+toast('✓ נוספו ' + ok + ' מודעות');
+if (btn) { btn.textContent = '✓ נוספו ' + ok; }
 };
 
 /* סימון מהיר מתוך הגיליון: "חשבונית הופקה" (לחיצה שנייה מבטלת). לא נוגע ב"שולם". */
 window.fpMarkInvoiced = async function (id) {
-  if (!['admin', 'editor'].includes(profile.role)) return;
-  const a = (typeof _fpAds !== 'undefined') ? _fpAds.find(x => x.id === id) : null; if (!a) return;
-  let next;
-  if (a.deal_stage === 'paid') { toast('המודעה כבר מסומנת כשולם'); return; }
-  next = (a.deal_stage === 'invoiced') ? null : 'invoiced';
-  const up = await db.from('ads').update({ deal_stage: next }).eq('id', id);
-  if (up.error) { toast('שגיאה: ' + up.error.message, true); return; }
-  a.deal_stage = next;
-  try { await addInteraction('customer', a.customer_id, `שלב העסקה עודכן ל: ${next ? dealStageLabel(next) : '—'} (גיליון ${_fpIssue.issue_number})`); } catch (e) { }
-  toast(next ? '✓ סומן: חשבונית הופקה' : 'הסימון בוטל');
-  if (typeof _fpPaint === 'function') _fpPaint();
+if (!['admin', 'editor'].includes(profile.role)) return;
+const a = (typeof _fpAds !== 'undefined') ? _fpAds.find(x => x.id === id) : null; if (!a) return;
+let next;
+if (a.deal_stage === 'paid') { toast('המודעה כבר מסומנת כשולם'); return; }
+next = (a.deal_stage === 'invoiced') ? null : 'invoiced';
+const up = await db.from('ads').update({ deal_stage: next }).eq('id', id);
+if (up.error) { toast('שגיאה: ' + up.error.message, true); return; }
+a.deal_stage = next;
+try { await addInteraction('customer', a.customer_id, `שלב העסקה עודכן ל: ${next ? dealStageLabel(next) : '—'} (גיליון ${_fpIssue.issue_number})`); } catch (e) { }
+toast(next ? '✓ סומן: חשבונית הופקה' : 'הסימון בוטל');
+if (typeof _fpPaint === 'function') _fpPaint();
 };
 
 /* שיבוץ פריט לעמוד — משותף לגרירה ולהקשה. עדכון מקומי + שמירה ברקע */
@@ -543,6 +545,96 @@ const html = `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-
 const w = window.open('', '_blank');
 if (!w) { toast('חלון ההדפסה נחסם — יש לאפשר חלונות קופצים', true); return; }
 w.document.open(); w.document.write(html); w.document.close();
+}
+
+/* שליחת הפלטפלן ישירות לגרפיקאית במייל (דרך send-email).
+כתובת הגרפיקאית נשמרת בהגדרות (graphics_email) — נשמרת בפעם הראשונה. */
+let _fpPdfLibsPromise = null;
+function _fpEnsurePdfLibs() {
+if (window.jspdf && window.jspdf.jsPDF && window.html2canvas) return Promise.resolve();
+if (_fpPdfLibsPromise) return _fpPdfLibsPromise;
+const load = (src) => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(s); });
+_fpPdfLibsPromise = Promise.all([
+(window.jspdf && window.jspdf.jsPDF) ? Promise.resolve() : load('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'),
+window.html2canvas ? Promise.resolve() : load('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js')
+]);
+return _fpPdfLibsPromise;
+}
+
+async function fpEmailToGraphics() {
+if (!_fpIssue) return;
+const cur = (cache.settings || {}).graphics_email || '';
+const entered = prompt('מייל הגרפיקאית (יישמר לפעם הבאה):', cur);
+if (entered === null) return;
+const to = entered.trim();
+if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { toast('כתובת מייל לא תקינה', true); return; }
+if (to !== cur) { try { await db.from('settings').upsert({ key: 'graphics_email', value: to }); if (cache.settings) cache.settings.graphics_email = to; } catch (e) { } }
+
+const lines = ['עימוד — גיליון ' + _fpIssue.issue_number, 'חלוקה: ' + heDate(_fpIssue.publish_date) + ' · ' + _fpIssue.pages_count + ' עמודים', ''];
+for (let p = 1; p <= _fpIssue.pages_count; p++) {
+const ads = _fpAds.filter(a => a.page_number === p);
+const arts = _fpArticles.filter(a => a.page_number === p);
+const fill = Math.round(ads.reduce((s, a) => s + _adFraction(a), 0) * 100);
+const items = [...ads.map(a => a.title + ' (' + Math.round(_adFraction(a) * 100) + '%)'), ...arts.map(a => '✍ ' + a.title)].join(' · ') || '—';
+lines.push('עמוד ' + p + (fill ? ' [' + fill + '%]' : '') + ': ' + items);
+}
+const unplaced = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status)).map(a => a.title).join(' · ');
+if (unplaced) { lines.push(''); lines.push('ממתינים לשיבוץ: ' + unplaced); }
+const body = lines.join('\n');
+
+const tdS = 'border:1px solid #cbd5e1;padding:6px 9px;font-size:13px;text-align:right;vertical-align:top';
+let rows = '';
+for (let p = 1; p <= _fpIssue.pages_count; p++) {
+const ads = _fpAds.filter(a => a.page_number === p);
+const arts = _fpArticles.filter(a => a.page_number === p);
+const fill = Math.round(ads.reduce((s, a) => s + _adFraction(a), 0) * 100);
+const items = [...ads.map(a => esc(a.title) + ' (' + Math.round(_adFraction(a) * 100) + '%)'), ...arts.map(a => '✍ ' + esc(a.title))].join(' · ') || '—';
+rows += `<tr><td style="${tdS};font-weight:700;white-space:nowrap">עמוד ${p}</td><td style="${tdS}">${fill ? fill + '%' : ''}</td><td style="${tdS}">${items}</td></tr>`;
+}
+const html = `<div style="font-family:Arial,Heebo,sans-serif;direction:rtl;text-align:right;color:#111">
+<h2 style="margin:0 0 4px">עימוד — גיליון ${_fpIssue.issue_number}</h2>
+<div style="color:#555;font-size:13px;margin-bottom:10px">חלוקה: ${heDate(_fpIssue.publish_date)} · ${_fpIssue.pages_count} עמודים</div>
+<table style="width:100%;border-collapse:collapse">
+<thead><tr><th style="${tdS};background:#f1f5f9;width:70px">עמוד</th><th style="${tdS};background:#f1f5f9;width:55px">מילוי</th><th style="${tdS};background:#f1f5f9">תוכן</th></tr></thead>
+<tbody>${rows}</tbody></table>
+${unplaced ? `<p style="font-size:13px;color:#b45309;margin-top:10px"><b>ממתינים לשיבוץ:</b> ${esc(unplaced)}</p>` : ''}
+</div>`;
+
+toast('מכין PDF ושולח לגרפיקאית...');
+let attachments = [];
+try {
+await _fpEnsurePdfLibs();
+const wrap = document.createElement('div');
+wrap.style.cssText = 'position:fixed;left:-99999px;top:0;width:760px;background:#fff;padding:24px;box-sizing:border-box';
+wrap.innerHTML = html;
+document.body.appendChild(wrap);
+let base64 = '';
+try {
+const canvas = await window.html2canvas(wrap, { scale: 2, backgroundColor: '#ffffff' });
+const JsPDF = window.jspdf.jsPDF;
+const pdf = new JsPDF('p', 'pt', 'a4');
+const pw = pdf.internal.pageSize.getWidth();
+const ph = pdf.internal.pageSize.getHeight();
+const imgH = canvas.height * pw / canvas.width;
+const imgData = canvas.toDataURL('image/jpeg', 0.92);
+let heightLeft = imgH, position = 0;
+pdf.addImage(imgData, 'JPEG', 0, position, pw, imgH);
+heightLeft -= ph;
+while (heightLeft > 0) { position -= ph; pdf.addPage(); pdf.addImage(imgData, 'JPEG', 0, position, pw, imgH); heightLeft -= ph; }
+base64 = _commB64(new Uint8Array(pdf.output('arraybuffer')));
+} finally { wrap.remove(); }
+if (base64) attachments = [{ filename: 'עימוד-' + _fpIssue.issue_number + '.pdf', content: base64, contentType: 'application/pdf' }];
+} catch (e) { toast('יצירת ה-PDF נכשלה — נשלח כטבלה בגוף המייל', true); }
+
+try {
+const payload = { to, subject: 'עימוד ' + _fpIssue.issue_number, body: attachments.length ? 'מצורף העימוד.' : body };
+if (attachments.length) payload.attachments = attachments; else payload.html = html;
+const { data, error } = await db.functions.invoke('send-email', { body: payload });
+if (!error && data && data.ok) { toast('✅ העימוד נשלח ל' + to + (attachments.length ? ' (PDF מצורף)' : '')); return; }
+let msg = ''; try { if (error && error.context && error.context.json) { const j = await error.context.json(); msg = j.detail || j.error || ''; } } catch (e) { }
+if (!msg && data) msg = data.detail || data.error || '';
+toast('השליחה נכשלה' + (msg ? ' (' + msg + ')' : ''), true);
+} catch (e) { toast('שגיאה: ' + (e && e.message || e), true); }
 }
 
 function checklistToggle(id, done) {

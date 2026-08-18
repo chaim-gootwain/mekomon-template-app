@@ -17,7 +17,7 @@ api.js — תשתית משותפת לכל המערכת
 const BUILT_IN_URL = '@@SUPABASE_URL@@';
 const BUILT_IN_KEY = '@@SUPABASE_KEY@@';
 
-const CFG_KEY = 'app_supabase_cfg';
+const CFG_KEY = 'emanuel_cfg';
 let db = null; // לקוח Supabase — נוצר ב-initSupabase
 let session = null; // החיבור הנוכחי
 let profile = null; // הפרופיל של המשתמש (כולל role)
@@ -77,7 +77,7 @@ return r ? (field === 'issue' ? 'גיליון ' + r.issue_number : r[field]) : '
 const ROLE_NAMES = { admin: 'מנהל', sales: 'מכירות', editor: 'עורך', graphics: 'גרפיקה', committee: 'ועדה', pending: 'ממתין לאישור' };
 
 const STATUS = {
-lead: { new: ['חדש', 'blue'], contacted: ['נוצר קשר', ''], meeting: ['פגישה', 'amber'], proposal: ['הצעת מחיר', 'gold'], won: ['נסגר ✓', 'green'], lost: ['אבוד', 'red'] },
+lead: { new: ['חדש', 'blue'], contacted: ['נוצר קשר', ''], meeting: ['במשא ומתן', 'amber'], proposal: ['הצעת מחיר', 'gold'], won: ['נסגר ✓', 'green'], lost: ['אבוד', 'red'] },
 ad: { received: ['התקבלה', 'blue'], in_graphics: ['בגרפיקה', 'amber'], proof: ['פרוף מוכן', 'gold'], committee: ['בוועדה', 'gold'], approved: ['מאושרת', 'green'], placed: ['שובצה', 'green'], published: ['פורסמה', 'green'], rejected: ['נדחתה', 'red'], cancelled: ['בוטלה', 'red'] },
 issue: { planning: ['בתכנון', ''], in_progress: ['בעבודה', 'blue'], layout: ['בעימוד', 'amber'], closed: ['נסגר', 'gold'], published: ['יצא לאור', 'green'] },
 article: { idea: ['רעיון', ''], approved: ['אושר לכתיבה', 'blue'], writing: ['בכתיבה', 'blue'], submitted: ['הוגש', 'amber'], editing: ['בעריכה', 'amber'], ready: ['מוכן', 'green'], placed: ['שובץ', 'green'], published: ['פורסם', 'green'] },
@@ -267,7 +267,7 @@ w.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="
 <title>${esc(title)}</title>
 <style>
 body{font-family:'Segoe UI',Arial,sans-serif;padding:30px;color:#1c2438}
-h1{color:@@COLOR_DARK@@;font-size:22px;border-bottom:3px solid @@COLOR_GRAD@@;padding-bottom:8px}
+h1{color:@@COLOR_BRAND@@;font-size:22px;border-bottom:3px solid @@COLOR_GRAD@@;padding-bottom:8px}
 table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
 th{background:@@COLOR_LIGHT@@;color:@@COLOR_DARK@@;padding:8px;text-align:right;border:1px solid #cdd2ea}
 td{padding:7px 8px;border:1px solid #e2e8f0}
