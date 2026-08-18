@@ -19,7 +19,7 @@ function aiEnsureStyles() {
   s.textContent = `
   .ai-panel{margin-top:16px;border:1px solid var(--line,#e5e7eb);border-radius:14px;padding:14px;
     background:linear-gradient(180deg,#fbfbff,#f3f4ff)}
-  .ai-head{display:flex;align-items:center;gap:8px;font-weight:800;color:@@COLOR_BRAND@@;margin-bottom:10px;flex-wrap:wrap}
+  .ai-head{display:flex;align-items:center;gap:8px;font-weight:800;color:@@COLOR_DARK@@;margin-bottom:10px;flex-wrap:wrap}
   .ai-badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.78rem;font-weight:700}
   .ai-pos{background:#e7f7ec;color:#1a7f37}.ai-neu{background:#eef0f5;color:#555}.ai-neg{background:#fdecec;color:#c0392b}
   .ai-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}

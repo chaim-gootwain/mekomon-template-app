@@ -92,10 +92,7 @@ openForm('מודעה חדשה', [
 { name: 'price', label: 'מחיר (₪, ריק = לפי המחירון)', type: 'number' },
 { name: 'discount', label: 'הנחה (₪)', type: 'number', default: 0 },
 { name: 'commission_pct', label: '% עמלה מיוחד (ריק = לפי הסוכן)', type: 'number' },
-{ name: 'content_text', label: 'תוכן המודעה (טקסט שהלקוח שלח)', type: 'textarea' },
-{ name: 'graphics_note', label: 'הנחיה לעיצוב (לגרפיקאית)', type: 'textarea', rows: 2 },
-{ type: 'html', html: '<label>קובץ המודעה מהלקוח (תמונה / PDF)</label><input type="file" id="adNewFile" accept="image/*,application/pdf" style="width:100%">' },
-{ name: 'notes', label: 'הערות פנימיות', type: 'textarea', rows: 2 },
+{ name: 'notes', label: 'הערות', type: 'textarea' },
 ], prefill || {}, async (rec) => {
 const cust = cache.customers.find(c => c.id === rec.customer_id);
 if (cust) rec.agent_id = cust.agent_id;
@@ -109,23 +106,7 @@ rec.price = rec.price || 0;
 if ((!rec.discount || Number(rec.discount) === 0) && typeof custFixedDiscountAmount === 'function') rec.discount = custFixedDiscountAmount(rec.customer_id, rec.price);
 rec.discount = rec.discount || 0;
 rec.created_by = profile.id;
-// ניקוי שדות ריקים כדי לא לדרוס עם מחרוזת ריקה
-if (!rec.content_text) delete rec.content_text;
-if (!rec.graphics_note) delete rec.graphics_note;
-let data;
-try { data = await db.from('ads').insert(rec).select().single().then(r => { if (r.error) throw r.error; return r.data; }); }
-catch (e) { const r2 = { ...rec }; delete r2.content_text; delete r2.graphics_note; data = await run(db.from('ads').insert(r2).select().single()); }
-// העלאת קובץ המודעה מהלקוח אם צורף
-try {
-const _f = document.getElementById('adNewFile');
-const _file = _f && _f.files && _f.files[0];
-if (_file) {
-const _path = `staff/${data.id}/${Date.now()}_${_file.name}`;
-const { error: _e } = await db.storage.from('ad-files').upload(_path, _file);
-if (_e) { toast('המודעה נשמרה, אך העלאת הקובץ נכשלה: ' + _e.message, true); }
-else { await run(db.from('ad_files').insert({ ad_id: data.id, storage_path: _path, file_name: _file.name, kind: 'source', uploaded_by: profile.id })); }
-}
-} catch (e) { }
+const data = await run(db.from('ads').insert(rec).select().single());
 await addInteraction('ad', data.id, 'המודעה נוצרה ידנית');
 toast('המודעה נוספה');
 openPage('ads');

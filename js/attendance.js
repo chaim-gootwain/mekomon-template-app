@@ -134,8 +134,8 @@ function attEnsureBannerStyles() {
   s.textContent = `
   .att-banner{position:fixed;top:0;left:0;right:0;z-index:9998;display:flex;align-items:center;gap:12px;
     justify-content:center;flex-wrap:wrap;padding:10px 16px;color:#fff;font-weight:700;
-    background:linear-gradient(90deg,@@COLOR_BRAND@@,#3a4bc0);box-shadow:0 2px 12px rgba(0,0,0,.25)}
-  .att-banner .att-b-go{cursor:pointer;background:#fff;color:@@COLOR_BRAND@@;border:none;border-radius:8px;padding:6px 14px;font-weight:800}
+    background:linear-gradient(90deg,@@COLOR_BRAND@@,@@COLOR_GRAD@@);box-shadow:0 2px 12px rgba(0,0,0,.25)}
+  .att-banner .att-b-go{cursor:pointer;background:#fff;color:@@COLOR_DARK@@;border:none;border-radius:8px;padding:6px 14px;font-weight:800}
   .att-banner .att-b-x{cursor:pointer;background:transparent;color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:8px;padding:6px 12px}
   `;
   document.head.appendChild(s);

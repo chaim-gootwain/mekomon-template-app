@@ -80,7 +80,6 @@ openForm('עריכת פרטי משתמש', [
 { name: 'phone', label: 'טלפון', dir: 'ltr' },
 ], { full_name: u.full_name, phone: u.phone }, async (rec) => {
 await run(db.from('profiles').update({ full_name: rec.full_name, phone: rec.phone }).eq('id', id));
-try { await db.from('agents').update({ name: rec.full_name }).eq('profile_id', id); } catch (e) { }
 toast('נשמר');
 await refreshCache();
 openPage('users');

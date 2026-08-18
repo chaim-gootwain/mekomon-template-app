@@ -38,10 +38,7 @@ async function adStatusCheckPending() {
     if (_vb && _vb.classList.contains('open')) return; // חלון אחר פתוח (למשל אשף ייבוא) — לא דורסים
     const ads = await run(db.from('ads').select('id,customer_id,issue_id,title,price,discount,page_number,status,deal_stage')
       .is('deal_stage', null).gt('price', 0).not('status', 'in', '("cancelled","rejected")'));
-    let list = (ads || []).filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
-    const _mine = (typeof myAgentId === 'function') ? myAgentId() : null;
-    const _custAgent = {}; (cache.customers || []).forEach(c => _custAgent[c.id] = c.agent_id);
-    list = list.filter(a => _custAgent[a.customer_id] === _mine);
+    const list = (ads || []).filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
     if (!list.length) return;
     adStatusRender(list);
   } catch (e) { console.error('ad-status', e); }
@@ -67,7 +64,7 @@ function adStatusRender(list) {
         <td><button class="btn btn-sm btn-ghost" onclick="adStatusClose(); openCustomerCard(${a.customer_id})">כרטיס</button></td>
       </tr>`;
     }).join('');
-    return `<div style="margin-top:12px"><div style="font-weight:700;color:@@COLOR_BRAND@@">גיליון ${iss.issue_number || iid}${_eff(iss) ? ' · ' + (typeof heDate === 'function' ? heDate(_eff(iss)) : '') : ''} <span class="muted" style="font-weight:400">(${byIss[iid].length})</span></div>
+    return `<div style="margin-top:12px"><div style="font-weight:700;color:@@COLOR_DARK@@">גיליון ${iss.issue_number || iid}${_eff(iss) ? ' · ' + (typeof heDate === 'function' ? heDate(_eff(iss)) : '') : ''} <span class="muted" style="font-weight:400">(${byIss[iid].length})</span></div>
       <div class="table-wrap" style="margin-top:4px"><table class="data"><thead><tr><th>לקוח</th><th>מודעה</th><th>מחיר</th><th>סטטוס</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }).join('');
   document.getElementById('adStatusOv')?.remove();

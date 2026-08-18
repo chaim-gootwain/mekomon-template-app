@@ -156,57 +156,17 @@ renderTable(document.getElementById('quotesTable'), _quotes, [
 { h: 'פריטים', f: r => (r.items || []).map(i => esc(i.name)).join(', ') },
 { h: 'הנחה', f: r => money(r.discount) || '—' },
 { h: 'סה"כ (לפני מע"מ)', f: r => money(r.total) },
-{ h: 'חתימת לקוח', f: r => r.signed_at
-? `<span class="pill green">✓ נחתם ${heDate(r.signed_at)}</span>`
-: `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();quoteShare(${r.id})">🖊 שלח לחתימה</button>` },
 ], { onRow: r => quotePrint(r), empty: 'אין הצעות מחיר' });
 }
 };
-
-/* שיתוף קישור לחתימה דיגיטלית (וואטסאפ / מייל / העתקה) */
-function quoteShare(id) {
-const q = (_quotes || []).find(x => x.id === id);
-if (!q) return;
-if (!q.sign_token) { toast('הרץ קודם את מיגרציית החתימה במסד הנתונים', true); return; }
-const base = location.href.replace(/index\.html.*$/, '').replace(/#.*$/, '').replace(/\/$/, '');
-const url = base + '/sign/?t=' + q.sign_token;
-const paper = (cache.settings && cache.settings.paper_name) || '@@PAPER_NAME@@';
-const txt = 'שלום, מצורפת הצעת מחיר מ' + paper + ' לצפייה ולחתימה דיגיטלית: ' + url;
-let wa = '';
-if (q.recipient_phone) { let ph = String(q.recipient_phone).replace(/\D/g, ''); if (ph.startsWith('0')) ph = '972' + ph.slice(1); wa = `<a class="btn" style="background:#25d366;color:#fff;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(txt)}">💬 וואטסאפ</a>`; }
-let mail = '';
-if (q.recipient_email) { mail = `<a class="btn btn-ghost" style="text-decoration:none" href="mailto:${q.recipient_email}?subject=${encodeURIComponent('הצעת מחיר לחתימה — ' + paper)}&body=${encodeURIComponent(txt)}">✉️ מייל</a>`; }
-document.getElementById('qShareOv')?.remove();
-const ov = document.createElement('div');
-ov.id = 'qShareOv';
-ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:99999';
-ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:14px;padding:18px;max-width:420px;width:92%;direction:rtl">
-<h3 style="margin:0 0 4px">🖊 שליחת הצעה לחתימה — ${esc(q.recipient_name)}</h3>
-<p class="muted" style="font-size:.8rem;margin:0 0 12px">הלקוח יפתח את הקישור, יראה את ההצעה ויחתום דיגיטלית.</p>
-<div style="display:flex;flex-direction:column;gap:10px">
-${wa}${mail}
-<button class="btn btn-ghost" onclick="navigator.clipboard.writeText('${url}').then(()=>toast('הקישור הועתק'))">🔗 העתק קישור</button>
-<button class="btn btn-ghost" onclick="document.getElementById('qShareOv').remove()">סגירה</button>
-</div></div>`;
-document.body.appendChild(ov);
-}
 
 /* פתיחת טופס הצעה — נקרא גם מליד ומלקוח */
 function openQuoteForm(ctx) {
 _quoteItems = [];
 const modal = document.getElementById('viewModal');
-const _vIso = new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
 modal.innerHTML = `
 <h3>הצעת מחיר חדשה</h3>
-<div class="grid2">
 <div class="field"><label>שם הנמען</label><input id="qName" value="${esc(ctx.recipient_name || '')}"></div>
-<div class="field"><label>טלפון</label><input id="qPhone" dir="ltr" value="${esc(ctx.phone || '')}"></div>
-</div>
-<div class="grid2">
-<div class="field"><label>אימייל</label><input id="qEmail" dir="ltr" value="${esc(ctx.email || '')}"></div>
-<div class="field"><label>בתוקף עד</label><input id="qValid" type="date" value="${_vIso}"></div>
-</div>
 <b style="font-size:.9rem">בחירת פריטים מהמחירון:</b>
 <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
 <select id="qItem" style="flex:2;min-width:160px">
@@ -215,20 +175,11 @@ ${cache.priceList.map(p => `<option value="${p.id}">${esc(p.name)} — ${money(p
 <input id="qQty" type="number" value="1" min="1" style="width:70px" dir="ltr" title="כמות">
 <button class="btn btn-sm" onclick="quoteAddItem()">+ הוספה</button>
 </div>
-<b style="font-size:.9rem">שורה ידנית (מחיר חופשי):</b>
-<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
-<input id="qCustName" placeholder="תיאור" style="flex:2;min-width:140px">
-<input id="qCustPrice" type="number" placeholder="מחיר" style="width:90px" dir="ltr">
-<input id="qCustQty" type="number" value="1" min="1" style="width:60px" dir="ltr" title="כמות">
-<button class="btn btn-sm" onclick="quoteAddCustom()">+ שורה</button>
-</div>
-<b style="font-size:.9rem">שורת מלל חופשי (ללא מחיר):</b>
-<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
-<input id="qTextLine" placeholder="טקסט חופשי / הערה / תנאי" style="flex:3;min-width:180px">
-<button class="btn btn-sm btn-ghost" onclick="quoteAddText()">+ שורת טקסט</button>
-</div>
 <div id="qItems"></div>
-<div class="field" style="margin-top:10px;max-width:200px"><label>הנחה (₪)</label><input id="qDiscount" type="number" value="0" dir="ltr" oninput="quoteDrawItems()"></div>
+<div class="grid2" style="margin-top:10px">
+<div class="field"><label>הנחה (₪)</label><input id="qDiscount" type="number" value="0" dir="ltr" oninput="quoteDrawItems()"></div>
+<div class="field"><label>תוקף ההצעה</label><input id="qValid" value="14 יום"></div>
+</div>
 <div class="m-actions">
 <button class="btn" onclick="quoteSave(${ctx.lead_id || null}, ${ctx.customer_id || null})">שמירה והפקת PDF</button>
 <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">ביטול</button>
@@ -245,41 +196,16 @@ _quoteItems.push({ name: item.name, price: Number(item.price), qty });
 quoteDrawItems();
 }
 
-/* שורה ידנית עם מחיר חופשי (לא מהמחירון) */
-function quoteAddCustom() {
-const name = document.getElementById('qCustName').value.trim();
-if (!name) { toast('נא למלא תיאור לשורה', true); return; }
-const price = Number(document.getElementById('qCustPrice').value) || 0;
-const qty = Math.max(1, Number(document.getElementById('qCustQty').value || 1));
-_quoteItems.push({ name, price, qty });
-document.getElementById('qCustName').value = '';
-document.getElementById('qCustPrice').value = '';
-document.getElementById('qCustQty').value = '1';
-quoteDrawItems();
-}
-
-/* שורת מלל חופשי — טקסט בלבד, לא נספר בסכום */
-function quoteAddText() {
-const t = document.getElementById('qTextLine').value.trim();
-if (!t) { toast('נא למלא טקסט', true); return; }
-_quoteItems.push({ name: t, type: 'text' });
-document.getElementById('qTextLine').value = '';
-quoteDrawItems();
-}
-
 function quoteDrawItems() {
 const wrap = document.getElementById('qItems');
 if (!wrap) return;
 const discount = Number(document.getElementById('qDiscount')?.value || 0);
-const sum = _quoteItems.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0);
+const sum = _quoteItems.reduce((s, i) => s + i.price * i.qty, 0);
 const total = Math.max(0, sum - discount);
 const vat = Math.round(total * VAT_PCT) / 100;
 wrap.innerHTML = _quoteItems.length ? `
 <table class="data"><thead><tr><th>פריט</th><th>מחיר</th><th>כמות</th><th>סה"כ</th><th></th></tr></thead><tbody>
-${_quoteItems.map((i, idx) => i.type === 'text'
-? `<tr><td colspan="4" style="font-style:italic;color:#475569">${esc(i.name)}</td>
-<td><button class="btn-danger-ghost btn-sm" onclick="_quoteItems.splice(${idx},1);quoteDrawItems()">✕</button></td></tr>`
-: `<tr>
+${_quoteItems.map((i, idx) => `<tr>
 <td>${esc(i.name)}</td><td>${money(i.price)}</td><td>${i.qty}</td><td>${money(i.price * i.qty)}</td>
 <td><button class="btn-danger-ghost btn-sm" onclick="_quoteItems.splice(${idx},1);quoteDrawItems()">✕</button></td>
 </tr>`).join('')}
@@ -294,62 +220,39 @@ const name = document.getElementById('qName').value.trim();
 if (!name) { toast('נא למלא שם נמען', true); return; }
 if (!_quoteItems.length) { toast('נא להוסיף לפחות פריט אחד', true); return; }
 const discount = Number(document.getElementById('qDiscount').value || 0);
-const total = Math.max(0, _quoteItems.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0) - discount);
-const validUntil = document.getElementById('qValid').value || null;
-const phone = document.getElementById('qPhone').value.trim() || null;
-const email = document.getElementById('qEmail').value.trim() || null;
+const total = Math.max(0, _quoteItems.reduce((s, i) => s + i.price * i.qty, 0) - discount);
+const valid = document.getElementById('qValid').value;
 
-const _base = { lead_id: leadId, customer_id: customerId, recipient_name: name, items: _quoteItems, discount, total, created_by: profile.id };
-const _full = { ..._base, recipient_phone: phone, recipient_email: email, valid_until: validUntil };
-let q;
-try { q = await db.from('quotes').insert(_full).select().single().then(r => { if (r.error) throw r.error; return r.data; }); }
-catch (e) { q = await run(db.from('quotes').insert(_base).select().single()); }
+const q = await run(db.from('quotes').insert({
+lead_id: leadId, customer_id: customerId, recipient_name: name,
+items: _quoteItems, discount, total, created_by: profile.id,
+}).select().single());
 
 if (leadId) await addInteraction('lead', leadId, `נשלחה הצעת מחיר על סך ${money(total)} (לפני מע"מ)`);
 if (customerId) await addInteraction('customer', customerId, `נשלחה הצעת מחיר על סך ${money(total)} (לפני מע"מ)`);
 
 document.getElementById('viewBack').classList.remove('open');
 toast('ההצעה נשמרה');
-quotePrint({ ...q, recipient_phone: phone, recipient_email: email, valid_until: validUntil });
+quotePrint({ ...q, valid_text: valid });
 }
 
 /* הפקת ה-PDF: נפתח חלון הדפסה מעוצב — בוחרים "שמירה כ-PDF" */
 function quotePrint(q) {
 const items = q.items || [];
-const sum = items.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0);
+const sum = items.reduce((s, i) => s + i.price * i.qty, 0);
 const total = Math.max(0, sum - Number(q.discount || 0));
 const vat = Math.round(total * VAT_PCT) / 100;
-const _logo = new URL('img/logo.png', location.href).href;
-const _paper = (cache.settings && cache.settings.paper_name) || '@@PAPER_NAME@@';
-const _valid = q.valid_until ? heDate(q.valid_until) : (q.valid_text || '');
-const _contact = [q.recipient_phone, q.recipient_email].filter(Boolean).map(esc).join(' · ');
 printArea('הצעת מחיר', `
-<div style="text-align:center;margin-bottom:10px"><img src="${_logo}" style="height:70px" alt="${esc(_paper)}"></div>
-<p><b>מספר הצעה:</b> ${esc(String(q.id || '—'))}<br>
-<b>לכבוד:</b> ${esc(q.recipient_name)}${_contact ? '<br><b>פרטי קשר:</b> ' + _contact : ''}<br>
+<p><b>לכבוד:</b> ${esc(q.recipient_name)}<br>
 <b>תאריך:</b> ${heDate(q.created_at || new Date().toISOString())}<br>
-${_valid ? `<b>בתוקף עד:</b> ${esc(_valid)}` : ''}</p>
+${q.valid_text ? `<b>תוקף ההצעה:</b> ${esc(q.valid_text)}` : ''}</p>
 <table><thead><tr><th>פריט</th><th>מחיר ליחידה</th><th>כמות</th><th>סה"כ</th></tr></thead><tbody>
-${items.map(i => i.type === 'text'
-? `<tr><td colspan="4" style="font-style:italic">${esc(i.name)}</td></tr>`
-: `<tr><td>${esc(i.name)}</td><td>${money(i.price)}</td><td>${i.qty}</td><td>${money(i.price * i.qty)}</td></tr>`).join('')}
+${items.map(i => `<tr><td>${esc(i.name)}</td><td>${money(i.price)}</td><td>${i.qty}</td><td>${money(i.price * i.qty)}</td></tr>`).join('')}
 ${q.discount > 0 ? `<tr><td colspan="3">הנחה</td><td>-${money(q.discount)}</td></tr>` : ''}
 <tr><td colspan="3"><b>סה"כ לפני מע"מ</b></td><td><b>${money(total)}</b></td></tr>
 <tr><td colspan="3">מע"מ ${VAT_PCT}%</td><td>${money(vat)}</td></tr>
 <tr><td colspan="3"><b>סה"כ לתשלום</b></td><td><b>${money(total + vat)}</b></td></tr>
 </tbody></table>
-<div style="margin-top:28px;display:flex;justify-content:${q.signature_data ? 'space-between' : 'center'};align-items:flex-end;gap:20px">
-<div style="text-align:center">
-<img src="${_logo}" style="height:46px;opacity:.92" alt=""><br>
-<b style="color:@@COLOR_BRAND@@">בכבוד רב, מערכת ${esc(_paper)}</b>
-<div style="font-size:11px;color:#64748b">חתימה וחותמת</div>
-</div>
-${q.signature_data ? `<div style="text-align:center">
-<img src="${q.signature_data}" style="height:56px" alt=""><br>
-<b>${esc(q.signer_name || q.recipient_name)}</b>
-<div style="font-size:11px;color:#64748b">חתימת הלקוח · ${heDate(q.signed_at)}</div>
-</div>` : ''}
-</div>
 <p style="margin-top:16px;font-size:12px;color:#64748b">
 המחירים אינם כוללים עיצוב גרפי. ט.ל.ח.<br>
 לאישור ההצעה: @@PAPER_PHONE@@ · @@PAPER_EMAIL@@</p>`);

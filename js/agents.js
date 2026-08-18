@@ -66,7 +66,6 @@ function agentEdit(id) {
 const a = _agents.find(x => x.id === id);
 openForm('עריכת סוכן — ' + a.name, AGENT_FIELDS(), a, async (rec) => {
 await run(db.from('agents').update(rec).eq('id', id));
-if (rec.name && a.profile_id && rec.name !== a.name) { try { await db.from('profiles').update({ full_name: rec.name }).eq('id', a.profile_id); } catch (e) { } }
 await refreshCache();
 toast('נשמר');
 openPage('agents');

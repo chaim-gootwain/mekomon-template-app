@@ -72,8 +72,6 @@ openPage('dash');
 setTimeout(async () => {
   try { if (typeof pdfImportCheckPending === 'function' && await pdfImportCheckPending()) return; } catch (e) { }
   try { if (typeof invReconcileCheckPending === 'function' && await invReconcileCheckPending()) return; } catch (e) { }
-  try { if (typeof subMaybeReminder === 'function' && await subMaybeReminder()) return; } catch (e) { }
-  try { if (typeof pvCheckPending === 'function' && await pvCheckPending()) return; } catch (e) { }
   try { if (typeof weeklyReviewCheckPending === 'function' && await weeklyReviewCheckPending()) return; } catch (e) { }
   try { if (typeof adStatusCheckPending === 'function') await adStatusCheckPending(); } catch (e) { }
 }, 1200);

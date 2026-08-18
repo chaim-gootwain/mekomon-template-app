@@ -40,14 +40,13 @@ async function toggleMonthlyBilling(id) {
   if (typeof openCustomerCard === 'function') openCustomerCard(id);
 }
 
-/* ---- מרכז קהילתי עמנואל: פיצול חשבונית חודשית ל-2 קטגוריות (רגיל / חברתי כלכלי) ---- */
-/* הסיווג הוא ברמת המודעה הבודדת — באותו שבוע יכולות להיות מודעות משתי הקטגוריות */
-const EC_KEY = 'emanuel_center_cat';
+/* ---- פיצול חשבונית חודשית ל-2 קטגוריות (רגיל / חברתי כלכלי) — כבוי בתבנית הגנרית ----
+   פיצ'ר גנרי לא-פעיל: ecIsCenter מחזיר תמיד false, כך שכל לקוח מקבל חשבונית אחת כרגיל.
+   להפעלה עתידית לעיתון ספציפי — להתאים כאן את התנאי (לפי קונפיג/שם לקוח). */
+const EC_KEY = 'ad_category_map';
 const EC_CAT_HE = { regular: 'רגיל', social: 'חברתי כלכלי' };
 function ecIsCenter(cid) {
-  const c = (cache.customers || []).find(x => x.id === Number(cid));
-  const n = (c && c.name) ? c.name : '';
-  return /מרכז\s*קהילתי/.test(n) && /עמנואל/.test(n);
+  return false;
 }
 function ecMap() { try { return JSON.parse((cache.settings || {})[EC_KEY] || '{}'); } catch (e) { return {}; } }
 function ecCatOfAd(adId) { return ecMap()['ad' + adId] || 'regular'; }
@@ -135,7 +134,7 @@ async function monthlyBillingRun(ym) {
     if (!cAds.length) continue;
     const cust = (cache.customers || []).find(c => c.id === cid) || {};
     const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
-    // מרכז קהילתי עמנואל → פיצול ל-2 קטגוריות; שאר הלקוחות → חשבונית אחת כרגיל
+    // פיצול לקטגוריות אם מופעל (כבוי כברירת מחדל); אחרת חשבונית אחת כרגיל
     const isCenter = ecIsCenter(cid);
     const groups = isCenter
       ? { regular: cAds.filter(a => ecCatOfAd(a.id) === 'regular'), social: cAds.filter(a => ecCatOfAd(a.id) === 'social') }

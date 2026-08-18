@@ -9,8 +9,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
-  --brand:@@COLOR_BRAND@@; --brand-dark:@@COLOR_DARK@@; --accent:@@COLOR_GRAD@@; --accent-dark:#b31f24;
-  --lav:#e9eaf7; --lav-deep:#d7d9ee; --line:#d5d8ee; --muted:#6b7392; --ink:#1c2036;
+  --brand:@@COLOR_BRAND@@; --brand-dark:@@COLOR_DARK@@; --accent:@@COLOR_GRAD@@; --accent-dark:@@COLOR_GRAD@@;
+  --lav:@@COLOR_LIGHT@@; --lav-deep:#d7d9ee; --line:#d5d8ee; --muted:#6b7392; --ink:#1c2036;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Heebo','Segoe UI',Arial,sans-serif;color:var(--ink);
@@ -132,9 +132,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);b
         <div class="amt"><span id="priceVal">—</span><span class="cur">₪</span></div>
       </div>
 
-      <div id="payWarn" class="msg err" style="display:none;margin:0 0 10px"></div>
-      <button type="button" class="btn" id="payLinkBtn" style="background:#fff;color:var(--brand);border:1.5px solid var(--brand);box-shadow:none;margin-bottom:10px" onclick="openPayLink()">💳 מעבר לתשלום מאובטח</button>
-
       <label class="pkg" id="fPaidWrap" style="border-color:var(--brand)">
         <input type="checkbox" id="fPaidChk">
         <span class="txt"><b>התשלום הוסדר ✓</b> — סמן/י לאישור שסידרת את התשלום. חובה לצורך שליחה.</span>
@@ -162,43 +159,8 @@ const CATS = [
   ['gemach','גמ״חים'],['lost','השבת אבידה'],['other','שונות']
 ];
 
-// קישורי תשלום אמיתיים (ישראכרט Pay360) — קבועים מראש לפי סוג/מילים/מסלול 4+1.
-// אין קישור למודעה עם תמונה + 4+1 (לא מוצע בטופס), ואין קישור מעבר ל-22 מילה (free_words 12 + בלוק של 10).
-const PAY_LINKS = {
-  regular: {
-    10: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=AD36D5E5-5BED-EA09-BF35-717B297CA706', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=5A9E03F9-A409-8F7D-8170-8C77DAF48304' },
-    20: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=9C61C820-6881-E18C-0E3B-F1149CBBD912', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=B3E6358C-2253-D0B6-3454-95CEB564886D' }
-  },
-  bold: {
-    10: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=9394555B-0F71-6FBF-C25C-4C108BDF0B5A', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=2C080DF4-A067-842B-16C6-CB5378A19E46' },
-    20: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=C9A13A14-51CC-45BD-7167-2936C0A6874A', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=8014B9CB-922E-6B6F-94B7-20D13D0A598D' }
-  },
-  image: {
-    10: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=2342C08E-43A9-FB3E-C2ED-8BB62043C9AC', pkg:null }
-  }
-};
-
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function wc(t){return String(t||'').trim().split(/\s+/).filter(Boolean).length;}
-// מחזיר את "מדרגת" התשלום (10/20 מילה) לפי הקישורים הקיימים בפועל, או null אם אין קישור תואם
-function payTier(type, words){
-  if(!META) return null;
-  const free = +META.prices.free_words;
-  if(type === 'image') return words <= free ? 10 : null;
-  if(words <= free) return 10;
-  if(words <= free + 10) return 20;
-  return null;
-}
-function openPayLink(){
-  const words = wc(document.getElementById('fBody').value);
-  const tier = payTier(TYPE, words);
-  if(!tier) return;
-  const pkg = document.getElementById('fPkgChk').checked;
-  const entry = PAY_LINKS[TYPE] && PAY_LINKS[TYPE][tier];
-  const url = entry && (pkg ? entry.pkg : entry.single);
-  if(!url) return;
-  window.open(url, '_blank');
-}
 
 function unitPrice(){
   const p = META.prices, w = wc(document.getElementById('fBody').value);
@@ -212,19 +174,6 @@ function recalc(){
   const pkg = document.getElementById('fPkgChk').checked;
   const total = pkg ? unitPrice()*4 : unitPrice();
   document.getElementById('priceVal').textContent = total.toLocaleString('he-IL');
-  const words = wc(document.getElementById('fBody').value);
-  const tier = payTier(TYPE, words);
-  const warn = document.getElementById('payWarn');
-  const payBtn = document.getElementById('payLinkBtn');
-  if(!tier){
-    warn.textContent = 'המודעה ארוכה מדי להגשה עצמית. לפרסום מודעה ארוכה יותר, צרו קשר: @@PAPER_PHONE@@';
-    warn.style.display = 'block';
-    payBtn.disabled = true;
-  } else {
-    warn.style.display = 'none';
-    payBtn.disabled = false;
-  }
-  updateSendGate();
 }
 
 async function init(){
@@ -250,9 +199,6 @@ async function init(){
       document.querySelectorAll('#fTypes .type-opt').forEach(o=>o.classList.remove('sel'));
       opt.classList.add('sel'); TYPE = opt.dataset.type;
       document.getElementById('imgField').style.display = TYPE==='image'?'block':'none';
-      const pkgWrap = document.getElementById('fPkg');
-      if(TYPE==='image'){ document.getElementById('fPkgChk').checked = false; pkgWrap.style.display = 'none'; }
-      else { pkgWrap.style.display = ''; }
       recalc();
     });
   });
@@ -274,9 +220,7 @@ function imgChosen(){
 
 function updateSendGate(){
   const c=document.getElementById('fPaidChk'), b=document.getElementById('sendBtn');
-  const words = wc(document.getElementById('fBody').value);
-  const tier = payTier(TYPE, words);
-  if(b) b.disabled = !(c && c.checked) || !tier;
+  if(b) b.disabled = !(c && c.checked);
 }
 
 async function submitAd(){
@@ -291,7 +235,6 @@ async function submitAd(){
   if(phone.replace(/\D/g,'').length<7){msg.textContent='נא למלא מספר טלפון תקין';msg.classList.add('err');return;}
   if(!body){msg.textContent='נא לכתוב את נוסח המודעה';msg.classList.add('err');return;}
   if(TYPE==='image' && !IMG_FILE){msg.textContent='בחרתם "עם תמונה" — נא לצרף קובץ תמונה';msg.classList.add('err');return;}
-  if(!payTier(TYPE, wc(body))){msg.textContent='המודעה ארוכה מדי להגשה עצמית — צרו קשר: @@PAPER_PHONE@@';msg.classList.add('err');return;}
   if(!document.getElementById('fPaidChk').checked){msg.textContent='נא לסמן "התשלום הוסדר" כדי לשלוח';msg.classList.add('err');return;}
 
   btn.disabled=true; btn.textContent='שולח...';

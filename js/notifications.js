@@ -12,14 +12,13 @@ let _notifItems = [];
 async function notifBuild() {
   const role = profile.role, T = today(), items = [];
   const canSales = ['admin', 'sales'].includes(role);
-  const mine = (typeof myAgentId === 'function') ? myAgentId() : null;
   let leads = [], charges = [], issues = [];
   const jobs = [];
   jobs.push(db.from('issues').select('id,issue_number,ads_deadline,status')
     .not('status', 'in', '("closed","published")').then(r => issues = r.data || []));
   if (canSales) {
     jobs.push(db.from('leads').select('id,name,phone,status,follow_up,agent_id')
-      .not('status', 'in', '("won","lost")').lte('follow_up', T).then(r => leads = (r.data || []).filter(l => l.agent_id === mine)));
+      .not('status', 'in', '("won","lost")').lte('follow_up', T).then(r => leads = r.data || []));
     jobs.push(db.from('charges').select('id,customer_id,amount,status,due_date')
       .in('status', ['pending', 'invoiced', 'partial', 'overdue']).then(r => charges = r.data || []));
   }
