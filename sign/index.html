@@ -89,7 +89,7 @@ function renderItems(q){
   document.getElementById('pItems').innerHTML = `
     <table><thead><tr><th>פריט</th><th>מחיר</th><th>כמות</th><th>סה"כ</th></tr></thead><tbody>
     ${rows}
-    ${q.discount>0 ? `<tr><td colspan="3">הנחה</td><td>-${money(q.discount)}</td></tr>` : ''}
+    ${q.discount>0 ? `<tr><td colspan="3">הנחה${q.discount_pct ? ' ('+q.discount_pct+'%)' : ''}</td><td>-${money(q.discount)}</td></tr>` : ''}
     <tr class="tot"><td colspan="3">סה"כ לפני מע"מ</td><td>${money(total)}</td></tr>
     <tr><td colspan="3">מע"מ ${VAT_PCT}%</td><td>${money(vat)}</td></tr>
     <tr class="tot"><td colspan="3">סה"כ לתשלום</td><td class="big">${money(total+vat)}</td></tr>
