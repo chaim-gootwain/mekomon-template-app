@@ -228,7 +228,15 @@ ${cache.priceList.map(p => `<option value="${p.id}">${esc(p.name)} — ${money(p
 <button class="btn btn-sm btn-ghost" onclick="quoteAddText()">+ שורת טקסט</button>
 </div>
 <div id="qItems"></div>
-<div class="field" style="margin-top:10px;max-width:200px"><label>הנחה (₪)</label><input id="qDiscount" type="number" value="0" dir="ltr" oninput="quoteDrawItems()"></div>
+<div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;flex-wrap:wrap">
+<div class="field" style="max-width:130px;margin:0"><label>סוג הנחה</label>
+<select id="qDiscType" onchange="quoteDrawItems()">
+<option value="amount">₪ סכום</option>
+<option value="pct">% אחוז</option>
+</select></div>
+<div class="field" style="max-width:140px;margin:0"><label>ערך ההנחה</label><input id="qDiscount" type="number" value="0" min="0" dir="ltr" oninput="quoteDrawItems()"></div>
+<div id="qDiscHint" class="muted" style="font-size:.8rem;padding-bottom:9px"></div>
+</div>
 <div class="m-actions">
 <button class="btn" onclick="quoteSave(${ctx.lead_id || null}, ${ctx.customer_id || null})">שמירה והפקת PDF</button>
 <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">ביטול</button>
@@ -267,11 +275,26 @@ document.getElementById('qTextLine').value = '';
 quoteDrawItems();
 }
 
+/* מחשב את ההנחה בשקלים מתוך הטופס — תומך בסכום קבוע או באחוז מהסכום שלפני מע"מ.
+   מחזיר תמיד סכום ב-₪ (amount) + סוג ההנחה (type) והאחוז (pct) לצורך תיוג. */
+function quoteCalcDiscount(sum) {
+const type = document.getElementById('qDiscType')?.value || 'amount';
+const raw = Number(document.getElementById('qDiscount')?.value || 0);
+if (type === 'pct') {
+const pct = Math.min(Math.max(raw, 0), 100);
+return { amount: Math.min(sum, Math.round(sum * pct) / 100), pct, type: 'pct' };
+}
+return { amount: Math.max(0, Math.min(sum, raw)), pct: null, type: 'amount' };
+}
+
 function quoteDrawItems() {
 const wrap = document.getElementById('qItems');
 if (!wrap) return;
-const discount = Number(document.getElementById('qDiscount')?.value || 0);
 const sum = _quoteItems.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0);
+const disc = quoteCalcDiscount(sum);
+const discount = disc.amount;
+const hint = document.getElementById('qDiscHint');
+if (hint) hint.textContent = disc.type === 'pct' && discount ? `= ${money(discount)} הנחה` : '';
 const total = Math.max(0, sum - discount);
 const vat = Math.round(total * VAT_PCT) / 100;
 wrap.innerHTML = _quoteItems.length ? `
@@ -283,6 +306,7 @@ ${_quoteItems.map((i, idx) => i.type === 'text'
 <td>${esc(i.name)}</td><td>${money(i.price)}</td><td>${i.qty}</td><td>${money(i.price * i.qty)}</td>
 <td><button class="btn-danger-ghost btn-sm" onclick="_quoteItems.splice(${idx},1);quoteDrawItems()">✕</button></td>
 </tr>`).join('')}
+${discount ? `<tr><td colspan="3">הנחה${disc.type === 'pct' ? ' (' + disc.pct + '%)' : ''}</td><td colspan="2">-${money(discount)}</td></tr>` : ''}
 <tr><td colspan="3"><b>סה"כ לפני מע"מ${discount ? ' (אחרי הנחה)' : ''}</b></td><td colspan="2"><b>${money(total)}</b></td></tr>
 <tr><td colspan="3">מע"מ ${VAT_PCT}%</td><td colspan="2">${money(vat)}</td></tr>
 <tr><td colspan="3"><b>סה"כ כולל מע"מ</b></td><td colspan="2"><b style="color:var(--brand)">${money(total + vat)}</b></td></tr>
@@ -293,14 +317,16 @@ async function quoteSave(leadId, customerId) {
 const name = document.getElementById('qName').value.trim();
 if (!name) { toast('נא למלא שם נמען', true); return; }
 if (!_quoteItems.length) { toast('נא להוסיף לפחות פריט אחד', true); return; }
-const discount = Number(document.getElementById('qDiscount').value || 0);
-const total = Math.max(0, _quoteItems.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0) - discount);
+const _sum = _quoteItems.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0);
+const _disc = quoteCalcDiscount(_sum);
+const discount = _disc.amount;
+const total = Math.max(0, _sum - discount);
 const validUntil = document.getElementById('qValid').value || null;
 const phone = document.getElementById('qPhone').value.trim() || null;
 const email = document.getElementById('qEmail').value.trim() || null;
 
 const _base = { lead_id: leadId, customer_id: customerId, recipient_name: name, items: _quoteItems, discount, total, created_by: profile.id };
-const _full = { ..._base, recipient_phone: phone, recipient_email: email, valid_until: validUntil };
+const _full = { ..._base, recipient_phone: phone, recipient_email: email, valid_until: validUntil, discount_pct: _disc.pct };
 let q;
 try { q = await db.from('quotes').insert(_full).select().single().then(r => { if (r.error) throw r.error; return r.data; }); }
 catch (e) { q = await run(db.from('quotes').insert(_base).select().single()); }
@@ -333,7 +359,7 @@ ${_valid ? `<b>בתוקף עד:</b> ${esc(_valid)}` : ''}</p>
 ${items.map(i => i.type === 'text'
 ? `<tr><td colspan="4" style="font-style:italic">${esc(i.name)}</td></tr>`
 : `<tr><td>${esc(i.name)}</td><td>${money(i.price)}</td><td>${i.qty}</td><td>${money(i.price * i.qty)}</td></tr>`).join('')}
-${q.discount > 0 ? `<tr><td colspan="3">הנחה</td><td>-${money(q.discount)}</td></tr>` : ''}
+${q.discount > 0 ? `<tr><td colspan="3">הנחה${q.discount_pct ? ' (' + q.discount_pct + '%)' : ''}</td><td>-${money(q.discount)}</td></tr>` : ''}
 <tr><td colspan="3"><b>סה"כ לפני מע"מ</b></td><td><b>${money(total)}</b></td></tr>
 <tr><td colspan="3">מע"מ ${VAT_PCT}%</td><td>${money(vat)}</td></tr>
 <tr><td colspan="3"><b>סה"כ לתשלום</b></td><td><b>${money(total + vat)}</b></td></tr>
