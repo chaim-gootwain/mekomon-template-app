@@ -407,6 +407,37 @@ function invChatCardSetDoc(k) {
 }
 
 /* ---------- אישור / ביטול ---------- */
+// מיפוי doc_type של הצ'אט → doc_kind של ezcount-doc (אותו ספק כמו כרטיס הלקוח = EZcount)
+const INVCHAT_EZ_DOC_KIND = {
+  tax_invoice: 'tax_invoice', tax_invoice_receipt: 'invoice_receipt',
+  receipt: 'receipt', credit_invoice: 'credit', proforma: 'proforma',
+};
+/* בונה גוף בקשה ל-ezcount-doc מתוך שדות הצ'אט — אותו חוזה של מסך החשבוניות (invSubmit) */
+function invChatEzcountBody(f) {
+  const isPay = (f.doc_type === 'receipt' || f.doc_type === 'tax_invoice_receipt');
+  const lines = (f.line_items || []).filter(l => Number(l.unit_price) > 0);
+  // מע"מ ברמת המסמך (ezcount-doc מקבל דגל אחד): כלול רק אם כל השורות "כולל מע"מ"
+  const vatInc = lines.length ? lines.every(l => !!l.price_includes_vat) : false;
+  const pct = invChatVatPct();
+  const dstr = (f.doc_date ? String(f.doc_date).slice(0, 10) : today());
+  const body = {
+    customer_id: f.customer_id || null,
+    doc_kind: INVCHAT_EZ_DOC_KIND[f.doc_type] || f.doc_type,
+    items: lines.map(l => ({ details: String(l.description || '').trim() || 'פרסום', amount: Number(l.quantity) || 1, price: Number(l.unit_price) || 0 })),
+    vat_included: vatInc,
+    doc_date: dstr,
+  };
+  if (!f.customer_id && f.customer_name) body.client_name = String(f.customer_name).trim();
+  if (isPay) {
+    const base = lines.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);
+    // מס-קבלה: אם המחירים "לפני מע"מ" — מגלמים מע"מ כדי שהתשלום יתאים לסה"כ. קבלה: הסכום כפי שנגבה.
+    const gross = (vatInc || f.doc_type === 'receipt') ? base : base * (1 + pct / 100);
+    body.pay_date = dstr;
+    body.payment = { method: f.payment_method || 'cash', sum: Math.round(gross * 100) / 100, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) };
+    if (f.doc_type === 'receipt') delete body.items; // קבלה בלבד — מסמך תשלום ללא פירוט חשבונית
+  }
+  return body;
+}
 async function invChatApprove() {
   const f = _icState.fields;
   if (!f.line_items.some(l => Number(l.unit_price) > 0)) { toast('חסר מחיר — השלם לפני הפקה', true); return; }
@@ -414,23 +445,36 @@ async function invChatApprove() {
   const btn = document.getElementById('icApprove');
   if (btn) { btn.disabled = true; btn.textContent = 'מפיק...'; }
   icSetBusy(true);
-  const r = await invChatFn('issue-invoice', { request_id: _icState.reqId, confirmed: true, fields: f });
+  const body = invChatEzcountBody(f);
+  const r = await invChatFn('ezcount-doc', body);
   icSetBusy(false);
-  if (r.errMsg || !r.data || !r.data.ok) {
+  const doc = r.data && r.data.document;
+  if (r.data && r.data.status === 'pending_allocation') {
     if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והפק'; }
+    icSayErr('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount והשלם ידנית.');
+    return;
+  }
+  if (r.errMsg || !r.data || !r.data.ok || !doc) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והפק'; }
+    if (_icState.reqId) db.from('invoice_requests').update({ status: 'error', error_message: String(r.errMsg || 'שגיאה').slice(0, 300), final_fields: body }).eq('id', _icState.reqId).then(() => { });
     icSayErr('ההפקה נכשלה: ' + esc(r.errMsg || 'שגיאה') +
       '<div class="muted" style="font-size:.78rem;margin-top:4px">שום מסמך לא הופק. אפשר לתקן את הכרטיס ולנסות שוב.</div>');
     return;
   }
-  const d = r.data.document || {};
+  if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
+  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  const t = invChatTotals(f.line_items, invChatVatPct());
+  const shownTotal = f.doc_type === 'receipt'
+    ? Math.round(f.line_items.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0) * 100) / 100
+    : t.total;
   document.getElementById('icCard-' + _icState.reqId)?.remove();
   icSayOk('✅ הופק <b>' + (INVCHAT_DOC_HE[f.doc_type] || 'מסמך') + '</b> ללקוח <b>' + esc(f.customer_name || '') + '</b>' +
-    (d.doc_number ? ' · מספר <b dir="ltr">' + esc(String(d.doc_number)) + '</b>' : '') +
-    (d.totals ? ' · סה"כ <b>' + money(f.doc_type === 'receipt' ? d.totals.total : d.totals.total) + '</b>' : '') +
-    (d.pdf_url ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(d.pdf_url)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
+    (doc.doc_number ? ' · מספר <b dir="ltr">' + esc(String(doc.doc_number)) + '</b>' : '') +
+    ' · סה"כ <b>' + money(shownTotal) + '</b>' +
+    (doc.pdf_url ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(doc.pdf_url)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
   icResetState();
   invChatLoadHistory();
-  document.getElementById('icInput').focus();
+  document.getElementById('icInput')?.focus();
 }
 async function invChatCancel() {
   document.getElementById('icCard-' + _icState.reqId)?.remove();
@@ -662,20 +706,13 @@ async function invChatProbe() {
   const el = document.getElementById('icProbeOut');
   if (el) el.textContent = 'בודק...';
   const [pi, pc] = await Promise.all([
-    invChatFn('issue-invoice', { probe: true }),
+    invChatFn('ezcount-doc', { probe: true }),
     invChatFn('parse-invoice-text', { probe: true }),
   ]);
-  const icOk = pi.data && pi.data.ok;
+  const icOk = pi.data && (pi.data.ok || pi.data.authOk);
   const clOk = pc.data && pc.data.ok;
-  let html = (icOk ? '✅ iCount מחובר' : '❌ iCount: ' + esc((pi.data && pi.data.error) || pi.errMsg || 'לא מחובר')) + '<br>' +
+  let html = (icOk ? '✅ EZcount מחובר' : '❌ EZcount: ' + esc((pi.data && pi.data.error) || pi.errMsg || 'לא מחובר')) + '<br>' +
     (clOk ? '✅ פענוח (Claude) מחובר' : '❌ פענוח: ' + esc((pc.data && pc.data.error) || pc.errMsg || 'לא מחובר'));
-  if (icOk && pi.data.doctypes) {
-    try {
-      const dt = pi.data.doctypes;
-      html += '<div class="muted" style="font-size:.75rem;margin-top:4px">סוגי מסמכים בחשבון: ' +
-        esc(Object.entries(dt).slice(0, 12).map(([k, v]) => k + '=' + (typeof v === 'string' ? v : (v && v.name) || '')).join(' · ')) + '</div>';
-    } catch (e) { }
-  }
   if (el) el.innerHTML = html;
 }
 (function () {
@@ -687,10 +724,10 @@ async function invChatProbe() {
         const card = document.createElement('div');
         card.className = 'card card-pad';
         card.innerHTML = `
-        <b>צ׳אט חשבוניות (iCount)</b>
+        <b>צ׳אט חשבוניות (EZcount)</b>
         <p class="muted" style="font-size:.82rem">הפקת מסמכים ממשפט חופשי בעברית, עם אישור לפני כל הפקה.
-        הסודות (iCount ו-Claude) מוגדרים ב-Supabase → Edge Functions → Secrets, לא כאן.
-        להדליק רק במופע שהוגדרו בו סודות iCount.</p>
+        ההפקה עוברת דרך אותו ספק חיוב של כרטיס הלקוח (EZcount). סוד ה-Claude (ANTHROPIC_API_KEY)
+        מוגדר ב-Supabase → Edge Functions → Secrets.</p>
         <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
           <input type="checkbox" ${invoiceChatOn() ? 'checked' : ''} onchange="invChatToggleSave(this.checked)" style="width:18px;height:18px">
           צ׳אט חשבוניות פעיל (מוסיף "🧾 צ׳אט חשבוניות" לתפריט)
@@ -699,7 +736,7 @@ async function invChatProbe() {
           <div class="field"><label>שיעור מע"מ (%)</label>
             <input type="number" value="${esc((cache.settings || {}).vat_rate || '18')}" dir="ltr" onchange="invChatVatSave(this.value)"></div>
         </div>
-        <button class="btn btn-sm btn-ghost" onclick="invChatProbe()">🔌 בדיקת חיבור iCount + פענוח</button>
+        <button class="btn btn-sm btn-ghost" onclick="invChatProbe()">🔌 בדיקת חיבור EZcount + פענוח</button>
         <div id="icProbeOut" class="muted" style="font-size:.83rem;margin-top:6px"></div>`;
         const anchor = el.querySelector('#activityLog');
         const anchorCard = anchor ? anchor.closest('.card') : null;
