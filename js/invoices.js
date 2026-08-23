@@ -441,24 +441,3 @@ async function invIssueReceiptDirect(cid) {
   const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
   await invOpenModal(c, 'invoice_receipt', true);
 }
-(function () {
-  if (typeof window.openCustomerCard !== 'function') return;
-  const _origOpenCustomerCard = window.openCustomerCard;
-  window.openCustomerCard = async function (id) {
-    const _r = await _origOpenCustomerCard.apply(this, arguments);
-    try {
-      const host = document.querySelector('#viewBack .m-actions');
-      if (host && !host.querySelector('.btn-receipt-direct')) {
-        const anchor = Array.from(host.querySelectorAll('button')).find(b => /הפקת חשבונית/.test(b.textContent));
-        if (anchor) {
-          const _b = document.createElement('button');
-          _b.className = 'btn btn-sm btn-receipt-direct';
-          _b.textContent = '🧾 חשבונית מס קבלה';
-          _b.onclick = function () { invIssueReceiptDirect(id); };
-          anchor.after(_b);
-        }
-      }
-    } catch (e) {}
-    return _r;
-  };
-})();
