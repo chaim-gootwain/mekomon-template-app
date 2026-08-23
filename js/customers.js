@@ -327,6 +327,7 @@ ${overLimit ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;
 ${canWrite ? `<div class="m-actions" style="flex-wrap:wrap;margin-top:2px;gap:6px">
 <button class="btn btn-sm" onclick="adAdd({customer_id:${id}})">➕ מודעה לגיליון</button>
 <button class="btn btn-sm" onclick="invIssueOrder(${id})">🧾 הפקת חשבונית</button>
+<button class="btn btn-sm" onclick="invIssueReceiptDirect(${id})">🧾 חשבונית מס קבלה</button>
 <button class="btn btn-sm btn-ghost" onclick="custToggleMore()">⋯ עוד</button>
 <button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
 </div>

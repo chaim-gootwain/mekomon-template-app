@@ -429,3 +429,15 @@ async function invCall(body) {
     window.openCustomerCard = wrapped;
   }
 })();
+
+/* ── חשבונית מס קבלה ישירות מכרטיס הלקוח ──────────────────────────
+   מפיק מסמך תשלום (invoice_receipt) עם החוב הפתוח של הלקוח נטען דינמית,
+   ומוסיף כפתור לצד "הפקת חשבונית" בכרטיס הלקוח. */
+async function invIssueReceiptDirect(cid) {
+  if (typeof checkCustomerStatusGate === 'function') {
+    const _okS = await checkCustomerStatusGate(cid, 'הפקת חשבונית מס קבלה');
+    if (!_okS) return;
+  }
+  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  await invOpenModal(c, 'invoice_receipt', true);
+}
