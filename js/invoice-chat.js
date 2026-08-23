@@ -89,7 +89,7 @@ async function invChatFn(name, body) {
 /* ---------- מצב הצ'אט ---------- */
 let _icState = null; // הבקשה הפעילה
 function icResetState() {
-  _icState = { reqId: null, rawText: '', fields: null, pending: null, candidates: [], confidence: 'high', busy: false };
+  _icState = { reqId: null, rawText: '', fields: null, pending: null, candidates: [], confidence: 'high', busy: false, mode: 'issue', pay: null, openProformas: [], payDate: null };
 }
 
 /* ---------- הדף ---------- */
@@ -183,10 +183,11 @@ async function invChatSend() {
     }
     const parsed = p.data.parsed;
     _icState.confidence = parsed.confidence || 'low';
+    _icState.mode = (parsed.action === 'pay_existing') ? 'pay_existing' : 'issue';
     db.from('invoice_requests').update({ parsed_json: parsed }).eq('id', _icState.reqId).then(() => { });
 
     _icState.fields = {
-      doc_type: parsed.doc_type,
+      doc_type: (_icState.mode === 'pay_existing') ? 'tax_invoice_receipt' : parsed.doc_type,
       customer_id: null,
       customer_name: parsed.customer_name_raw,
       customer_source: null,
@@ -279,6 +280,8 @@ function invChatAskCustomerAgain() {
 function invChatNext() {
   const f = _icState.fields;
   if (!f.customer_id && !(f.customer_name && f.customer_name.trim())) { invChatAskCustomerAgain(); return; }
+  // מצב "לקוח שילם" — שולפים את חשבון העסקה הפתוח ומפיקים מס-קבלה מקושרת
+  if (_icState.mode === 'pay_existing') { invChatStartPayExisting(); return; }
   if (!f.doc_type) {
     _icState.pending = 'doc_type';
     icSay('איזה סוג מסמך להפיק?' +
@@ -435,6 +438,160 @@ async function invChatCancel() {
   icSay('הבקשה בוטלה — לא הופק מסמך.');
   icResetState();
   invChatLoadHistory();
+}
+
+/* ============================================================
+   מצב "לקוח שילם" — הפקת מס-קבלה מקושרת לחשבון עסקה פתוח
+   ------------------------------------------------------------
+   שולף את חשבונות העסקה הפתוחים של הלקוח מטבלת documents ומקשר
+   את המס-קבלה למסמך המקור דרך ezcount-doc (parent=doc_uuid) — בדיוק
+   כמו הכפתור בכרטיס הלקוח (invIssueReceiptFor). אין הפקה בלי אישור.
+   ============================================================ */
+function _icProformaUuid(d) {
+  return (d && ((d.raw && (d.raw.doc_uuid || (d.raw.data && d.raw.data.doc_uuid))) || d.doc_uuid)) || null;
+}
+async function invChatFindOpenProformas(customerId) {
+  const { data, error } = await db.from('documents').select('*')
+    .eq('customer_id', customerId).eq('doc_kind', 'proforma').eq('status', 'issued')
+    .order('created_at', { ascending: false }).limit(50);
+  if (error) return { err: error.message, rows: [] };
+  // פתוח = לא סומן settled (העמודה אולי עדיין לא קיימת → undefined = פתוח)
+  return { err: null, rows: (data || []).filter(d => !d.settled_at) };
+}
+async function invChatStartPayExisting() {
+  const f = _icState.fields;
+  if (!f.customer_id) {
+    _icState.pending = 'customer';
+    icSay('כדי לרשום תשלום על חשבונית קיימת אני צריך לקוח מתוך המערכת (עם כרטיס). כתוב את שם הלקוח:');
+    document.getElementById('icInput')?.focus();
+    return;
+  }
+  icSetBusy(true);
+  const thinking = icSay('מחפש חשבון עסקה פתוח ל' + esc(f.customer_name || '') + '... ⏳');
+  const res = await invChatFindOpenProformas(f.customer_id);
+  icSetBusy(false);
+  thinking && thinking.remove();
+  if (res.err) { icSayErr('שגיאה בשליפת המסמכים: ' + esc(res.err)); return; }
+  const linkable = (res.rows || []).filter(d => _icProformaUuid(d));
+  if (!linkable.length) {
+    if (res.rows.length) {
+      icSayErr('נמצאו ' + res.rows.length + ' חשבוניות עסקה פתוחות ל' + esc(f.customer_name || '') +
+        ', אבל אף אחת לא ניתנת לקישור אוטומטי (הופקו מחוץ למסלול הרגיל / חסר מזהה מסמך לשיוך). אפשר להפיק מס-קבלה ידנית מכרטיס הלקוח.');
+    } else {
+      icSayErr('לא נמצאה חשבונית עסקה פתוחה ל' + esc(f.customer_name || '') + '. אם כבר הופקה עליה מס-קבלה — היא נסגרה.');
+    }
+    return;
+  }
+  _icState.openProformas = linkable;
+  if (linkable.length === 1) { invChatPayPick(0); return; }
+  icSay('ל' + esc(f.customer_name || '') + ' יש כמה חשבוניות עסקה פתוחות — על איזו שולם?' +
+    '<div class="ic-choices">' +
+    linkable.map((d, i) => `<button class="btn btn-sm btn-ghost" onclick="invChatPayPick(${i})">עסקה ${esc(String(d.doc_number || '—'))} · ${money(Number(d.total) || 0)}${d.created_at ? ' · ' + (typeof heDate === 'function' ? heDate(d.created_at) : String(d.created_at).slice(0, 10)) : ''}</button>`).join('') +
+    '</div>');
+}
+function invChatPayPick(i) {
+  const d = _icState.openProformas[i];
+  if (!d) return;
+  _icState.pay = { docId: d.id, uuid: _icProformaUuid(d), docNumber: d.doc_number, amount: Number(d.total) || 0 };
+  _icState.pending = null;
+  if (!_icState.fields.payment_method) {
+    _icState.pending = 'pay_method';
+    icSay('באיזה אמצעי תשלום שילם ' + esc(_icState.fields.customer_name || '') + '?' +
+      '<div class="ic-choices">' +
+      INV_PAY_METHODS.map(m => `<button class="btn btn-sm btn-ghost" onclick="invChatPaySetMethod('${m.v}')">${m.t}</button>`).join('') +
+      '</div>');
+    return;
+  }
+  invChatRenderPayCard();
+}
+function invChatPaySetMethod(v) {
+  _icState.fields.payment_method = v;
+  _icState.pending = null;
+  invChatRenderPayCard();
+}
+function invChatRenderPayCard() {
+  const f = _icState.fields, p = _icState.pay;
+  document.getElementById('icCard-' + _icState.reqId)?.remove();
+  _icState.payDate = _icState.payDate || today();
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'icCard-' + _icState.reqId;
+  card.innerHTML = `
+    <div class="hd">🧾 מס-קבלה מקושרת — לאישור לפני הפקה</div>
+    <div class="ic-warn">המס-קבלה תקושר לחשבון העסקה <b dir="ltr">${esc(String(p.docNumber || ''))}</b> ותסגור אותו. הסכום נלקח מהעסקה.</div>
+    <div class="grid2">
+      <div class="field"><label>לקוח <span class="ic-src exist">✓ מכרטיס קיים</span></label>
+        <input type="text" value="${esc(f.customer_name || '')}" disabled></div>
+      <div class="field"><label>חשבון עסקה מקושר</label>
+        <input type="text" value="${esc(String(p.docNumber || '—'))}" disabled dir="ltr"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>אמצעי תשלום</label>
+        <select onchange="_icState.fields.payment_method=this.value">
+          ${INV_PAY_METHODS.map(m => `<option value="${m.v}" ${m.v === f.payment_method ? 'selected' : ''}>${m.t}</option>`).join('')}
+        </select></div>
+      <div class="field"><label>תאריך תשלום</label>
+        <input type="date" value="${esc(_icState.payDate)}" onchange="_icState.payDate=this.value"></div>
+    </div>
+    <div class="ic-sum">
+      <div class="row tot"><span>סה"כ המס-קבלה</span><span>${money(Number(p.amount) || 0)}</span></div>
+      <div class="muted" style="font-size:.75rem;margin-top:3px">הסכום כפי שנקבע בחשבון העסקה (כולל מע"מ).</div>
+    </div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="icApprove" onclick="invChatPayApprove()">✅ אשר והפק מס-קבלה</button>
+      <button class="btn btn-ghost" onclick="invChatCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function invChatPayApprove() {
+  const f = _icState.fields, p = _icState.pay;
+  if (!p || !p.uuid) { toast('חסר מזהה קישור לעסקה', true); return; }
+  const gross = Number(p.amount) || 0;
+  if (!(gross > 0)) { toast('סכום העסקה אינו תקין', true); return; }
+  const method = f.payment_method || 'cash';
+  const dstr = _icState.payDate || today();
+  const btn = document.getElementById('icApprove');
+  if (btn) { btn.disabled = true; btn.textContent = 'מפיק...'; }
+  icSetBusy(true);
+  const body = {
+    customer_id: f.customer_id,
+    doc_kind: 'invoice_receipt',
+    items: [{ details: 'תשלום עבור חשבון עסקה ' + (p.docNumber || ''), amount: 1, price: gross }],
+    vat_included: true,
+    doc_date: dstr,
+    pay_date: dstr,
+    payment: { method, sum: gross, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) },
+    parent: p.uuid,
+  };
+  const r = await invChatFn('ezcount-doc', body);
+  icSetBusy(false);
+  const doc = r.data && r.data.document;
+  if (r.data && r.data.status === 'pending_allocation') {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והפק מס-קבלה'; }
+    icSayErr('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount והשלם ידנית.');
+    return;
+  }
+  if (r.errMsg || !r.data || !r.data.ok || !doc) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והפק מס-קבלה'; }
+    if (_icState.reqId) db.from('invoice_requests').update({ status: 'error', error_message: String(r.errMsg || 'שגיאה').slice(0, 300), final_fields: body }).eq('id', _icState.reqId).then(() => { });
+    icSayErr('ההפקה נכשלה: ' + esc(r.errMsg || 'שגיאה') +
+      '<div class="muted" style="font-size:.78rem;margin-top:4px">שום מסמך לא הופק.</div>');
+    return;
+  }
+  // סימון חשבון העסקה כסגור (העמודה אולי לא קיימת עדיין → best effort)
+  try { await db.from('documents').update({ settled_at: new Date().toISOString(), settled_by_doc: doc.doc_number ? String(doc.doc_number) : null }).eq('id', p.docId); } catch (e) { }
+  if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
+  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  document.getElementById('icCard-' + _icState.reqId)?.remove();
+  icSayOk('✅ הופקה <b>חשבונית מס קבלה</b> ל<b>' + esc(f.customer_name || '') + '</b>' +
+    (doc.doc_number ? ' · מספר <b dir="ltr">' + esc(String(doc.doc_number)) + '</b>' : '') +
+    ' · מקושרת לעסקה <b dir="ltr">' + esc(String(p.docNumber || '')) + '</b>' +
+    ' · סה"כ <b>' + money(gross) + '</b>' +
+    (doc.pdf_url ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(doc.pdf_url)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
+  icResetState();
+  invChatLoadHistory();
+  document.getElementById('icInput')?.focus();
 }
 
 /* ---------- היסטוריה ---------- */
