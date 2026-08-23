@@ -204,6 +204,8 @@ Deno.serve(async (req) => {
 
     const d = doc.data || doc;
     const docNumber = d.docnum || d.doc_number || d.docNumber || null;
+    // מזהה ייחודי של המסמך בספק — נשמר כדי שאפשר יהיה לקשר אליו מס-קבלה מאוחר יותר
+    const docUuid = d.doc_uuid || d.docUuid || d.uuid || (d.data && d.data.doc_uuid) || null;
     let pdfUrl = d.pdf_link || d.doc_url || d.link || null;
     if (!pdfUrl && docNumber) {
       try {
@@ -229,6 +231,7 @@ Deno.serve(async (req) => {
         customer_id: (custRow && custRow.id) || null,
         doc_kind: DOC_KIND_MAP[f.doc_type] || f.doc_type,
         doc_number: docNumber ? String(docNumber) : null,
+        doc_uuid: docUuid,
         pdf_url: pdfUrl,
         amount: totals.base, vat_amount: totals.vat, total: totals.total,
         vat_included: false, status: 'issued', mode: 'production', raw: d,
