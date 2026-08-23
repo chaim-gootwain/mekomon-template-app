@@ -20,6 +20,7 @@ const SYSTEM = `אתה מפענח בקשות בעברית להפקת מסמכי 
 
 מבנה הפלט (בדיוק):
 {
+  "action": "issue | pay_existing",
   "doc_type": "tax_invoice | tax_invoice_receipt | receipt | credit_invoice | proforma | null",
   "customer_name_raw": "string | null",
   "line_items": [
@@ -31,6 +32,7 @@ const SYSTEM = `אתה מפענח בקשות בעברית להפקת מסמכי 
 }
 
 כללי הקיצור של המשתמש:
+- action: ברירת המחדל "issue" — המשתמש מבקש להפיק מסמך חדש עם סכום/סוג שהוא מציין. אבל אם המשתמש מדווח שלקוח **שילם** את מה שכבר הוצא לו — בלי לציין סכום חדש ובלי לבקש סוג מסמך מפורש — אז action="pay_existing". דוגמאות ניסוח: "פסיפס שילם את החשבונית האחרונה שלו", "גן ורדים פרע את החוב", "שולם ע"י מכולת השכונה", "תסגור את העסקה של דויטש". במצב pay_existing: customer_name_raw חובה; doc_type ו-line_items יכולים להישאר null/ריקים (הסכום יישלף מהעסקה הפתוחה במערכת — לא מהמשפט); payment_method רק אם המשתמש ציין אמצעי תשלום. שים לב: אם המשתמש כן נקב בסכום מפורש להפקה ("תוציא מס-קבלה ל... 500") — זה action="issue" רגיל, לא pay_existing.
 - סוג מסמך: "ח. מס" / "ח מס" / "חשבונית מס" → tax_invoice · "מס קבלה" / "חשבונית מס קבלה" → tax_invoice_receipt · "קבלה" → receipt · "זיכוי" / "חשבונית זיכוי" → credit_invoice · "עסקה" / "חשבון עסקה" / "חשבונית על עסקה" → proforma. לא ברור → null והוסף "doc_type" ל-missing_fields.
 - מע"מ: "+ מע\"מ" אחרי סכום, או "+" צמוד לסוף הסכום (למשל "250+") → המחיר לפני מע"מ → price_includes_vat=false. נאמר "כולל מע\"מ" → price_includes_vat=true. לא צוין כלום → price_includes_vat=false (ההנחה: לפני מע"מ; הכרטיס יציג זאת לאישור).
 - כמות: "4 פעמים", "4 פרסומים", "פעמיים" (=2), מספרים במילים ("ארבע") → quantity. לא צוינה כמות → 1.
@@ -49,8 +51,15 @@ const SYSTEM = `אתה מפענח בקשות בעברית להפקת מסמכי 
 פלט: {"doc_type":"proforma","customer_name_raw":null,"line_items":[{"description":"פרסום רבע עמוד","quantity":4,"unit_price":250,"price_includes_vat":false}],"payment_method":null,"confidence":"high","missing_fields":["customer"]}
 
 קלט: קבלה לגן ורדים 500 כולל מעמ במזומן
-פלט: {"doc_type":"receipt","customer_name_raw":"גן ורדים","line_items":[{"description":"פרסום","quantity":1,"unit_price":500,"price_includes_vat":true}],"payment_method":"cash","confidence":"medium","missing_fields":[]}
+פלט: {"action":"issue","doc_type":"receipt","customer_name_raw":"גן ורדים","line_items":[{"description":"פרסום","quantity":1,"unit_price":500,"price_includes_vat":true}],"payment_method":"cash","confidence":"medium","missing_fields":[]}
 
+קלט: פסיפס שילם את החשבונית האחרונה שלו
+פלט: {"action":"pay_existing","doc_type":null,"customer_name_raw":"פסיפס","line_items":[],"payment_method":null,"confidence":"high","missing_fields":[]}
+
+קלט: גן ורדים שילם בהעברה
+פלט: {"action":"pay_existing","doc_type":null,"customer_name_raw":"גן ורדים","line_items":[],"payment_method":"transfer","confidence":"high","missing_fields":[]}
+
+בשאר הדוגמאות שלמעלה action="issue".
 החזר JSON בלבד.`;
 
 /* חילוץ JSON גם אם המודל עטף אותו בטקסט/גדרות */
@@ -68,7 +77,9 @@ function extractJson(text) {
 const DOC_TYPES = ['tax_invoice', 'tax_invoice_receipt', 'receipt', 'credit_invoice', 'proforma'];
 const PAY_METHODS = ['credit', 'cash', 'transfer', 'check'];
 function normalizeParsed(p) {
+  const action = (p && p.action === 'pay_existing') ? 'pay_existing' : 'issue';
   const out = {
+    action,
     doc_type: DOC_TYPES.includes(p && p.doc_type) ? p.doc_type : null,
     customer_name_raw: (p && typeof p.customer_name_raw === 'string' && p.customer_name_raw.trim()) ? p.customer_name_raw.trim() : null,
     line_items: [],
@@ -85,14 +96,21 @@ function normalizeParsed(p) {
   })).filter(it => it.unit_price >= 0);
   // שדות קריטיים חסרים — משלימים את missing_fields גם אם המודל שכח
   const miss = new Set(out.missing_fields);
-  if (!out.customer_name_raw) miss.add('customer');
-  if (!out.doc_type) miss.add('doc_type');
-  if (!out.line_items.length || out.line_items.every(it => !it.unit_price)) miss.add('price');
-  if ((out.doc_type === 'receipt' || out.doc_type === 'tax_invoice_receipt') && !out.payment_method) miss.add('payment_method');
-  if (out.customer_name_raw) miss.delete('customer');
-  if (out.doc_type) miss.delete('doc_type');
-  if (out.line_items.some(it => it.unit_price > 0)) miss.delete('price');
-  if (out.payment_method) miss.delete('payment_method');
+  if (out.action === 'pay_existing') {
+    // מצב "לקוח שילם": הסכום והמסמך נשלפים מהעסקה הפתוחה — לא מהמשפט.
+    // חובה רק לזהות לקוח; אמצעי תשלום נבחר בכרטיס אם לא צוין.
+    miss.clear();
+    if (!out.customer_name_raw) miss.add('customer');
+  } else {
+    if (!out.customer_name_raw) miss.add('customer');
+    if (!out.doc_type) miss.add('doc_type');
+    if (!out.line_items.length || out.line_items.every(it => !it.unit_price)) miss.add('price');
+    if ((out.doc_type === 'receipt' || out.doc_type === 'tax_invoice_receipt') && !out.payment_method) miss.add('payment_method');
+    if (out.customer_name_raw) miss.delete('customer');
+    if (out.doc_type) miss.delete('doc_type');
+    if (out.line_items.some(it => it.unit_price > 0)) miss.delete('price');
+    if (out.payment_method) miss.delete('payment_method');
+  }
   out.missing_fields = [...miss];
   return out;
 }
