@@ -20,19 +20,22 @@ const SYSTEM = `אתה מפענח בקשות בעברית להפקת מסמכי 
 
 מבנה הפלט (בדיוק):
 {
-  "action": "issue | pay_existing",
+  "action": "issue | pay_existing | new_deal",
   "doc_type": "tax_invoice | tax_invoice_receipt | receipt | credit_invoice | proforma | null",
   "customer_name_raw": "string | null",
   "line_items": [
     { "description": "string", "quantity": number, "unit_price": number, "price_includes_vat": boolean }
   ],
+  "deal": { "count": number, "start_issue": number, "size_raw": "string | null", "unit_price": number, "price_includes_vat": boolean } ,
   "payment_method": "credit | cash | transfer | check | null",
   "confidence": "high | medium | low",
   "missing_fields": ["שמות שדות חסרים קריטיים"]
 }
+(שדה deal מופיע רק כש-action="new_deal"; אחרת deal=null.)
 
 כללי הקיצור של המשתמש:
 - action: ברירת המחדל "issue" — המשתמש מבקש להפיק מסמך חדש עם סכום/סוג שהוא מציין. אבל אם המשתמש מדווח שלקוח **שילם** את מה שכבר הוצא לו — בלי לציין סכום חדש ובלי לבקש סוג מסמך מפורש — אז action="pay_existing". דוגמאות ניסוח: "פסיפס שילם את החשבונית האחרונה שלו", "גן ורדים פרע את החוב", "שולם ע"י מכולת השכונה", "תסגור את העסקה של דויטש". במצב pay_existing: customer_name_raw חובה; doc_type ו-line_items יכולים להישאר null/ריקים (הסכום יישלף מהעסקה הפתוחה במערכת — לא מהמשפט); payment_method רק אם המשתמש ציין אמצעי תשלום. שים לב: אם המשתמש כן נקב בסכום מפורש להפקה ("תוציא מס-קבלה ל... 500") — זה action="issue" רגיל, לא pay_existing.
+- action="new_deal": כשהמשתמש מבקש **עסקה/חבילה של כמה פרסומים שפרוסים על גיליונות** — כלומר מציין מספר פרסומים **וגם** גיליון-התחלה או רצף גיליונות. סימנים: "עסקה של 5 פרסומים מגיליון 301", "5 פרסומים ברצף החל מגיליון 301", "חבילה של 4 מודעות רבע עמוד מגיליון 12", "פרסום כל שבוע X פעמים מגיליון Y". במצב זה מלא את האובייקט "deal": count=מספר הפרסומים, start_issue=מספר הגיליון הראשון, size_raw=תיאור הגודל אם צוין ("רבע עמוד" / "חצי עמוד" / "עמוד שלם" / "שמינית" / null), unit_price=מחיר לפרסום אחד אם צוין (0 אם לא), price_includes_vat כרגיל. אל תמלא line_items ב-new_deal. missing_fields: הוסף "customer" אם אין שם, "count" אם אין מספר פרסומים, "start_issue" אם אין גיליון התחלה. הבחנה חשובה: "עסקה של 4 פרסומים 250" **בלי** גיליון/רצף → זה action="issue" עם doc_type="proforma" (כמו הדוגמה למטה), לא new_deal. רק אזכור גיליון/רצף הופך אותו ל-new_deal.
 - סוג מסמך: "ח. מס" / "ח מס" / "חשבונית מס" → tax_invoice · "מס קבלה" / "חשבונית מס קבלה" → tax_invoice_receipt · "קבלה" → receipt · "זיכוי" / "חשבונית זיכוי" → credit_invoice · "עסקה" / "חשבון עסקה" / "חשבונית על עסקה" → proforma. לא ברור → null והוסף "doc_type" ל-missing_fields.
 - מע"מ: "+ מע\"מ" אחרי סכום, או "+" צמוד לסוף הסכום (למשל "250+") → המחיר לפני מע"מ → price_includes_vat=false. נאמר "כולל מע\"מ" → price_includes_vat=true. לא צוין כלום → price_includes_vat=false (ההנחה: לפני מע"מ; הכרטיס יציג זאת לאישור).
 - כמות: "4 פעמים", "4 פרסומים", "פעמיים" (=2), מספרים במילים ("ארבע") → quantity. לא צוינה כמות → 1.
@@ -59,7 +62,13 @@ const SYSTEM = `אתה מפענח בקשות בעברית להפקת מסמכי 
 קלט: גן ורדים שילם בהעברה
 פלט: {"action":"pay_existing","doc_type":null,"customer_name_raw":"גן ורדים","line_items":[],"payment_method":"transfer","confidence":"high","missing_fields":[]}
 
-בשאר הדוגמאות שלמעלה action="issue".
+קלט: תוציא עסקה של 5 פרסומים ברצף לפסיפס מגיליון 301, רבע עמוד, 250
+פלט: {"action":"new_deal","doc_type":null,"customer_name_raw":"פסיפס","line_items":[],"deal":{"count":5,"start_issue":301,"size_raw":"רבע עמוד","unit_price":250,"price_includes_vat":false},"payment_method":null,"confidence":"high","missing_fields":[]}
+
+קלט: חבילה של 4 מודעות חצי עמוד לגן ורדים החל מגיליון 12
+פלט: {"action":"new_deal","doc_type":null,"customer_name_raw":"גן ורדים","line_items":[],"deal":{"count":4,"start_issue":12,"size_raw":"חצי עמוד","unit_price":0,"price_includes_vat":false},"payment_method":null,"confidence":"high","missing_fields":[]}
+
+בשאר הדוגמאות שלמעלה action="issue" ו-deal=null.
 החזר JSON בלבד.`;
 
 /* חילוץ JSON גם אם המודל עטף אותו בטקסט/גדרות */
@@ -76,17 +85,29 @@ function extractJson(text) {
 /* אכיפת המבנה וברירות המחדל — לא סומכים על המודל בעיוורון */
 const DOC_TYPES = ['tax_invoice', 'tax_invoice_receipt', 'receipt', 'credit_invoice', 'proforma'];
 const PAY_METHODS = ['credit', 'cash', 'transfer', 'check'];
+const ACTIONS = ['issue', 'pay_existing', 'new_deal'];
 function normalizeParsed(p) {
-  const action = (p && p.action === 'pay_existing') ? 'pay_existing' : 'issue';
+  const action = ACTIONS.includes(p && p.action) ? p.action : 'issue';
   const out = {
     action,
     doc_type: DOC_TYPES.includes(p && p.doc_type) ? p.doc_type : null,
     customer_name_raw: (p && typeof p.customer_name_raw === 'string' && p.customer_name_raw.trim()) ? p.customer_name_raw.trim() : null,
     line_items: [],
+    deal: null,
     payment_method: PAY_METHODS.includes(p && p.payment_method) ? p.payment_method : null,
     confidence: ['high', 'medium', 'low'].includes(p && p.confidence) ? p.confidence : 'low',
     missing_fields: Array.isArray(p && p.missing_fields) ? p.missing_fields.filter(x => typeof x === 'string') : [],
   };
+  if (action === 'new_deal') {
+    const d = (p && p.deal) || {};
+    out.deal = {
+      count: (Number(d.count) > 0) ? Math.floor(Number(d.count)) : 0,
+      start_issue: (Number(d.start_issue) > 0) ? Math.floor(Number(d.start_issue)) : 0,
+      size_raw: (typeof d.size_raw === 'string' && d.size_raw.trim()) ? d.size_raw.trim() : null,
+      unit_price: (isFinite(Number(d.unit_price)) && Number(d.unit_price) >= 0) ? Number(d.unit_price) : 0,
+      price_includes_vat: !!d.price_includes_vat,
+    };
+  }
   const items = Array.isArray(p && p.line_items) ? p.line_items : [];
   out.line_items = items.map((it) => ({
     description: (it && typeof it.description === 'string' && it.description.trim()) ? it.description.trim() : 'פרסום',
@@ -101,6 +122,13 @@ function normalizeParsed(p) {
     // חובה רק לזהות לקוח; אמצעי תשלום נבחר בכרטיס אם לא צוין.
     miss.clear();
     if (!out.customer_name_raw) miss.add('customer');
+  } else if (out.action === 'new_deal') {
+    // עסקת רצף: חובה לקוח + כמות + גיליון-התחלה. גודל ומחיר מושלמים בכרטיס
+    // (הגודל מהמחירון, המחיר מברירת-המחדל של הגודל אם לא צוין).
+    miss.clear();
+    if (!out.customer_name_raw) miss.add('customer');
+    if (!out.deal || !out.deal.count) miss.add('count');
+    if (!out.deal || !out.deal.start_issue) miss.add('start_issue');
   } else {
     if (!out.customer_name_raw) miss.add('customer');
     if (!out.doc_type) miss.add('doc_type');
