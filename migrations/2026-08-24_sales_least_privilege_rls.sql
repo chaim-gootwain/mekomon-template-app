@@ -55,7 +55,7 @@ end if; end $do$;
 
 do $do$ begin if to_regclass('public.commission_payouts') is not null then
   execute $p$drop policy if exists zz_sales_commission_payouts on public.commission_payouts$p$;
-  execute $p$create policy zz_sales_commission_payouts on public.commission_payouts as restrictive for all to public using ( public.emu_is_admin() or public.my_role() <> 'sales' ) with check ( public.emu_is_admin() or public.my_role() <> 'sales' )$p$;
+  execute $p$create policy zz_sales_commission_payouts on public.commission_payouts as restrictive for all to public using ( public.emu_is_admin() or public.my_role() <> 'sales' or agent_id = public.my_agent_id() ) with check ( public.emu_is_admin() or public.my_role() <> 'sales' )$p$;
 end if; end $do$;
 
 do $do$ begin if to_regclass('public.agents') is not null then
