@@ -68,6 +68,7 @@ show('app');
 await refreshCache();
 await updateClockButton();
 if (typeof notifInit === 'function') notifInit();
+if (typeof alertsInit === 'function') alertsInit();
 openPage('dash');
 setTimeout(async () => {
   try { if (typeof pdfImportCheckPending === 'function' && await pdfImportCheckPending()) return; } catch (e) { }
