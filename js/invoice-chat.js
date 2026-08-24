@@ -89,7 +89,7 @@ async function invChatFn(name, body) {
 /* ---------- מצב הצ'אט ---------- */
 let _icState = null; // הבקשה הפעילה
 function icResetState() {
-  _icState = { reqId: null, rawText: '', fields: null, pending: null, candidates: [], confidence: 'high', busy: false, mode: 'issue', pay: null, openProformas: [], payDate: null };
+  _icState = { reqId: null, rawText: '', fields: null, pending: null, candidates: [], confidence: 'high', busy: false, mode: 'issue', pay: null, openProformas: [], payDate: null, deal: null };
 }
 
 /* ---------- הדף ---------- */
@@ -183,7 +183,8 @@ async function invChatSend() {
     }
     const parsed = p.data.parsed;
     _icState.confidence = parsed.confidence || 'low';
-    _icState.mode = (parsed.action === 'pay_existing') ? 'pay_existing' : 'issue';
+    _icState.mode = ['pay_existing', 'new_deal'].includes(parsed.action) ? parsed.action : 'issue';
+    _icState.deal = (_icState.mode === 'new_deal') ? (parsed.deal || null) : null;
     db.from('invoice_requests').update({ parsed_json: parsed }).eq('id', _icState.reqId).then(() => { });
 
     _icState.fields = {
@@ -282,6 +283,7 @@ function invChatNext() {
   if (!f.customer_id && !(f.customer_name && f.customer_name.trim())) { invChatAskCustomerAgain(); return; }
   // מצב "לקוח שילם" — שולפים את חשבון העסקה הפתוח ומפיקים מס-קבלה מקושרת
   if (_icState.mode === 'pay_existing') { invChatStartPayExisting(); return; }
+  if (_icState.mode === 'new_deal') { invChatStartNewDeal(); return; }
   if (!f.doc_type) {
     _icState.pending = 'doc_type';
     icSay('איזה סוג מסמך להפיק?' +
@@ -636,6 +638,262 @@ async function invChatPayApprove() {
   icResetState();
   invChatLoadHistory();
   document.getElementById('icInput')?.focus();
+}
+
+/* ============================================================
+   מצב "עסקת פרסומים ברצף" (new_deal)
+   ------------------------------------------------------------
+   "תוציא עסקה של 5 פרסומים מגיליון 301, רבע עמוד, 250" →
+   כרטיס אישור עם אפשרויות סימון (חוזה / מודעות / השלמת גיליונות /
+   חשבון עסקה) — לא חייבים הכול. אחרי אישור: משלים גיליונות חסרים
+   (RPC generate_issues), פותח חוזה (contracts), יוצר מודעות (ads)
+   פר גיליון, ומפיק חשבון עסקה דרך ezcount-doc (אחרון — כדי שלא ייווצר
+   מסמך כספי אם ההקמה נכשלה). מבנה הרשומות זהה ל-issue-entry.js.
+   ============================================================ */
+function _icNorm(s) { return String(s || '').replace(/["'`״׳.\-]/g, '').replace(/\s+/g, '').trim(); }
+/* התאמת גודל חופשי ("רבע עמוד") לפריט מחירון */
+function invChatMatchSize(raw) {
+  const list = cache.priceList || [];
+  if (!list.length) return null;
+  if (!raw) return null;
+  const q = _icNorm(raw);
+  let hit = list.find(p => _icNorm(p.name) === q);
+  if (!hit) hit = list.find(p => { const n = _icNorm(p.name); return n.includes(q) || q.includes(n); });
+  return hit || null;
+}
+/* מיפוי מספרי גיליון לרשומות קיימות ב-cache */
+function invChatMapIssues(nums) {
+  const byNum = {};
+  (cache.issues || []).forEach(i => { byNum[Number(i.issue_number)] = i; });
+  const existing = [], missing = [];
+  nums.forEach(n => { if (byNum[n]) existing.push({ num: n, id: byNum[n].id }); else missing.push(n); });
+  const maxExisting = Math.max(0, ...(cache.issues || []).map(i => Number(i.issue_number) || 0));
+  return { existing, missing, maxExisting, byNum };
+}
+async function invChatStartNewDeal() {
+  const f = _icState.fields, d = _icState.deal || {};
+  if (!f.customer_id) {
+    _icState.pending = 'customer';
+    icSay('עסקת פרסומים נפתחת על כרטיס לקוח קיים. כתוב את שם הלקוח:');
+    document.getElementById('icInput')?.focus();
+    return;
+  }
+  // גודל + מחיר ברירת מחדל מהמחירון
+  const sizeHit = invChatMatchSize(d.size_raw);
+  _icState.deal = {
+    count: Number(d.count) || 0,
+    start_issue: Number(d.start_issue) || 0,
+    unit_price: (Number(d.unit_price) > 0) ? Number(d.unit_price) : (sizeHit ? Number(sizeHit.price) || 0 : 0),
+    price_includes_vat: !!d.price_includes_vat,
+    size_id: sizeHit ? sizeHit.id : ((cache.priceList || [])[0] ? cache.priceList[0].id : null),
+    opts: { contract: true, ads: true, autoIssues: true, proforma: true },
+  };
+  invChatNewDealCard();
+}
+function _icDealNums() {
+  const d = _icState.deal;
+  const n = Math.max(0, Number(d.count) || 0), s = Number(d.start_issue) || 0;
+  const out = []; for (let i = 0; i < n && s > 0; i++) out.push(s + i); return out;
+}
+function invChatNewDealCard() {
+  const f = _icState.fields, d = _icState.deal;
+  document.getElementById('icCard-' + _icState.reqId)?.remove();
+  const pct = invChatVatPct();
+  const nums = _icDealNums();
+  const map = invChatMapIssues(nums);
+  const base = (Number(d.count) || 0) * (Number(d.unit_price) || 0);
+  const totalBase = d.price_includes_vat ? Math.round(base / (1 + pct / 100) * 100) / 100 : base;
+  const vat = Math.round(totalBase * pct / 100 * 100) / 100;
+  const total = Math.round((totalBase + vat) * 100) / 100;
+  const sizeOpts = (cache.priceList || []).map(p => `<option value="${p.id}" ${p.id === d.size_id ? 'selected' : ''}>${esc(p.name)} — ${money(p.price)}</option>`).join('');
+  const rangeTxt = nums.length ? (nums[0] + (nums.length > 1 ? '–' + nums[nums.length - 1] : '')) : '—';
+  const missFuture = map.missing.filter(x => x > map.maxExisting);
+  const missPast = map.missing.filter(x => x <= map.maxExisting);
+  const warns = [];
+  if (d.opts.ads && missFuture.length) warns.push('גיליונות ' + missFuture.join(', ') + ' עדיין לא קיימים — ' + (d.opts.autoIssues ? 'ייווצרו אוטומטית לפי מספור רץ.' : 'סמן "השלמת גיליונות" כדי ליצור אותם, אחרת המודעות עליהם ידולגו.'));
+  if (d.opts.ads && missPast.length) warns.push('⚠ גיליונות ' + missPast.join(', ') + ' חסרים ואי אפשר ליצור אותם אוטומטית (הם לפני הגיליון האחרון). המודעות עליהם ידולגו.');
+  if (!d.size_id) warns.push('⚠ בחר גודל מהמחירון.');
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'icCard-' + _icState.reqId;
+  const cb = (k, label, extra) => `<label style="display:flex;gap:7px;align-items:center;cursor:pointer;font-size:.9rem">
+    <input type="checkbox" ${d.opts[k] ? 'checked' : ''} onchange="invChatDealToggle('${k}',this.checked)" style="width:16px;height:16px">${label}${extra || ''}</label>`;
+  card.innerHTML = `
+    <div class="hd">🧾 עסקת פרסומים ברצף — לאישור</div>
+    ${warns.map(w => `<div class="ic-warn">${w}</div>`).join('')}
+    <div class="grid2">
+      <div class="field"><label>לקוח <span class="ic-src exist">✓ מכרטיס</span></label>
+        <input type="text" value="${esc(f.customer_name || '')}" disabled></div>
+      <div class="field"><label>גודל (מחירון)</label>
+        <select onchange="invChatDealSetSize(this.value)">${sizeOpts}</select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>מספר פרסומים</label>
+        <input type="number" min="1" value="${Number(d.count) || ''}" onchange="invChatDealSet('count',this.value)"></div>
+      <div class="field"><label>מגיליון</label>
+        <input type="number" min="1" value="${Number(d.start_issue) || ''}" dir="ltr" onchange="invChatDealSet('start_issue',this.value)"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>מחיר לפרסום</label>
+        <input type="number" step="any" value="${Number(d.unit_price) || ''}" onchange="invChatDealSet('unit_price',this.value)"></div>
+      <div class="field"><label>גיליונות</label>
+        <input type="text" value="${esc(rangeTxt)} (${nums.length})" disabled dir="ltr"></div>
+    </div>
+    <label class="vat" style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" ${d.price_includes_vat ? 'checked' : ''} onchange="invChatDealSet('price_includes_vat',this.checked)" style="width:15px;height:15px">המחיר כולל מע"מ</label>
+    <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px;display:flex;flex-direction:column;gap:6px">
+      <div class="muted" style="font-size:.8rem">מה להקים (אפשר לבחור):</div>
+      ${cb('contract', 'חוזה/עסקה (' + (Number(d.count) || 0) + ' פרסומים)')}
+      ${cb('ads', 'מודעות פר גיליון (' + nums.length + ')')}
+      ${cb('autoIssues', 'השלמת גיליונות חסרים אוטומטית')}
+      ${cb('proforma', 'חשבון עסקה (על כל החבילה)')}
+    </div>
+    <div class="ic-sum">
+      <div class="row"><span>לפני מע"מ</span><span>${money(totalBase)}</span></div>
+      <div class="row"><span>מע"מ ${pct}%</span><span>${money(vat)}</span></div>
+      <div class="row tot"><span>סה"כ חשבון עסקה</span><span>${money(total)}</span></div>
+    </div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="icApprove" onclick="invChatNewDealApprove()">✅ אשר והקם</button>
+      <button class="btn btn-ghost" onclick="invChatCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+function invChatDealSet(k, v) {
+  const d = _icState.deal;
+  if (k === 'price_includes_vat') d.price_includes_vat = !!v;
+  else if (k === 'count' || k === 'start_issue') d[k] = Math.max(0, Math.floor(Number(v) || 0));
+  else if (k === 'unit_price') d.unit_price = Math.max(0, Number(v) || 0);
+  invChatNewDealCard();
+}
+function invChatDealSetSize(id) {
+  const d = _icState.deal; d.size_id = Number(id) || null;
+  const it = (cache.priceList || []).find(p => p.id === d.size_id);
+  if (it && !(Number(d.unit_price) > 0)) d.unit_price = Number(it.price) || 0;
+  invChatNewDealCard();
+}
+function invChatDealToggle(k, on) { _icState.deal.opts[k] = !!on; invChatNewDealCard(); }
+async function invChatNewDealApprove() {
+  const f = _icState.fields, d = _icState.deal;
+  const nums = _icDealNums();
+  if (!nums.length) { toast('חסר מספר פרסומים / גיליון התחלה', true); return; }
+  if ((d.opts.contract || d.opts.ads || d.opts.proforma) && !(Number(d.unit_price) > 0)) { toast('חסר מחיר לפרסום', true); return; }
+  if ((d.opts.contract || d.opts.ads) && !d.size_id) { toast('בחר גודל מהמחירון', true); return; }
+  const btn = document.getElementById('icApprove');
+  if (btn) { btn.disabled = true; btn.textContent = 'מקים...'; }
+  icSetBusy(true);
+  const done = [];
+  try {
+    // ----- שלב 1: השלמת גיליונות חסרים (רק אם יוצרים מודעות) -----
+    let issueMap = invChatMapIssues(nums);
+    if (d.opts.ads && d.opts.autoIssues) {
+      const missFuture = issueMap.missing.filter(x => x > issueMap.maxExisting);
+      if (missFuture.length) {
+        const weeks = Math.min(52, Math.max(...missFuture) - issueMap.maxExisting);
+        try {
+          const before = new Set((cache.issues || []).map(i => i.id));
+          await run(db.rpc('generate_issues', { p_weeks: weeks }), 'שגיאה ביצירת גיליונות');
+          try {
+            const dpc = Number((cache.settings || {}).default_pages_count) || 40;
+            const { data: allI } = await db.from('issues').select('id');
+            const newIds = (allI || []).map(i => i.id).filter(id => !before.has(id));
+            if (newIds.length) await db.from('issues').update({ pages_count: dpc }).in('id', newIds);
+          } catch (e) { }
+          if (typeof refreshCache === 'function') await refreshCache();
+          issueMap = invChatMapIssues(nums);
+          done.push('נוצרו גיליונות עד ' + Math.max(...nums));
+        } catch (e) { icSayErr('לא הצלחתי ליצור גיליונות (' + esc(String(e && e.message || e)) + '). ' + (done.length ? 'הוקמו: ' + done.join(', ') : 'לא הוקם דבר') + '.'); if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והקם'; } return; }
+      }
+    }
+    // ----- שלב 2: חוזה (לא נוצר שוב אם כבר הוקם בניסיון קודם) -----
+    const c = _customerRow(f.customer_id);
+    let contractId = d._contractId || null;
+    if (d.opts.contract && !contractId) {
+      const row = await run(db.from('contracts').insert({
+        customer_id: f.customer_id, agent_id: (c && c.agent_id) || null,
+        price_item_id: d.size_id, total_inserts: Number(d.count) || nums.length,
+        total_price: (Number(d.unit_price) || 0) * (Number(d.count) || nums.length),
+        active: true, cadence: 'every', start_date: today(), created_by: profile.id,
+        notes: 'נפתחה מצ׳אט החשבוניות',
+      }).select().single(), 'שגיאה בפתיחת חוזה');
+      contractId = row.id; d._contractId = contractId;
+      done.push('חוזה #' + contractId);
+    }
+    // ----- שלב 3: מודעות פר גיליון (לא נוצרות שוב אם כבר הוקמו) -----
+    if (d.opts.ads && !d._adsDone) {
+      const targets = issueMap.existing; // רק גיליונות שקיימים בפועל
+      const missingSkipped = nums.length - targets.length; // גיליונות שלא קיימים בכלל
+      let made = 0, failed = 0;
+      for (const t of targets) {
+        const price = Number(d.unit_price) || 0;
+        const rec = {
+          customer_id: f.customer_id, title: (c && c.name) || f.customer_name || 'לקוח',
+          price_item_id: d.size_id, price: price,
+          discount: (typeof custFixedDiscountAmount === 'function' ? (custFixedDiscountAmount(f.customer_id, price) || 0) : 0),
+          agent_id: (c && c.agent_id) || null, requested_placement: null,
+          issue_id: t.id, page_number: null, status: 'committee',
+          graphics_note: null, deal_stage: 'in_progress', contract_id: contractId, created_by: profile.id,
+        };
+        try { await db.from('ads').insert(rec).select('id').single().then(r => { if (r.error) throw r.error; }); made++; }
+        catch (e1) {
+          if (String(e1.message || e1).includes('deal_stage')) {
+            const r2 = { ...rec }; delete r2.deal_stage;
+            try { await db.from('ads').insert(r2).select('id').single().then(r => { if (r.error) throw r.error; }); made++; }
+            catch (e2) { failed++; console.error('ad insert failed', e2); }
+          } else { failed++; console.error('ad insert failed', e1); }
+        }
+      }
+      if (made > 0) d._adsDone = true; // ננעל רק אחרי שנוצרה לפחות מודעה אחת — מונע כפילויות בלחיצה חוזרת
+      done.push(made + ' מודעות' +
+        (missingSkipped > 0 ? ' (' + missingSkipped + ' דולגו — גיליון חסר)' : '') +
+        (failed > 0 ? ' (⚠ ' + failed + ' נכשלו — אפשר להוסיף ידנית)' : ''));
+    }
+    // ----- שלב 4: חשבון עסקה (אחרון — מסמך כספי) -----
+    let docNum = null, pdfUrl = null;
+    if (d.opts.proforma) {
+      const sizeName = (cache.priceList || []).find(p => p.id === d.size_id);
+      const label = 'פרסום' + (sizeName ? ' ' + sizeName.name : '') + ' — גיליונות ' + (nums[0] + (nums.length > 1 ? '–' + nums[nums.length - 1] : '')) + ' (' + (Number(d.count) || nums.length) + ' פרסומים)';
+      const body = {
+        customer_id: f.customer_id, doc_kind: 'proforma',
+        items: [{ details: label, amount: Number(d.count) || nums.length, price: Number(d.unit_price) || 0 }],
+        vat_included: !!d.price_includes_vat, doc_date: today(),
+        comment: 'גיליון ' + (nums[0] + (nums.length > 1 ? '-' + nums[nums.length - 1] : '')),
+      };
+      const r = await invChatFn('ezcount-doc', body);
+      const doc = r.data && r.data.document;
+      if (r.errMsg || !r.data || !r.data.ok || !doc) {
+        if (_icState.reqId) db.from('invoice_requests').update({ status: 'error', error_message: String(r.errMsg || 'שגיאה').slice(0, 300), final_fields: body }).eq('id', _icState.reqId).then(() => { });
+        icSayErr('הוקמו: ' + (done.join(', ') || '—') + '. אבל הפקת חשבון העסקה נכשלה: ' + esc(r.errMsg || 'שגיאה') + ' (החוזה/המודעות כבר נוצרו ולא ייווצרו שוב — לחיצה נוספת על "אשר והקם" תנסה להפיק רק את חשבון העסקה; לחלופין אפשר להפיק אותו ידנית מכרטיס הלקוח).');
+        if (btn) { btn.disabled = false; btn.textContent = '🔁 נסה שוב חשבון עסקה'; }
+        return;
+      }
+      docNum = doc.doc_number; pdfUrl = doc.pdf_url;
+      if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: docNum ? String(docNum) : null, icount_doc_url: pdfUrl || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
+      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+      done.push('חשבון עסקה' + (docNum ? ' #' + docNum : ''));
+    }
+    // רישום בציר הזמן של הלקוח (כמו בהזנת גיליון) — לא קריטי
+    if (typeof addInteraction === 'function') {
+      const szName = (cache.priceList || []).find(p => p.id === d.size_id);
+      try { await addInteraction('customer', f.customer_id, 'עסקת פרסומים מהצ׳אט: ' + (szName ? szName.name + ' × ' : '') + (Number(d.count) || nums.length) + ' פרסומים · גיליונות ' + (nums[0] + (nums.length > 1 ? '–' + nums[nums.length - 1] : '')) + (docNum ? ' · חשבון עסקה #' + docNum : '')); } catch (e) { }
+    }
+    if (typeof refreshCache === 'function') { try { await refreshCache(); } catch (e) { } }
+    document.getElementById('icCard-' + _icState.reqId)?.remove();
+    icSayOk('✅ הוקם ל<b>' + esc(f.customer_name || '') + '</b>: ' + done.map(x => '<b>' + esc(x) + '</b>').join(' · ') +
+      (pdfUrl ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(pdfUrl)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
+    icResetState();
+    invChatLoadHistory();
+    document.getElementById('icInput')?.focus();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והקם'; }
+    icSayErr('שגיאה בהקמת העסקה: ' + esc(String(e && e.message || e)) + (done.length ? ' · הוקם עד כה: ' + esc(done.join(', ')) : '') + '. חשבון העסקה לא הופק.');
+  } finally {
+    icSetBusy(false);
+  }
+}
+/* שליפת רשומת לקוח מה-cache (לשם/סוכן) */
+function _customerRow(id) {
+  return (cache.customers || []).find(x => x.id === id) || null;
 }
 
 /* ---------- היסטוריה ---------- */
