@@ -84,7 +84,7 @@ renderTable(document.getElementById('adsTable'), rows, [
 /* --- הוספה ידנית --- */
 function adAdd(prefill) {
 openForm('מודעה חדשה', [
-{ name: 'customer_id', label: 'לקוח', type: 'select', options: 'customers', required: true },
+{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true },
 { name: 'title', label: 'תיאור המודעה', required: true },
 { name: 'price_item_id', label: 'גודל (מהמחירון)', type: 'select', options: 'priceList' },
 { name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues' },
@@ -233,7 +233,7 @@ const a = _ads.find(x => x.id === id);
 document.getElementById('viewBack').classList.remove('open');
 openForm('עריכת מודעה', [
 { name: 'title', label: 'תיאור', required: true },
-{ name: 'customer_id', label: 'לקוח', type: 'select', options: 'customers' },
+{ name: 'customer_id', label: 'לקוח', type: 'customer' },
 { name: 'price_item_id', label: 'גודל', type: 'select', options: 'priceList' },
 { name: 'issue_id', label: 'גיליון', type: 'select', options: 'issues' },
 { name: 'requested_placement', label: 'מיקום מבוקש' },

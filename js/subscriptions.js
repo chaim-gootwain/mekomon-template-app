@@ -30,10 +30,7 @@ const cad = c.cadence || 'every';
 document.getElementById('viewModal').innerHTML = `
 <h3>${existing ? 'עריכת חוזה — ' + esc(nameOf('customers', c.customer_id)) : 'חוזה חדש'}</h3>
 <div class="grid2">
-<div class="field"><label>לקוח *</label>
-<input id="subCustSearch" placeholder="הקלד שם או טלפון לחיפוש..." autocomplete="off" oninput="subCustFilter(this.value)" value="${existing ? esc(nameOf('customers', c.customer_id)) : ''}">
-<input type="hidden" id="subCust" value="${c.customer_id || ''}">
-<div id="subCustRes" style="max-height:170px;overflow:auto;border:1px solid var(--line,#e5e7eb);border-radius:8px;margin-top:2px;display:none;background:#fff"></div></div>
+<div class="field"><label>לקוח *</label>${custPickerHtml({ base: 'subCust', value: c.customer_id })}</div>
 <div class="field"><label>סוכן</label><select id="subAgent"><option value="">—</option>${_subOpts(cache.agents, c.agent_id, x => x.name)}</select></div>
 </div>
 <div class="grid2">
@@ -90,20 +87,7 @@ if (hint) hint.textContent = 'מחיר לפרסום: ' + (money(Math.round(price
 }
 }
 
-function subCustFilter(q) {
-q = (q || '').trim();
-const res = document.getElementById('subCustRes'); if (!res) return;
-document.getElementById('subCust').value = '';
-if (!q) { res.style.display = 'none'; res.innerHTML = ''; return; }
-const list = (cache.customers || []).filter(c => (c.name || '').indexOf(q) >= 0 || (c.phone || '').indexOf(q) >= 0).slice(0, 20);
-res.innerHTML = list.map(c => `<div style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #eee" onclick="subCustPick(${c.id})">${esc(c.name)}${c.phone ? ' <span class="muted" style="font-size:.78rem">· ' + esc(c.phone) + '</span>' : ''}</div>`).join('') || '<div class="muted" style="padding:6px 8px">לא נמצא</div>';
-res.style.display = 'block';
-}
-function subCustPick(id) {
-document.getElementById('subCust').value = id;
-document.getElementById('subCustSearch').value = nameOf('customers', id);
-const res = document.getElementById('subCustRes'); if (res) { res.style.display = 'none'; res.innerHTML = ''; }
-}
+/* בורר הלקוח בטופס החוזה עבר לבורר המשותף (customer-picker.js): חיפוש + הוסף לקוח חדש */
 
 function subToggleDates() {
 const cad = document.getElementById('subCadence').value;

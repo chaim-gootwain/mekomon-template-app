@@ -223,7 +223,7 @@ function classifiedAdd(existingId) {
   document.getElementById('viewModal').innerHTML = `
     <h3>מודעת לוח חדשה</h3>
     <div class="grid2">
-      <div class="field"><label>לקוח *</label><select id="clCust">${(cache.customers || []).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>לקוח *</label>${custPickerHtml({ base: 'clCust' })}</div>
       <div class="field"><label>קטגוריה *</label><select id="clCat">${CL_CATEGORIES.map(c => `<option value="${c.v}">${c.t}</option>`).join('')}</select></div>
     </div>
     <div class="grid2">
