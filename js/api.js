@@ -148,6 +148,16 @@ inp = `<select id="f_${f.name}">` +
 opts.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.t)}</option>`).join('') +
 `</select>`;
 }
+else if (f.type === 'customer') {
+// בורר לקוחות משותף (חיפוש + הוסף לקוח חדש). נפילה בטוחה ל-select אם המודול לא נטען.
+if (typeof custPickerHtml === 'function') {
+inp = custPickerHtml({ base: 'f_' + f.name, value: v, allowNew: f.allowNew !== false, placeholder: f.placeholder, form: true });
+} else {
+const _co = (cache.customers || []).map(r => ({ v: r.id, t: r.name }));
+inp = `<select id="f_${f.name}">` + (f.required ? '' : `<option value="">— ללא —</option>`) +
+_co.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.t)}</option>`).join('') + `</select>`;
+}
+}
 else inp = `<input id="f_${f.name}" type="${f.type || 'text'}" value="${esc(v)}"${dir} ${f.type === 'number' ? 'step="any" dir="ltr"' : ''}>`;
 return `<div class="field ${f.half ? 'half' : ''}"><label>${f.label}${f.required ? ' *' : ''}</label>${inp}</div>`;
 }).join('');
@@ -164,6 +174,7 @@ const el = document.getElementById('f_' + f.name);
 let v = f.type === 'checkbox' ? el.checked : el.value;
 if (f.type === 'number') v = v === '' ? null : Number(v);
 if (f.type === 'select') v = v === '' ? null : (isNaN(Number(v)) ? v : Number(v));
+if (f.type === 'customer') v = v === '' ? null : Number(v);
 if (f.type === 'date') v = v === '' ? null : v;
 if (f.type === 'time') v = v === '' ? null : v;
 if (typeof v === 'string') v = v.trim();

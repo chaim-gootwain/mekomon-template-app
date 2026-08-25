@@ -69,7 +69,7 @@ ${left <= 1 && r.active ? '<span class="pill red">אחרון!</span>' : ''}
 };
 
 const CONTRACT_FIELDS = [
-{ name: 'customer_id', label: 'לקוח', type: 'select', options: 'customers', required: true },
+{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true },
 { name: 'agent_id', label: 'סוכן', type: 'select', options: 'agents' },
 { name: 'price_item_id', label: 'סוג מודעה (מהמחירון)', type: 'select', options: 'priceList', required: true },
 { name: 'total_inserts', label: 'מספר פרסומים בחבילה', type: 'number', required: true, default: 13 },

@@ -121,7 +121,7 @@ document.getElementById('viewBack').classList.add('open');
 
 function chargeAdd() {
 openForm('חיוב ידני', [
-{ name: 'customer_id', label: 'לקוח', type: 'select', options: 'customers', required: true },
+{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true },
 { name: 'amount', label: 'סכום (₪)', type: 'number', required: true },
 { name: 'description', label: 'תיאור', required: true },
 { name: 'due_date', label: 'לתשלום עד', type: 'date' },

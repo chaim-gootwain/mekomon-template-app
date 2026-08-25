@@ -186,12 +186,11 @@ ${_repData.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td>
 
 /* ---------- היסטוריית לקוח ---------- */
 async function report_customer() {
-const options = cache.customers.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
 document.getElementById('reportArea').innerHTML = `
 <div class="card-pad">
 <b>היסטוריית לקוח</b>
-<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
-<select id="repCust" style="width:auto;min-width:220px">${options}</select>
+<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
+<div style="min-width:240px">${custPickerHtml({ base: 'repCust', allowNew: false, placeholder: 'הקלד שם לקוח לחיפוש…' })}</div>
 <button class="btn btn-sm" onclick="reportCustomerRun()">הצגה</button>
 </div>
 <div id="repTable" class="table-wrap" style="margin-top:14px"></div>
@@ -200,6 +199,7 @@ document.getElementById('reportArea').innerHTML = `
 
 async function reportCustomerRun() {
 const id = Number(document.getElementById('repCust').value);
+if (!id) { toast('בחר לקוח מהחיפוש', true); return; }
 const [ads, charges, payments] = await Promise.all([
 run(db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false })),
 run(db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false })),
