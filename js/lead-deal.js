@@ -9,7 +9,7 @@ lead-deal.js — קליטת פרטי עסקה בסיום המרת ליד ללק�
 
 'use strict';
 
-const LD_CADENCE = [['every', 'כל גיליון'], ['monthly', 'חודשי'], ['bimonthly', 'דו-שבועי'], ['selected', 'תאריכים נבחרים']];
+const LD_CADENCE = [['every', 'כל גיליון'], ['monthly', 'חודשי'], ['bimonthly', 'דו-שבועי'], ['alt', 'מסורג — גיליון כן, גיליון לא'], ['selected', 'תאריכים נבחרים']];
 
 function _ldealIssues() {
   return (typeof cache !== 'undefined' ? (cache.issues || []) : []).slice()

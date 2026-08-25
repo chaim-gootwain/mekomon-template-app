@@ -14,6 +14,7 @@ const SUB_CADENCES = [
 { v: 'every', t: 'כל גיליון (רצף)' },
 { v: 'monthly', t: 'פעם בחודש' },
 { v: 'bimonthly', t: 'פעם בחודשיים' },
+{ v: 'alt', t: 'מסורג — גיליון כן, גיליון לא' },
 { v: 'selected', t: 'תאריכים נבחרים' },
 ];
 function _subCadenceHe(v) { const x = SUB_CADENCES.find(c => c.v === v); return x ? x.t : 'כל גיליון (רצף)'; }
@@ -211,6 +212,18 @@ subContractModal(c || { id });
 function subIssueMatches(issue, contract, allIssues) {
 const cad = contract.cadence || 'every';
 if (cad === 'every') return true;
+if (cad === 'alt') {
+// מסורג — "גיליון כן, גיליון לא": כל גיליון שני לפי רצף הגיליונות, החל מתאריך ההתחלה.
+// הגיליון הראשון מתאריך ההתחלה = "כן" (idx 0), הבא = "לא", וכן הלאה — תמיד בדיוק חצי מהגיליונות.
+const _edA = (i) => (i.print_date || i.publish_date) || '';
+const startA = contract.start_date || _edA(issue);
+const seqA = (allIssues || [])
+.filter(i => _edA(i) && _edA(i) >= startA)
+.sort((a, b) => _edA(a).localeCompare(_edA(b)));
+const idxA = seqA.findIndex(i => i.id === issue.id);
+if (idxA < 0) return false; // גיליון שלפני תאריך ההתחלה — לא נכנס
+return idxA % 2 === 0;
+}
 if (cad === 'selected') {
 const dates = Array.isArray(contract.selected_dates) ? contract.selected_dates : [];
 return dates.includes(issue.publish_date) || dates.includes(issue.print_date);
@@ -323,11 +336,14 @@ if (typeof openFlatplan === 'function') openFlatplan(target.id);
 
 /* ---------- תזכורת שבועית: מודעות מנוי להכנסה לגיליון הקרוב ---------- */
 async function subDueForUpcoming() {
+// כל הגיליונות (כולל שיצאו/נסגרו) — נחוץ לחישוב תקין של רצף המסורג בחוזים ותיקים
 const issues = await run(db.from('issues').select('id,issue_number,publish_date,print_date,status')
-.not('status', 'in', '("published","closed")').order('publish_date'));
+.order('publish_date'));
 if (!issues.length) return { issue: null, items: [] };
+const openIssues = issues.filter(i => !['published', 'closed'].includes(i.status));
+if (!openIssues.length) return { issue: null, items: [] };
 const T = today();
-const upcoming = issues.find(i => (i.publish_date || '') >= T) || issues[0];
+const upcoming = openIssues.find(i => (i.publish_date || '') >= T) || openIssues[0];
 const contracts = await run(db.from('contracts').select('*').eq('active', true));
 const existing = await run(db.from('ads').select('contract_id').eq('issue_id', upcoming.id).not('contract_id', 'is', null));
 const existingSet = new Set(existing.map(a => a.contract_id));

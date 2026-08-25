@@ -67,6 +67,7 @@ function dealNew(customerId) {
         <option value="every">כל גיליון (רצף)</option>
         <option value="monthly">פעם בחודש</option>
         <option value="bimonthly">פעם בחודשיים</option>
+        <option value="alt">מסורג — גיליון כן, גיליון לא</option>
         <option value="selected">גיליונות / תאריכים שמורים</option>
       </select></div>
     <div id="dlIssuesBox" class="hidden" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px;background:#fbfdff;max-height:190px;overflow:auto">
