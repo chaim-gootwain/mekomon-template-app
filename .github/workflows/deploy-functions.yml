@@ -1,0 +1,71 @@
+# .github/workflows/deploy-functions.yml
+# ------------------------------------------------------------------------------
+# פריסה אוטומטית של כל ה-Edge Functions למופע (Supabase) — סוגר את הפער שבו
+# פונקציות לא הסתנכרנו ונשארו ידניות בכל מופע.
+#
+# הקובץ הזה יושב בכל ריפו-מופע (imanuel-sheli, emtzash, ...). כשמתמזג עדכון
+# שנוגע ב-supabase/functions/** — או כשמגיע dispatch מהתבנית ("template-updated"),
+# או בהרצה ידנית — הוא פורס את *כל* הפונקציות ל-Supabase של אותו מופע.
+#
+# מה שצריך פעם אחת בכל ריפו-מופע (Settings → Secrets and variables → Actions):
+#   Secret  SUPABASE_ACCESS_TOKEN  = טוקן אישי מ- https://supabase.com/dashboard/account/tokens
+#   Variable SUPABASE_PROJECT_REF  = מזהה הפרויקט (למשל imanuel = hkbstegusfdjtkjxkmjc)
+#
+# הערה חשובה על verify_jwt: פריסת CLI קובעת verify_jwt לפי supabase/config.toml.
+# ודא ש-config.toml משקף את ההגדרה הנכונה של כל פונקציה (ראה supabase/config.toml).
+# ------------------------------------------------------------------------------
+name: Deploy Edge Functions to Supabase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+      - ".github/workflows/deploy-functions.yml"
+  repository_dispatch:
+    types: [template-updated]      # נשלח ע"י notify-instances שבתבנית אחרי סנכרון
+  workflow_dispatch:                # הרצה ידנית מדף ה-Actions
+
+concurrency:
+  group: deploy-functions-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # רץ רק בריפו-מופע שבו הוגדר SUPABASE_PROJECT_REF. בתבנית (אין var) ה-job
+    # פשוט מדולג (skipped) ולא נכשל — כך הקובץ יכול לחיות בתבנית ולהגיע למופעים
+    # חדשים שנוצרים ממנה, בלי להרעיש שם.
+    if: ${{ vars.SUPABASE_PROJECT_REF != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Sanity check config
+        env:
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          echo "Deploying functions to project: $PROJECT_REF"
+          ls supabase/functions
+
+      - name: Deploy all Edge Functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          # פריסת כל הפונקציות שקיימות בריפו. call-dial לא נוגעים בו:
+          # אם הוא קיים בריפו הוא ייפרס כרגיל (קוד זהה), אבל אנחנו לא משנים אותו.
+          supabase functions deploy --project-ref "$PROJECT_REF"
+
+      - name: Done
+        run: echo "✅ נפרסו כל ה-Edge Functions ל-$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}

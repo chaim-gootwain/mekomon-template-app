@@ -1,0 +1,51 @@
+# supabase/config.toml — הגדרות פרויקט לפריסת CLI של ה-Edge Functions
+# ------------------------------------------------------------------------------
+# חשוב: כשפורסים פונקציה דרך ה-CLI, ערך verify_jwt נקבע מכאן. אם פונקציה
+# צריכה verify_jwt=false (מאמתת בעצמה / cron / webhook ציבורי) והיא לא מופיעה
+# כאן עם false — הפריסה תדליק לה אימות JWT ותשבור אותה. לכן חובה שהקובץ הזה
+# ישקף את ההגדרה הנכונה של כל פונקציה.
+#
+# הערכים למטה אומתו מול הדשבורד של עמנואל (hkbstegusfdjtkjxkmjc) ב-26.08.2026:
+#   כל הפונקציות verify_jwt=true, פרט ל-send-email (false — מאמתת בעצמה ב-getUser).
+#   send-issue דווקא true (למרות שיש לה x-cron-secret).
+#
+# call-dial ו-call-analysis (טלפוניה, Verify JWT=false) לא מנוהלות כאן ולא
+# נכללות בתבנית — הן פר-לקוח בלבד. אם מופע כולל אותן בריפו שלו, יש להוסיף
+# להן כאן רשומה עם verify_jwt=false לפני פריסה, או להחריג אותן מהפריסה.
+# ------------------------------------------------------------------------------
+
+project_id = "mekomon"     # שם לוגי בלבד; ה-project-ref האמיתי מגיע מ- --project-ref ב-workflow
+
+[functions.admin-users]
+verify_jwt = true
+
+[functions.alerts-engine]
+verify_jwt = true
+
+[functions.green-invoice-doc]
+verify_jwt = true
+
+[functions.issue-invoice]
+verify_jwt = true
+
+[functions.match-customer]
+verify_jwt = true
+
+[functions.parse-invoice-text]
+verify_jwt = true
+
+[functions.send-clip]
+verify_jwt = true
+
+[functions.send-clip-month]
+verify_jwt = true
+
+[functions.send-email]
+# מאמתת בעצמה (admin.auth.getUser) — חייבת verify_jwt=false, אחרת השער חוסם.
+verify_jwt = false
+
+[functions.send-issue]
+verify_jwt = true
+
+[functions.ezcount-doc]
+verify_jwt = true
