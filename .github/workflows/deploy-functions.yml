@@ -1,30 +1,27 @@
 # .github/workflows/deploy-functions.yml
 # ------------------------------------------------------------------------------
-# פריסה אוטומטית של כל ה-Edge Functions למופע (Supabase) — סוגר את הפער שבו
-# פונקציות לא הסתנכרנו ונשארו ידניות בכל מופע.
+# פריסה אוטומטית של כל ה-Edge Functions למופע (Supabase) — ישירות מהתבנית,
+# שהיא מקור האמת. סוגר את הפער שבו פונקציות לא הסתנכרנו ונשארו ידניות.
 #
-# הקובץ הזה יושב בכל ריפו-מופע (imanuel-sheli, emtzash, ...). כשמתמזג עדכון
-# שנוגע ב-supabase/functions/** — או כשמגיע dispatch מהתבנית ("template-updated"),
-# או בהרצה ידנית — הוא פורס את *כל* הפונקציות ל-Supabase של אותו מופע.
+# איך זה עובד: כשמתעדכנת התבנית, notify-instances שולח repository_dispatch
+# מסוג template-updated לכל מופע. ה-workflow הזה (שיושב בכל ריפו-מופע) מושך את
+# הפונקציות *מהתבנית*, מחליף בהן את הטוקנים בערכים של המופע (מ-vars), ופורס
+# ל-Supabase של אותו מופע. כך אין צורך לסנכרן את הפונקציות לתוך ריפו-המופע,
+# ואין נגיעה בסנכרון צד-הלקוח.
 #
 # מה שצריך פעם אחת בכל ריפו-מופע (Settings → Secrets and variables → Actions):
-#   Secret  SUPABASE_ACCESS_TOKEN  = טוקן אישי מ- https://supabase.com/dashboard/account/tokens
-#   Variable SUPABASE_PROJECT_REF  = מזהה הפרויקט (למשל imanuel = hkbstegusfdjtkjxkmjc)
+#   Secret   SUPABASE_ACCESS_TOKEN = טוקן מ- https://supabase.com/dashboard/account/tokens
+#   Variable SUPABASE_PROJECT_REF  = מזהה הפרויקט (עמנואל = hkbstegusfdjtkjxkmjc)
+#   Variables PAPER_NAME, PAPER_EMAIL = שם העיתון והמייל (כבר קיימים לסנכרון צד-הלקוח)
 #
-# הערה חשובה על verify_jwt: פריסת CLI קובעת verify_jwt לפי supabase/config.toml.
-# ודא ש-config.toml משקף את ההגדרה הנכונה של כל פונקציה (ראה supabase/config.toml).
+# verify_jwt נקבע מ-supabase/config.toml שבתבנית (send-email=false, השאר true).
+# call-dial לא בתבנית ולכן לא נפרסת/נגעת כאן — נשארת פר-לקוח.
 # ------------------------------------------------------------------------------
 name: Deploy Edge Functions to Supabase
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "supabase/functions/**"
-      - "supabase/config.toml"
-      - ".github/workflows/deploy-functions.yml"
   repository_dispatch:
-    types: [template-updated]      # נשלח ע"י notify-instances שבתבנית אחרי סנכרון
+    types: [template-updated]      # נשלח ע"י notify-instances שבתבנית אחרי עדכון
   workflow_dispatch:                # הרצה ידנית מדף ה-Actions
 
 concurrency:
@@ -34,38 +31,52 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  TEMPLATE_REPO: https://github.com/chaim-gootwain/mekomon-template-app
+
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    # רץ רק בריפו-מופע שבו הוגדר SUPABASE_PROJECT_REF. בתבנית (אין var) ה-job
-    # פשוט מדולג (skipped) ולא נכשל — כך הקובץ יכול לחיות בתבנית ולהגיע למופעים
-    # חדשים שנוצרים ממנה, בלי להרעיש שם.
+    # רץ רק בריפו-מופע שבו הוגדר SUPABASE_PROJECT_REF. בתבנית (אין var) מדולג.
     if: ${{ vars.SUPABASE_PROJECT_REF != '' }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Fetch functions from template (source of truth)
+        run: |
+          git clone --depth 1 "$TEMPLATE_REPO" tpl
+          echo "── functions in template ──"
+          ls tpl/supabase/functions
+
+      - name: Substitute per-instance values into function source
+        env:
+          PAPER_NAME: ${{ vars.PAPER_NAME }}
+          PAPER_EMAIL: ${{ vars.PAPER_EMAIL }}
+        run: |
+          cd tpl
+          # החלפת הטוקנים בערכי המופע (מ-vars של הריפו). מפריד sed = | כדי לא
+          # להתנגש עם תווים בערכים:
+          grep -rl '@@PAPER_' supabase/functions | while read -r f; do
+            sed -i "s|@@PAPER_NAME@@|${PAPER_NAME}|g; s|@@PAPER_EMAIL@@|${PAPER_EMAIL}|g" "$f"
+          done
+          # שסתום ביטחון: לעולם לא לפרוס קוד עם טוקן לא-מוחלף.
+          if grep -rq '@@PAPER_' supabase/functions; then
+            echo "::error::נשארו טוקנים לא-מוחלפים — ודא ש-PAPER_NAME ו-PAPER_EMAIL מוגדרים כ-Variables בריפו."
+            grep -rl '@@PAPER_' supabase/functions
+            exit 1
+          fi
 
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      - name: Sanity check config
-        env:
-          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-        run: |
-          echo "Deploying functions to project: $PROJECT_REF"
-          ls supabase/functions
-
       - name: Deploy all Edge Functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
-          # פריסת כל הפונקציות שקיימות בריפו. call-dial לא נוגעים בו:
-          # אם הוא קיים בריפו הוא ייפרס כרגיל (קוד זהה), אבל אנחנו לא משנים אותו.
+          cd tpl
+          # פורס את כל הפונקציות שבתבנית ל-Supabase של המופע. verify_jwt מ-config.toml.
           supabase functions deploy --project-ref "$PROJECT_REF"
 
       - name: Done
-        run: echo "✅ נפרסו כל ה-Edge Functions ל-$SUPABASE_PROJECT_REF"
-        env:
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: echo "✅ נפרסו כל ה-Edge Functions מהתבנית ל-${{ vars.SUPABASE_PROJECT_REF }}"
