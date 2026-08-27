@@ -1,13 +1,13 @@
 /* ============================================================
-invoice-chat.js — צ'אט הפקת חשבוניות ממלל חופשי (iCount)
+invoice-chat.js — צ'אט הפקת חשבוניות ממלל חופשי (EZcount)
 ------------------------------------------------------------
 - כותבים משפט חופשי → פענוח (Edge: parse-invoice-text, Claude בצד השרת)
 - התאמת לקוח fuzzy (Edge: match-customer) — לעולם לא מנחשים
 - כרטיס תצוגה מקדימה עם עריכה inline וחישוב חי של מע"מ וסה"כ
-- הפקה ב-iCount (Edge: issue-invoice) רק אחרי [אשר והפק]
+- הפקה ב-EZcount (Edge: ezcount-doc) רק אחרי [אשר והפק]
 - כל בקשה נרשמת בטבלת invoice_requests (draft/issued/cancelled/error)
 - מאחורי דגל: settings.invoice_chat_enabled ('0' כברירת מחדל) —
-  מדליקים רק במופע שמוגדרים בו סודות iCount. מוזרק לתפריט ולהגדרות
+  מדליקים רק במופע שמוגדרים בו סודות EZcount. מוזרק לתפריט ולהגדרות
   בלי לגעת בקוד הקיים (עטיפות refreshCache ו-Pages.settings).
 ============================================================ */
 
@@ -99,7 +99,7 @@ Pages.invchat = {
     invChatEnsureStyles();
     icResetState();
     if (!invoiceChatOn()) {
-      el.innerHTML = `<div class="empty">צ׳אט החשבוניות כבוי במופע הזה.<br>מנהל יכול להדליק אותו במסך הגדרות ← "צ׳אט חשבוניות (iCount)".</div>`;
+      el.innerHTML = `<div class="empty">צ׳אט החשבוניות כבוי במופע הזה.<br>מנהל יכול להדליק אותו במסך הגדרות ← "צ׳אט חשבוניות (EZcount)".</div>`;
       return;
     }
     el.innerHTML = `
