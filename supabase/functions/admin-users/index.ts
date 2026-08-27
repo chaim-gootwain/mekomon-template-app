@@ -1,69 +1,107 @@
 // admin-users — ניהול משתמשים ע"י מנהל (הזמנה במייל + מחיקה)
 // דורש service_role. מאמת שהקורא הוא admin פעיל לפני כל פעולה.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...cors, 'Content-Type': 'application/json' },
+    headers: {
+      ...cors,
+      'Content-Type': 'application/json'
+    }
   });
 }
-
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+Deno.serve(async (req)=>{
+  if (req.method === 'OPTIONS') return new Response('ok', {
+    headers: cors
+  });
   try {
-    const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-    const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    const ANON = Deno.env.get('SUPABASE_ANON_KEY');
-    const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
-
-    // אימות הקורא — חייב להיות admin פעיל
+    const url = Deno.env.get('SUPABASE_URL');
+    const anon = Deno.env.get('SUPABASE_ANON_KEY');
+    const svc = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    // 1) אימות הקורא — חייב להיות admin פעיל
     const authHeader = req.headers.get('Authorization') || '';
-    const caller = createClient(SUPABASE_URL, ANON, { global: { headers: { Authorization: authHeader } } });
-    const { data: { user }, error: uErr } = await caller.auth.getUser();
-    if (uErr || !user) return json({ error: 'לא מזוהה' }, 401);
-    const { data: prof } = await svc.from('profiles').select('role, active').eq('id', user.id).single();
-    if (!prof || prof.role !== 'admin' || prof.active === false) {
-      return json({ error: 'אין הרשאה — נדרש מנהל' }, 403);
-    }
-
-    const body = await req.json();
-    const action = body.action;
-
-    if (action === 'invite') {
-      const { email, full_name, phone, role, redirectTo } = body;
-      if (!email || !role) return json({ error: 'חסר אימייל או תפקיד' }, 400);
-      const { data: inv, error: iErr } = await svc.auth.admin.inviteUserByEmail(email, {
-        data: { full_name: full_name || '' },
-        redirectTo: redirectTo || undefined,
-      });
-      if (iErr) return json({ error: iErr.message }, 400);
-      const newId = inv?.user?.id;
-      if (newId) {
-        await svc.from('profiles').update({
-          full_name: full_name || '',
-          phone: phone || '',
-          role,
-        }).eq('id', newId);
+    const caller = createClient(url, anon, {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
       }
-      return json({ ok: true, id: newId });
+    });
+    const { data: uData, error: uErr } = await caller.auth.getUser();
+    if (uErr || !uData || !uData.user) return json({
+      error: 'לא מחובר'
+    }, 401);
+    const admin = createClient(url, svc);
+    const { data: prof } = await admin.from('profiles').select('role, active').eq('id', uData.user.id).single();
+    if (!prof || prof.role !== 'admin' || prof.active === false) return json({
+      error: 'אין הרשאה — מנהל בלבד'
+    }, 403);
+    const body = await req.json().catch(()=>({}));
+    const action = body.action;
+    // 2) הזמנת משתמש חדש במייל
+    if (action === 'invite') {
+      const email = String(body.email || '').trim().toLowerCase();
+      const full_name = String(body.full_name || '').trim();
+      const phone = String(body.phone || '').trim();
+      const role = String(body.role || 'pending');
+      if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({
+        error: 'מייל לא תקין'
+      }, 400);
+      const { data: inv, error: iErr } = await admin.auth.admin.inviteUserByEmail(email, {
+        data: {
+          full_name
+        },
+        redirectTo: body.redirectTo || undefined
+      });
+      if (iErr) return json({
+        error: iErr.message
+      }, 400);
+      // קביעת התפקיד + הפרטים בפרופיל (דורס את ברירת המחדל 'pending')
+      const uid = inv.user.id;
+      const { error: pErr } = await admin.from('profiles').upsert({
+        id: uid,
+        full_name,
+        phone,
+        role,
+        active: true
+      });
+      if (pErr) return json({
+        error: 'ההזמנה נשלחה אך נכשל עדכון התפקיד: ' + pErr.message
+      }, 400);
+      return json({
+        ok: true,
+        id: uid
+      });
     }
-
+    // 3) מחיקת משתמש לצמיתות
     if (action === 'delete') {
-      const { id } = body;
-      if (!id) return json({ error: 'חסר מזהה משתמש' }, 400);
-      const { error: dErr } = await svc.auth.admin.deleteUser(id);
-      if (dErr) return json({ error: dErr.message }, 400);
-      return json({ ok: true });
+      const id = String(body.id || '');
+      if (!id) return json({
+        error: 'חסר מזהה'
+      }, 400);
+      if (id === uData.user.id) return json({
+        error: 'אי אפשר למחוק את עצמך'
+      }, 400);
+      await admin.from('profiles').delete().eq('id', id);
+      const { error: dErr } = await admin.auth.admin.deleteUser(id);
+      if (dErr) return json({
+        error: dErr.message
+      }, 400);
+      return json({
+        ok: true
+      });
     }
-
-    return json({ error: 'פעולה לא מוכרת' }, 400);
+    return json({
+      error: 'פעולה לא מוכרת'
+    }, 400);
   } catch (e) {
-    return json({ error: (e && e.message) ? e.message : String(e) }, 500);
+    return json({
+      error: String(e && e.message || e)
+    }, 500);
   }
 });
