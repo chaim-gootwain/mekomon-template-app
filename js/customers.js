@@ -328,6 +328,7 @@ ${canWrite ? `<div class="m-actions" style="flex-wrap:wrap;margin-top:2px;gap:6p
 <button class="btn btn-sm" onclick="adAdd({customer_id:${id}})">➕ מודעה לגיליון</button>
 <button class="btn btn-sm" onclick="invIssueOrder(${id})">🧾 הפקת חשבונית</button>
 <button class="btn btn-sm" onclick="invIssueReceiptDirect(${id})">🧾 חשבונית מס קבלה</button>
+${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn btn-sm" onclick="ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn btn-sm btn-ghost" onclick="custToggleMore()">⋯ עוד</button>
 <button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
 </div>
