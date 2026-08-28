@@ -572,10 +572,10 @@ const st = document.createElement('style'); st.id = 'ccCardCss';
 st.textContent = `
 .cc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
 .cc-tsep{width:1px;height:24px;background:var(--line,#e5e7eb)}
-.cc-tbtn{width:42px;height:42px;border-radius:11px;border:1px solid var(--line,#e5e7eb);background:#fff;display:inline-grid;place-items:center;cursor:pointer;color:var(--brand,#2b3990);position:relative;padding:0;text-decoration:none;transition:background .15s,border-color .15s}
+.cc-tbtn{width:42px;height:42px;border-radius:11px;border:1px solid var(--line,#e5e7eb);background:#fff;display:inline-grid;place-items:center;cursor:pointer;color:var(--brand);position:relative;padding:0;text-decoration:none;transition:background .15s,border-color .15s}
 .cc-tbtn:hover{background:#eef0fb;border-color:#dfe3f5}
 .cc-tbtn svg{width:19px;height:19px}
-.cc-tbtn.cc-primary{background:var(--brand,#2b3990);border-color:var(--brand,#2b3990);color:#fff}
+.cc-tbtn.cc-primary{background:var(--brand);border-color:var(--brand);color:#fff}
 .cc-tbtn.cc-primary:hover{filter:brightness(.94)}
 .cc-tbtn.cc-danger{color:#dc2626}
 .cc-tbtn.cc-danger:hover{background:#fef2f2;border-color:#fde0e0}
