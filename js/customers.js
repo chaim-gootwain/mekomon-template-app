@@ -243,6 +243,7 @@ openPage('customers');
 
 /* --- כרטיס הלקוח: מרכז את כל המידע --- */
 async function openCustomerCard(id) {
+_ccEnsureCss();
 let c = _customers.find(x => x.id === id);
 if (!c) c = await run(db.from('customers').select('*').eq('id', id).single());
 const canWrite = ['admin', 'sales'].includes(profile.role);
@@ -306,8 +307,7 @@ ${(typeof custTagChips === 'function' ? custTagChips(c.tags) : '')}
 <div><label>סוכן</label><b>${esc(nameOf('agents', c.agent_id)) || '—'}</b></div>
 <div><label>תנאי תשלום</label><b>${PAY_TERMS[c.payment_terms]}</b></div>
 <div><label>לקוח מאז</label><b>${heDate(c.became_customer_at)}</b></div>
-${canMoney ? `<div><label>סה"כ חויב</label><b>${money(totalCharged)}</b></div>
-<div><label>יתרת חוב</label><b style="color:${debt > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(debt) || '₪0'}</b></div>` : ''}
+${canMoney ? `<div><label>סה"כ חויב</label><b>${money(totalCharged)}</b></div>` : ''}
 </div>
 
 ${canMoney ? `
@@ -324,24 +324,34 @@ ${nextIssue ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;
 ${churnRisk ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">⚠ <b>בסיכון נטישה</b> — לא פרסם ${churnGapCount} גיליונות ברצף</div>` : ''}
 ${overLimit ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">⛔ <b>חריגה ממסגרת אשראי</b> — חוב ${money(debt)} מתוך מסגרת ${money(creditLimit)}</div>` : ''}
 ` : ''}
-${canWrite ? `<div class="m-actions" style="flex-wrap:wrap;margin-top:2px;gap:6px">
-<button class="btn btn-sm" onclick="adAdd({customer_id:${id}})">➕ מודעה לגיליון</button>
-<button class="btn btn-sm" onclick="invIssueOrder(${id})">🧾 הפקת חשבונית</button>
-<button class="btn btn-sm" onclick="invIssueReceiptDirect(${id})">🧾 חשבונית מס קבלה</button>
-<button class="btn btn-sm btn-ghost" onclick="custToggleMore()">⋯ עוד</button>
-<button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
+${canWrite ? `<div class="cc-toolbar">
+<button class="cc-tbtn cc-primary" data-tip="מודעה לגיליון" aria-label="מודעה לגיליון" onclick="adAdd({customer_id:${id}})">${_ccIco('plus')}</button>
+<span class="cc-tsep"></span>
+<div class="cc-mwrap">
+<button class="cc-tbtn" data-tip="חשבונית ומסמכים" aria-label="חשבונית ומסמכים" onclick="ccMenu(event,'ccInvMenu')">${_ccIco('doc')}<span class="cc-cx"></span></button>
+<div id="ccInvMenu" class="cc-menu hidden">
+<button class="btn" onclick="ccMenuClose();invIssueOrder(${id})">🧾 הפקת חשבונית</button>
+<button class="btn" onclick="ccMenuClose();invIssueReceiptDirect(${id})">🧾 חשבונית מס קבלה${debt > 0 ? ' <span class="pill red" style="font-size:.66rem">חוב פתוח</span>' : ''}</button>
+<button class="btn" onclick="ccMenuClose();window.openQuoteForm ? openQuoteForm({customer_id:${id}, recipient_name:'${esc(c.name).replace(/'/g, '&#39;')}'}) : toast('בטעינה')">📝 הצעת מחיר</button>
+<button class="btn" onclick="ccMenuClose();dealNew(${id})">💼 עסקה חדשה</button>
+<div class="cc-msep"></div>
+<button id="csBtn" class="btn" onclick="ccMenuClose();customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
 </div>
-<div id="ccMoreMenu" class="hidden" style="border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:10px;margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;background:#fbfdff">
+</div>
+<div class="cc-mwrap">
+<button class="cc-tbtn" data-tip="עוד פעולות" aria-label="עוד פעולות" onclick="ccMenu(event,'ccMoreMenu')">${_ccIco('dots')}<span class="cc-cx"></span></button>
+<div id="ccMoreMenu" class="cc-menu hidden">
 ${phoneBtn(c.phone)}
-${(c.whatsapp || c.phone) ? `<a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(c.whatsapp || c.phone)}">💬 וואטסאפ</a>` : ''}
-<button class="btn btn-sm btn-ghost" onclick="customerEdit(${id})">✎ עריכה</button>
-<button class="btn btn-sm btn-ghost" onclick="customerAddNote(${id})">＋ הערה</button>
-<button class="btn btn-sm btn-ghost" onclick="dealNew(${id})">💼 עסקה חדשה</button>
-<button class="btn btn-sm btn-ghost" onclick="window.openQuoteForm ? openQuoteForm({customer_id:${id}, recipient_name:'${esc(c.name).replace(/'/g, '&#39;')}'}) : toast('בטעינה')">📝 הצעת מחיר</button>
-<button id="csBtn" class="btn btn-sm btn-ghost" onclick="customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
-<button class="btn btn-sm btn-ghost" onclick="customerStatusChange(${id})">🔄 שינוי סטטוס</button>
-<button class="btn btn-sm btn-ghost" onclick="custPortalShow()">🔗 קישור פורטל</button>
-${profile.role === 'admin' ? `<button class="btn btn-sm btn-danger-ghost" onclick="customerDelete(${id})">🗑 מחיקה</button>` : ''}
+${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(c.whatsapp || c.phone)}">💬 וואטסאפ</a>` : ''}
+<button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>
+<button class="btn" onclick="ccMenuClose();customerAddNote(${id})">＋ הוסף הערה</button>
+<button class="btn" onclick="ccMenuClose();customerStatusChange(${id})">🔄 שינוי סטטוס</button>
+<button class="btn" onclick="custPortalShow()">🔗 קישור פורטל</button>
+${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-danger-ghost" onclick="ccMenuClose();customerDelete(${id})">🗑 מחיקת לקוח</button>` : ''}
+</div>
+</div>
+<span style="flex:1"></span>
+<button class="cc-tbtn cc-danger" data-tip="סגירה" aria-label="סגירה" onclick="document.getElementById('viewBack').classList.remove('open')">${_ccIco('x')}</button>
 </div>
 <div id="ccPortalBox" class="hidden" style="margin-top:8px">
 <div style="display:flex;gap:8px">
@@ -541,6 +551,47 @@ openCustomerCard(id);
 function custToggleMore() { const m = document.getElementById('ccMoreMenu'); if (m) m.classList.toggle('hidden'); }
 function custToggleDetails(btn) { const g = document.getElementById('ccGrid'); if (!g) return; const open = g.classList.toggle('hidden') === false; if (btn) btn.textContent = open ? 'פחות פרטים ▲' : 'כל הפרטים ▾'; }
 function custPortalShow() { const b = document.getElementById('ccPortalBox'); if (b) { b.classList.toggle('hidden'); const inp = b.querySelector('input'); if (inp && !b.classList.contains('hidden')) inp.select(); } }
+
+/* ---- כרטיס לקוח: סרגל אייקונים אחיד + תפריטים נפתחים ---- */
+function _ccIco(n) {
+if (n === 'dots') return '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+const p = { plus: '<path d="M12 5v14M5 12h14"/>', doc: '<path d="M8 2h8l4 4v16H4V2h4Z"/><path d="M8 2v4h8"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>' };
+return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (p[n] || '') + '</svg>';
+}
+function ccMenuClose() { document.querySelectorAll('.cc-menu').forEach(x => x.classList.add('hidden')); }
+function ccMenu(ev, id) {
+if (ev) ev.stopPropagation();
+const m = document.getElementById(id); if (!m) return;
+const wasHidden = m.classList.contains('hidden');
+ccMenuClose();
+if (wasHidden) m.classList.remove('hidden');
+}
+function _ccEnsureCss() {
+if (document.getElementById('ccCardCss')) return;
+const st = document.createElement('style'); st.id = 'ccCardCss';
+st.textContent = `
+.cc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.cc-tsep{width:1px;height:24px;background:var(--line,#e5e7eb)}
+.cc-tbtn{width:42px;height:42px;border-radius:11px;border:1px solid var(--line,#e5e7eb);background:#fff;display:inline-grid;place-items:center;cursor:pointer;color:var(--brand);position:relative;padding:0;text-decoration:none;transition:background .15s,border-color .15s}
+.cc-tbtn:hover{background:#eef0fb;border-color:#dfe3f5}
+.cc-tbtn svg{width:19px;height:19px}
+.cc-tbtn.cc-primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.cc-tbtn.cc-primary:hover{filter:brightness(.94)}
+.cc-tbtn.cc-danger{color:#dc2626}
+.cc-tbtn.cc-danger:hover{background:#fef2f2;border-color:#fde0e0}
+.cc-tbtn.cc-wa{color:#12a150}
+.cc-tbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:#1e2340;color:#fff;font-size:11px;font-weight:600;white-space:nowrap;padding:3px 8px;border-radius:6px;pointer-events:none;z-index:60}
+.cc-cx{position:absolute;bottom:5px;inset-inline-start:6px;width:0;height:0;border-inline:3px solid transparent;border-top:4px solid currentColor;opacity:.5}
+.cc-mwrap{position:relative;display:inline-block}
+.cc-menu{position:absolute;top:calc(100% + 6px);inset-inline-start:0;z-index:30;min-width:220px;background:#fff;border:1px solid var(--line,#e5e7eb);border-radius:12px;box-shadow:0 10px 30px rgba(20,25,50,.16);padding:6px}
+.cc-menu .btn{display:flex!important;width:100%;justify-content:flex-start;align-items:center;gap:8px;border:none!important;background:none!important;box-shadow:none!important;border-radius:8px;padding:9px 11px!important;margin:0;font-size:.86rem;color:#1e2340;text-align:start}
+.cc-menu .btn:hover{background:#eef0fb!important}
+.cc-menu .btn-danger-ghost{color:#dc2626!important}
+.cc-menu .cc-msep{height:1px;background:var(--line,#eef0f5);margin:5px 4px}
+`;
+document.head.appendChild(st);
+document.addEventListener('click', e => { if (!e.target.closest('.cc-mwrap')) ccMenuClose(); });
+}
 
 /* כרטסת מאוחדת: חיובים + תשלומים כרונולוגית עם יתרה רצה */
 function _custLedgerHtml(charges, payments) {
