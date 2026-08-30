@@ -120,13 +120,14 @@ ${['admin', 'sales'].includes(profile.role) ? `<button class="btn btn-ghost" onc
 ${['admin', 'sales'].includes(profile.role) ? `<button class="btn btn-ghost" onclick="pdfImportOpen(294)">📥 ייבוא 294 מ-PDF</button>` : ''}
 </div>
 </div>
+${typeof hebHolidayBanner === 'function' ? hebHolidayBanner(_issues) : ''}
 <div class="card" id="issuesTable"></div>
 <div id="issuesTrends"></div>`;
 renderTable(document.getElementById('issuesTable'), _issues, [
 { h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>` },
-{ h: 'חלוקה (מוצ"ש)', f: r => heDate(r.publish_date) },
+{ h: 'חלוקה (מוצ"ש)', f: r => (typeof hebIssueDateCell === 'function' ? hebIssueDateCell(r.publish_date) : heDate(r.publish_date)) },
 { h: 'דפוס', f: r => heDate(r.print_date) },
-{ h: 'דדליין מודעות', f: r => heDateTime(r.ads_deadline) },
+{ h: 'דדליין מודעות', f: r => heDateTime(r.ads_deadline) + (typeof hebDeadlineWarn === 'function' ? hebDeadlineWarn(r.ads_deadline) : '') },
 { h: 'עמודים', f: r => r.pages_count },
 { h: 'סטטוס', f: r => pill('issue', r.status) + (((r.publish_date || '') < _t && !['closed', 'published'].includes(r.status)) ? ' <span title="עבר תאריך החלוקה והגיליון לא נסגר" style="color:#b91c1c">⚠ דורש טיפול</span>' : '') },
 { h: 'רווח', f: r => { if (!_canFin) return ''; const _rv = _revByIssue[r.id] || 0, _ct = _costByIssue[r.id] || 0; if (!_rv && !_ct) return '<span class="muted">—</span>'; const _p = _rv - _ct; return `<b style="color:${_p >= 0 ? 'var(--ok)' : 'var(--danger)'}" title="הכנסות ${money(_rv)} − עלויות ${money(_ct)} (נטו)">${money(_p)}</b>`; } },
@@ -786,4 +787,103 @@ async function archiveOpen(path) {
 const { data, error } = await db.storage.from('issues-archive').createSignedUrl(path, 600);
 if (error) { toast('שגיאה: ' + error.message, true); return; }
 window.open(data.signedUrl, '_blank');
+}
+
+/* ============================================================
+   לוח שנה עברי בתכנון גיליונות (פיצ'ר #18)
+   ------------------------------------------------------------
+   נשען על לוח השנה העברי המובנה בדפדפן (Intl, ca-hebrew) — בלי
+   שום ספרייה חיצונית. מזהה חגים ומועדים לפי התאריך העברי, מסמן
+   גיליונות סמוכים לחג ומתריע על דדליין שנופל על חג/ערב חג.
+   ============================================================ */
+
+const _HEB_HE = new Intl.DateTimeFormat('he-u-ca-hebrew', { day: 'numeric', month: 'long' });
+const _HEB_EN = new Intl.DateTimeFormat('en-u-ca-hebrew', { day: 'numeric', month: 'long' });
+
+function hebDateStr(d) {
+  try { return _HEB_HE.format(d instanceof Date ? d : new Date(d + 'T12:00:00')); } catch (e) { return ''; }
+}
+function _hebParts(d) {
+  try {
+    const parts = _HEB_EN.formatToParts(d instanceof Date ? d : new Date(d + 'T12:00:00'));
+    const get = t => (parts.find(p => p.type === t) || {}).value || '';
+    return { day: Number(get('day')), month: get('month') };
+  } catch (e) { return null; }
+}
+
+/* חגים ומועדים לפי תאריך עברי. 'Adar' תופס גם אדר ב' בשנה מעוברת. */
+function hebHolidayOn(d) {
+  const h = _hebParts(d); if (!h) return null;
+  const m = h.month, day = h.day;
+  const inM = (name, from, to) => m === name && day >= from && day <= (to || from);
+  if (inM('Elul', 29)) return 'ערב ראש השנה';
+  if (inM('Tishri', 1, 2)) return 'ראש השנה';
+  if (inM('Tishri', 9)) return 'ערב יום כיפור';
+  if (inM('Tishri', 10)) return 'יום כיפור';
+  if (inM('Tishri', 14)) return 'ערב סוכות';
+  if (inM('Tishri', 15, 21)) return day === 21 ? 'הושענא רבה' : 'סוכות';
+  if (inM('Tishri', 22)) return 'שמחת תורה';
+  if (inM('Kislev', 25, 30) || inM('Tevet', 1, 2)) return 'חנוכה';
+  if (inM('Shevat', 15)) return 'ט"ו בשבט';
+  if ((m === 'Adar' || m === 'Adar II') && day === 13) return 'תענית אסתר';
+  if ((m === 'Adar' || m === 'Adar II') && day === 14) return 'פורים';
+  if ((m === 'Adar' || m === 'Adar II') && day === 15) return 'שושן פורים';
+  if (inM('Nisan', 14)) return 'ערב פסח';
+  if (inM('Nisan', 15, 21)) return day === 21 ? 'שביעי של פסח' : 'פסח';
+  if (inM('Iyar', 18)) return 'ל"ג בעומר';
+  if (inM('Sivan', 5)) return 'ערב שבועות';
+  if (inM('Sivan', 6)) return 'שבועות';
+  if (inM('Av', 9)) return 'תשעה באב';
+  if (inM('Av', 15)) return 'ט"ו באב';
+  return null;
+}
+
+/* החג הקרוב בטווח ±days סביב תאריך (לסימון "גיליון סמוך לחג") */
+function hebHolidayNear(dateStr, days) {
+  if (!dateStr) return null;
+  const base = new Date(dateStr + 'T12:00:00');
+  if (isNaN(base)) return null;
+  const span = days == null ? 3 : days;
+  for (let off = 0; off <= span; off++) {
+    for (const sign of (off === 0 ? [0] : [-1, 1])) {
+      const d = new Date(base); d.setDate(d.getDate() + off * (sign || 1));
+      const name = hebHolidayOn(d);
+      if (name) return { name, offset: off * (sign || 1) };
+    }
+  }
+  return null;
+}
+
+/* תא תאריך עם התאריך העברי + תגית חג */
+function hebIssueDateCell(dateStr) {
+  if (!dateStr) return '—';
+  const hol = hebHolidayNear(dateStr, 3);
+  return heDate(dateStr) +
+    `<div style="font-size:.72rem;color:var(--muted,#6b7280)">${esc(hebDateStr(dateStr))}</div>` +
+    (hol ? `<span class="pill gold" style="font-size:.68rem" title="${hol.offset === 0 ? 'ביום החלוקה' : Math.abs(hol.offset) + ' ימים ' + (hol.offset > 0 ? 'אחרי' : 'לפני')}">🕎 ${esc(hol.name)}</span>` : '');
+}
+
+/* אזהרת דדליין שנופל על חג/ערב חג — הצעה להקדים */
+function hebDeadlineWarn(deadline) {
+  if (!deadline) return '';
+  const dOnly = String(deadline).slice(0, 10);
+  const hol = hebHolidayOn(dOnly);
+  if (!hol) return '';
+  return ` <span style="color:#b45309;font-weight:700" title="הדדליין נופל על ${esc(hol)} — שקול להקדים">⚠ ${esc(hol)}</span>`;
+}
+
+/* באנר גיליונות-חג קרובים — לראש עמוד הגיליונות */
+function hebHolidayBanner(issues) {
+  try {
+    const T = today();
+    const soon = (issues || []).filter(i => (i.publish_date || '') >= T && !['closed', 'published'].includes(i.status))
+      .map(i => ({ i, hol: hebHolidayNear(i.publish_date, 3) }))
+      .filter(x => x.hol).slice(0, 4);
+    if (!soon.length) return '';
+    return `<div class="card card-pad" style="border-right:4px solid #b45309;margin-bottom:14px">
+      <b style="color:#b45309">🕎 גיליונות חג קרובים:</b>
+      <span style="font-size:.9rem"> ${soon.map(x => `גיליון ${x.i.issue_number} — ${esc(x.hol.name)}${hebHolidayOn(String(x.i.ads_deadline || '').slice(0, 10)) ? ' (הדדליין על החג! ⚠)' : ''}`).join(' · ')}</span>
+      <span class="muted" style="font-size:.8rem"> — שקול להקדים דדליינים ולתגבר מכירות.</span>
+    </div>`;
+  } catch (e) { return ''; }
 }
