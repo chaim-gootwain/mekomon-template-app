@@ -124,7 +124,7 @@ ${typeof hebHolidayBanner === 'function' ? hebHolidayBanner(_issues) : ''}
 <div class="card" id="issuesTable"></div>
 <div id="issuesTrends"></div>`;
 renderTable(document.getElementById('issuesTable'), _issues, [
-{ h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>` },
+{ h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>${typeof issueTypeBadge === 'function' ? issueTypeBadge(r.issue_type) : ''}` },
 { h: 'חלוקה (מוצ"ש)', f: r => (typeof hebIssueDateCell === 'function' ? hebIssueDateCell(r.publish_date) : heDate(r.publish_date)) },
 { h: 'דפוס', f: r => heDate(r.print_date) },
 { h: 'דדליין מודעות', f: r => heDateTime(r.ads_deadline) + (typeof hebDeadlineWarn === 'function' ? hebDeadlineWarn(r.ads_deadline) : '') },
@@ -554,7 +554,7 @@ rows += `<tr><td style="font-weight:700;white-space:nowrap">עמוד ${p}</td><t
 const html = `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>פלטפלן גיליון ${_fpIssue.issue_number}</title>
 <style>body{font-family:Arial,Heebo,sans-serif;padding:22px;color:#111}h2{margin:0 0 4px}.sub{color:#555;font-size:13px;margin-bottom:10px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #cbd5e1;padding:6px 9px;font-size:13px;text-align:right;vertical-align:top}th{background:#f1f5f9}</style></head>
 <body><h2>פלטפלן — גיליון ${_fpIssue.issue_number}</h2>
-<div class="sub">חלוקה: ${heDate(_fpIssue.publish_date)} · ${_fpIssue.pages_count} עמודים</div>
+<div class="sub">חלוקה: ${heDate(_fpIssue.publish_date)} · ${_fpIssue.pages_count} עמודים${typeof issueTypeBadge === 'function' ? issueTypeBadge(_fpIssue.issue_type) : ''}</div>
 <table><thead><tr><th style="width:70px">עמוד</th><th style="width:55px">מילוי</th><th>תוכן</th></tr></thead><tbody>${rows}</tbody></table>
 <scr` + `ipt>window.onload=function(){setTimeout(function(){window.print()},250)}</scr` + `ipt></body></html>`;
 const w = window.open('', '_blank');
@@ -663,6 +663,8 @@ function issueStatusChange() {
 openForm('סטטוס גיליון ' + _fpIssue.issue_number, [
 { name: 'status', label: 'סטטוס', type: 'select', required: true,
 options: Object.entries(STATUS.issue).map(([v, t]) => ({ v, t: t[0] })) },
+{ name: 'issue_type', label: 'סוג גיליון', type: 'select', default: 'regular',
+options: [{ v: 'regular', t: 'רגיל' }, { v: 'vacation', t: 'נופש' }, { v: 'extra', t: 'עלון נוסף' }] },
 { name: 'pages_count', label: 'מספר עמודים', type: 'number', required: true },
 { name: 'print_qty', label: 'כמות הדפסה', type: 'number' },
 { name: 'notes', label: 'הערות', type: 'textarea' },
@@ -911,4 +913,55 @@ async function archivePublicToggle(on) {
   cache.settings.public_archive_enabled = on ? '1' : '0';
   toast(on ? '🌍 הארכיון הציבורי הופעל' : 'הארכיון הציבורי כובה — הדף והקבצים חסומים');
   openPage('archive');
+}
+
+/* ============================================================
+   סוגי גיליון מיוחדים (פיצ'ר #21)
+   ------------------------------------------------------------
+   רגיל / נופש / עלון נוסף. משפיע על: תצוגה בתכנון (תגית), סימון
+   בשורת החיוב, והצעת המחיר ממחירון בהכנסת מודעה (מכפיל אחוז
+   פר סוג, ברירת מחדל 100% = ללא שינוי). שום מחיר קיים לא משתנה.
+   ============================================================ */
+
+const ISSUE_TYPE_HE = { regular: 'רגיל', vacation: 'נופש', extra: 'עלון נוסף' };
+
+function issueTypeBadge(t) {
+  if (!t || t === 'regular') return '';
+  return ` <span class="pill ${t === 'vacation' ? 'gold' : 'blue'}" style="font-size:.7rem">${ISSUE_TYPE_HE[t] || t}</span>`;
+}
+
+/* מכפיל התמחור של סוג הגיליון (אחוז; 100 = ללא שינוי) */
+function issueTypePct(t) {
+  if (!t || t === 'regular') return 100;
+  const v = Number((cache.settings || {})['issue_type_pct_' + t]);
+  return (Number.isFinite(v) && v > 0) ? v : 100;
+}
+
+/* כרטיס הגדרות — מכפילי המחיר לסוגי הגיליון (מנהל) */
+function issueTypesCard() {
+  const s = cache.settings || {};
+  const val = k => { const v = Number(s[k]); return (Number.isFinite(v) && v > 0) ? v : 100; };
+  return `
+<div class="card card-pad">
+<b>סוגי גיליון מיוחדים 🗞️</b>
+<p class="muted" style="font-size:.82rem">סוג הגיליון נקבע בפלטפלן (כפתור הסטטוס). המכפיל משפיע רק על הצעת המחיר ממחירון בהכנסת מודעה חדשה לגיליון מהסוג — 100% = ללא שינוי. מחירים קיימים לא משתנים.</p>
+<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+<span class="field" style="margin:0">גיליון נופש — % מהמחירון:
+<input id="setItpVac" type="number" min="1" value="${val('issue_type_pct_vacation')}" dir="ltr" style="width:80px"></span>
+<span class="field" style="margin:0">עלון נוסף — % מהמחירון:
+<input id="setItpExt" type="number" min="1" value="${val('issue_type_pct_extra')}" dir="ltr" style="width:80px"></span>
+<button class="btn btn-sm" onclick="issueTypesSave()">שמירה</button>
+</div>
+</div>`;
+}
+
+async function issueTypesSave() {
+  const vac = Number(document.getElementById('setItpVac')?.value);
+  const ext = Number(document.getElementById('setItpExt')?.value);
+  if (!(vac > 0) || !(ext > 0)) { toast('אחוז לא תקין', true); return; }
+  await run(db.from('settings').upsert({ key: 'issue_type_pct_vacation', value: String(Math.round(vac)) }));
+  await run(db.from('settings').upsert({ key: 'issue_type_pct_extra', value: String(Math.round(ext)) }));
+  cache.settings.issue_type_pct_vacation = String(Math.round(vac));
+  cache.settings.issue_type_pct_extra = String(Math.round(ext));
+  toast('מכפילי סוגי הגיליון נשמרו');
 }

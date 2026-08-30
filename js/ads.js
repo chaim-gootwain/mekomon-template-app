@@ -105,6 +105,15 @@ if (typeof checkCustomerStatusGate === 'function') { const _okS = await checkCus
 if (rec.price == null && rec.price_item_id) {
 const item = cache.priceList.find(p => p.id === rec.price_item_id);
 rec.price = item ? Number(item.price) : 0;
+// סוג גיליון מיוחד (#21): הצעת המחיר ממחירון מוכפלת באחוז הסוג — גלוי למשתמש
+if (rec.issue_id && typeof issueTypePct === 'function') {
+const _iss = (cache.issues || []).find(i => i.id === rec.issue_id);
+const _pct = _iss ? issueTypePct(_iss.issue_type) : 100;
+if (_pct !== 100 && rec.price > 0) {
+rec.price = Math.round(rec.price * _pct / 100);
+toast(`מחיר לפי גיליון ${(typeof ISSUE_TYPE_HE !== 'undefined' && ISSUE_TYPE_HE[_iss.issue_type]) || 'מיוחד'} — ${_pct}% מהמחירון`);
+}
+}
 }
 rec.price = rec.price || 0;
 if ((!rec.discount || Number(rec.discount) === 0) && typeof custFixedDiscountAmount === 'function') rec.discount = custFixedDiscountAmount(rec.customer_id, rec.price);

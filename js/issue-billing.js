@@ -24,7 +24,10 @@ function _ibItems(ads, issue) {
     price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)),
   })).filter(it => it.price > 0);
   if (!adLines.length) return [];
-  return [{ details: 'גיליון ' + num + ' — ' + _ibIssueDate(issue), amount: 1, price: 0 }, ...adLines];
+  // סוג גיליון מיוחד (#21) — מסומן בשורת הכותרת של החשבונית
+  const typeTag = (issue.issue_type && issue.issue_type !== 'regular' && typeof ISSUE_TYPE_HE !== 'undefined')
+    ? ' (' + (ISSUE_TYPE_HE[issue.issue_type] || issue.issue_type) + ')' : '';
+  return [{ details: 'גיליון ' + num + typeTag + ' — ' + _ibIssueDate(issue), amount: 1, price: 0 }, ...adLines];
 }
 function _ibDocKind(customerId) {
   const c = (cache.customers || []).find(x => x.id === customerId) || {};
