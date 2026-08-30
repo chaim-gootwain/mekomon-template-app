@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>@@PAPER_NAME@@ — ארכיון גיליונות</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ארכיון הגיליונות הציבורי — אותה שפה עיצובית כמו הפורטל */
+:root { --brand:@@COLOR_BRAND@@; --brand-dark:@@COLOR_DARK@@; --bg:@@COLOR_BG@@; --line:#dfe2f0; --muted:#64748b; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Heebo','Segoe UI',Arial,sans-serif; background:var(--bg); color:#1c2438; min-height:100vh; }
+.top { background:var(--brand-dark); color:#fff; padding:22px 16px; text-align:center; }
+.top .logo { font-size:1.6rem; font-weight:800; }
+.top .sub { font-size:.85rem; opacity:.75; margin-top:2px; }
+.wrap { max-width:640px; margin:0 auto; padding:20px 16px 60px; }
+.card { background:#fff; border-radius:14px; box-shadow:0 2px 12px rgba(29,39,101,.08); padding:20px; margin-top:16px; }
+h2 { color:var(--brand-dark); font-size:1.1rem; margin-bottom:10px; }
+.issue-list { list-style:none; }
+.issue-list li { display:flex; justify-content:space-between; align-items:center; gap:10px;
+  padding:12px 4px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.issue-list li:last-child { border-bottom:none; }
+.btn { background:var(--brand); color:#fff; border:none; border-radius:9px; text-decoration:none;
+  padding:9px 18px; font-size:.95rem; font-weight:700; font-family:inherit; cursor:pointer; }
+.btn:hover { background:var(--brand-dark); }
+.btn:disabled { opacity:.6; }
+.center-msg { text-align:center; padding:60px 20px; color:var(--muted); }
+.search { width:100%; font-family:inherit; font-size:1rem; padding:11px 12px; border:1px solid var(--line); border-radius:9px; margin-bottom:6px; }
+</style>
+</head>
+<body>
+
+<div class="top">
+<div class="logo">@@PAPER_NAME@@</div>
+<div class="sub">ארכיון גיליונות</div>
+</div>
+
+<div class="wrap">
+<div id="loading" class="center-msg">טוען...</div>
+<div id="closed" class="center-msg" style="display:none">
+<h2 style="margin-bottom:8px">הארכיון אינו זמין כרגע</h2>
+לפרטים: @@PAPER_PHONE@@
+</div>
+<div id="archive" style="display:none">
+<div class="card">
+<h2>📚 גיליונות העבר</h2>
+<input class="search" id="q" placeholder="חיפוש לפי מספר גיליון..." oninput="draw()">
+<ul class="issue-list" id="list"></ul>
+</div>
+</div>
+</div>
+
+<script>
+'use strict';
+/* ארכיון ציבורי — קריאה בלבד. הרשימה מגיעה מ-RPC שמחזיר אך ורק
+   גיליונות שפורסמו עם PDF, וגם היא וגם הקבצים חסומים כשהמתג
+   public_archive_enabled כבוי בהגדרות המערכת. */
+const SUPABASE_URL = '@@SUPABASE_URL@@';
+const SUPABASE_KEY = '@@SUPABASE_KEY@@';
+let db = null, issues = [];
+
+const heDate = d => { try { return new Date(d + 'T12:00:00').toLocaleDateString('he-IL'); } catch (e) { return d || ''; } };
+
+async function init() {
+  if (SUPABASE_URL.startsWith('PASTE')) { showClosed(); return; }
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data, error } = await db.rpc('archive_public_list');
+  if (error || !data) { showClosed(); return; }
+  issues = data;
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('archive').style.display = 'block';
+  draw();
+}
+
+function showClosed() {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('closed').style.display = 'block';
+}
+
+function draw() {
+  const q = (document.getElementById('q').value || '').trim();
+  const rows = issues.filter(i => !q || String(i.issue_number).includes(q));
+  document.getElementById('list').innerHTML = rows.length ? rows.map(i => `<li>
+    <span><b>גיליון ${Number(i.issue_number)}</b><br>
+    <small style="color:var(--muted)">${heDate(i.publish_date)}</small></span>
+    <button class="btn" onclick="openPdf('${String(i.pdf_path).replace(/[^\w.\-\/]/g, '')}', this)">📖 צפייה</button>
+  </li>`).join('') : '<li style="color:var(--muted)">לא נמצאו גיליונות</li>';
+}
+
+async function openPdf(path, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'פותח...'; }
+  try {
+    const { data, error } = await db.storage.from('issues-archive').createSignedUrl(path, 600);
+    if (error || !data) throw error || new Error('no-url');
+    window.open(data.signedUrl, '_blank');
+  } catch (e) { alert('הגיליון אינו זמין כרגע'); }
+  if (btn) { btn.disabled = false; btn.textContent = '📖 צפייה'; }
+}
+
+init();
+</script>
+</body>
+</html>
