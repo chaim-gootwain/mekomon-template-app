@@ -27,11 +27,16 @@ Deno.serve(async (req)=>{
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
     const authHeader = req.headers.get("Authorization") || "";
-    const { data: userData } = await admin.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (!userData?.user?.id) return json({
-      ok: false,
-      error: "unauthorized"
-    }, 401);
+    const token = authHeader.replace("Bearer ", "").trim();
+    // קריאה פנימית מפונקציה אחרת (למשל alerts-engine) עם מפתח ה-service_role
+    const isInternal = !!token && token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!isInternal) {
+      const { data: userData } = await admin.auth.getUser(token);
+      if (!userData?.user?.id) return json({
+        ok: false,
+        error: "unauthorized"
+      }, 401);
+    }
     const { to, subject, body, html, customer_id, attachments } = await req.json();
     let dest = String(to || "").trim();
     if (!dest && customer_id) {
