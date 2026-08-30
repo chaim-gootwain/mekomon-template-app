@@ -396,6 +396,7 @@ async function invCall(body) {
       toast('נכשל: ' + (data && data.error ? data.error : ''), true);
     }
     if (body.customer_id) openCustomerCard(body.customer_id);
+  return data;
   } catch (e) { toast('שגיאה: ' + e, true); }
 }
 

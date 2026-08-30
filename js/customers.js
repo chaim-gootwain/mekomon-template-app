@@ -343,6 +343,7 @@ ${canWrite ? `<div class="cc-toolbar">
 <div id="ccMoreMenu" class="cc-menu hidden">
 ${phoneBtn(c.phone)}
 ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(c.whatsapp || c.phone)}">💬 וואטסאפ</a>` : ''}
+${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" onclick="ccMenuClose();ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>
 <button class="btn" onclick="ccMenuClose();customerAddNote(${id})">＋ הוסף הערה</button>
 <button class="btn" onclick="ccMenuClose();customerStatusChange(${id})">🔄 שינוי סטטוס</button>
