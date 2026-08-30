@@ -22,6 +22,7 @@ const reports = [
 { id: 'churn', title: '⚠️ לקוחות שהפסיקו', desc: 'מפרסמים שלא חזרו — הזדמנות לחידוש', roles: ['admin', 'sales'] },
 { id: 'customer', title: '🏪 היסטוריית לקוח', desc: 'כל הפרסומים, החיובים והתשלומים', roles: ['admin', 'sales'] },
 { id: 'ledger', title: '📒 כרטסות לרו"ח', desc: 'ייצוא חודשי לאקסל — כל תנועות הלקוחות עם יתרה רצה', roles: ['admin'] },
+{ id: 'weekly', title: '🗓️ דוח שבועי תפעולי', desc: 'מה נסגר, מה נכנס ומה תקוע — לשבוע שנבחר', roles: ['admin', 'sales'] },
 ].filter(r => r.roles.includes(role));
 
 el.innerHTML = `
@@ -478,3 +479,56 @@ async function reportLedgerExport() {
 }
 
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
+
+/* ---------- דוח שבועי תפעולי (פיצ'ר #10) ---------- */
+// נשען על weeklySummaryBuild (הסיכום השבועי, #22) עם טווח לבחירה.
+// נסגר/נכנס נמדדים בטווח; "מה תקוע" ו"חובות" הם תמונת-מצב נוכחית.
+function report_weekly() {
+  const to = today();
+  const from = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  document.getElementById('reportArea').innerHTML = `
+<div class="card-pad">
+<b>🗓️ דוח שבועי תפעולי</b>
+<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:end">
+<div class="field" style="margin:0"><label style="font-size:.8rem">מתאריך</label><input id="rwFrom" type="date" value="${from}"></div>
+<div class="field" style="margin:0"><label style="font-size:.8rem">עד תאריך</label><input id="rwTo" type="date" value="${to}"></div>
+<button class="btn btn-sm" onclick="reportWeeklyRun()">הצגה</button>
+<button class="btn btn-sm btn-ghost" onclick="reportWeeklyRun(-7)">◀ שבוע אחורה</button>
+</div>
+<div id="repTable" class="table-wrap" style="margin-top:14px"><div class="empty">בחר טווח ולחץ הצגה</div></div>
+</div>`;
+  reportWeeklyRun();
+}
+
+async function reportWeeklyRun(shiftDays) {
+  const fEl = document.getElementById('rwFrom'), tEl = document.getElementById('rwTo');
+  if (shiftDays) {
+    const sh = d => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + shiftDays); return x.toISOString().slice(0, 10); };
+    fEl.value = sh(fEl.value); tEl.value = sh(tEl.value);
+  }
+  const from = fEl.value, to = tEl.value;
+  if (!from || !to || from > to) { toast('טווח תאריכים לא תקין', true); return; }
+  if (typeof weeklySummaryBuild !== 'function') { toast('מודול הסיכום השבועי לא נטען', true); return; }
+  document.getElementById('repTable').innerHTML = '<div class="empty">אוסף נתונים...</div>';
+  const m = await weeklySummaryBuild(from, to);
+  _repData = [
+    ['מודעות שנסגרו', m.closed ? m.closed.count : '', m.closed ? Math.round(m.closed.total) : ''],
+    ['לידים חדשים', m.leads ? m.leads.count : '', ''],
+    ['מודעות תקועות (כעת)', m.stuck ? m.stuck.adsCount : '', m.stuck ? Math.round(m.stuck.adsSum) : ''],
+    ['לידים ממתינים למעקב (כעת)', m.stuck ? m.stuck.leadsDue : '', ''],
+    ['חוב פתוח (כעת)', m.debts ? m.debts.debtors : '', m.debts ? Math.round(m.debts.total) : ''],
+  ];
+  document.getElementById('repTable').innerHTML = `
+<div class="stats" style="margin-bottom:10px">
+${stat(m.closed ? m.closed.count : '—', 'מודעות נסגרו (' + heDate(from) + '–' + heDate(to) + ')')}
+${stat(m.closed ? (money(m.closed.total) || '₪0') : '—', '₪ שנסגרו בטווח')}
+${stat(m.leads ? m.leads.count : '—', 'לידים חדשים בטווח')}
+${stat(m.stuck ? m.stuck.adsCount : '—', 'מודעות תקועות כעת', m.stuck && m.stuck.adsCount ? 'red' : '')}
+</div>
+${m.leads && m.leads.names.length ? `<p style="font-size:.85rem"><b>לידים שנכנסו:</b> ${m.leads.names.map(esc).join(', ')}${m.leads.count > m.leads.names.length ? ' ועוד ' + (m.leads.count - m.leads.names.length) : ''}</p>` : ''}
+${m.stuck ? `<p style="font-size:.85rem"><b>מה תקוע כעת:</b> ${m.stuck.adsCount} מודעות בלי סגירה בסך ${money(m.stuck.adsSum) || '₪0'}${m.stuck.leadsDue ? ' · ' + m.stuck.leadsDue + ' לידים ממתינים למעקב' : ''}</p>` : ''}
+${m.debts ? `<p style="font-size:.85rem"><b>חובות כעת:</b> ${money(m.debts.total) || '₪0'} אצל ${m.debts.debtors} לקוחות${m.debts.tops.length ? ' — הגדולים: ' + m.debts.tops.slice(0, 3).map(t => esc(t.name) + ' (' + money(t.bal) + ')').join(', ') : ''}</p>` : ''}
+<div style="display:flex;gap:8px;margin-top:8px">
+<button class="btn btn-sm btn-ghost" onclick="exportCsv('דוח_שבועי_${from}_${to}', ['מדד','כמות','₪'], _repData)">⬇ אקסל</button>
+</div>`;
+}

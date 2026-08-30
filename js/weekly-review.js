@@ -241,20 +241,24 @@ function _wsRecipient() {
   return String(s.weekly_summary_email || s.alerts_email_to || '').trim();
 }
 
-/* איסוף 4 המדדים — 7 הימים האחרונים. כל מדד עטוף בנפרד כדי
-   שכשל באחד (עמודה חסרה וכו') לא יפיל את כל הסיכום. */
-async function weeklySummaryBuild() {
-  const weekAgoD = new Date(Date.now() - 7 * 86400000);
-  const weekAgo = weekAgoD.toISOString().slice(0, 10);
+/* איסוף 4 המדדים. ברירת מחדל: 7 הימים האחרונים; אפשר להעביר טווח
+   (fromStr/toStr, YYYY-MM-DD) — משמש גם את הדוח השבועי התפעולי (#10).
+   "מודעות שנסגרו" ו"לידים" נמדדים בטווח; "חובות" ו"מה תקוע" הם
+   תמונת-מצב נוכחית. כל מדד עטוף בנפרד כדי שכשל באחד (עמודה חסרה
+   וכו') לא יפיל את כל הסיכום. */
+async function weeklySummaryBuild(fromStr, toStr) {
   const T = today();
-  const m = { from: weekAgo, to: T, closed: null, debts: null, leads: null, stuck: null };
+  const weekAgo = fromStr || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const upTo = toStr || T;
+  const m = { from: weekAgo, to: upTo, closed: null, debts: null, leads: null, stuck: null };
   const nameOfC = cid => (cache.customers || []).find(c => c.id === Number(cid))?.name
     || (typeof nameOf === 'function' ? nameOf('customers', Number(cid)) : null) || ('לקוח #' + cid);
 
-  // 1) מודעות שנסגרו (סומנו שולם) השבוע
+  // 1) מודעות שנסגרו (סומנו שולם) בטווח
   try {
     const { data, error } = await db.from('ads')
-      .select('id,customer_id,price,discount,paid_date').eq('deal_stage', 'paid').gte('paid_date', weekAgo);
+      .select('id,customer_id,price,discount,paid_date').eq('deal_stage', 'paid')
+      .gte('paid_date', weekAgo).lte('paid_date', upTo);
     if (error) throw error;
     const rows = data || [];
     m.closed = { count: rows.length, total: rows.reduce((s, a) => s + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)), 0) };
@@ -281,9 +285,10 @@ async function weeklySummaryBuild() {
     m.debts = { total: Object.values(byCust).reduce((s, v) => s + v, 0), debtors: Object.keys(byCust).length, overdueSum, overdueCnt, tops };
   } catch (e) { }
 
-  // 3) לידים חדשים השבוע
+  // 3) לידים חדשים בטווח
   try {
-    const { data, error } = await db.from('leads').select('id,name,status,created_at').gte('created_at', weekAgoD.toISOString());
+    const { data, error } = await db.from('leads').select('id,name,status,created_at')
+      .gte('created_at', weekAgo + 'T00:00:00').lte('created_at', upTo + 'T23:59:59');
     if (error) throw error;
     m.leads = { count: (data || []).length, names: (data || []).slice(0, 8).map(l => l.name).filter(Boolean) };
   } catch (e) { }
