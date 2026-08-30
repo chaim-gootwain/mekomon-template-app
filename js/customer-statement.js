@@ -29,59 +29,88 @@ function _csEsc(t) {
   return String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
-/* אוסף נתוני כרטסת ללקוח */
+/* שם אמצעי תשלום בעברית (נשען על PAY_METHODS אם קיים) */
+function _csPayMethod(m) {
+  try { if (typeof PAY_METHODS !== 'undefined' && PAY_METHODS[m]) return PAY_METHODS[m]; } catch (e) { }
+  return m || 'תשלום';
+}
+
+/* אוסף נתוני כרטסת ללקוח — יומן חובה/זכות כרונולוגי עם יתרה רצה */
 async function _csGather(customerId) {
   const cust = await run(db.from('customers').select('*').eq('id', customerId).single());
   const charges = await run(db.from('charges').select('*')
     .eq('customer_id', customerId).order('issued_date', { ascending: true }));
-  const paidByCharge = {};
-  const paysByCharge = {};
-  if (charges.length) {
+  let pays = [];
+  try {
+    // גם תשלומים שנרשמו ישירות על הלקוח וגם כאלה שנרשמו על חיוב שלו
     const ids = charges.map(c => c.id);
-    try {
-      const pays = await run(db.from('payments').select('*').in('charge_id', ids));
-      pays.forEach(p => {
-        paidByCharge[p.charge_id] = (paidByCharge[p.charge_id] || 0) + Number(p.amount || 0);
-        (paysByCharge[p.charge_id] = paysByCharge[p.charge_id] || []).push(p);
-      });
-    } catch (e) { /* אין תשלומים */ }
-  }
+    const byCust = await run(db.from('payments').select('*').eq('customer_id', customerId));
+    const byCharge = ids.length ? await run(db.from('payments').select('*').in('charge_id', ids)) : [];
+    const seen = new Set();
+    [...byCust, ...byCharge].forEach(p => { if (!seen.has(p.id)) { seen.add(p.id); pays.push(p); } });
+  } catch (e) { /* אין תשלומים */ }
+
   const T = (typeof today === 'function') ? today() : new Date().toISOString().slice(0, 10);
-  let totalCharged = 0, totalPaid = 0, outstanding = 0, oldestDue = null;
-  const rows = charges.map(c => {
-    const paid = paidByCharge[c.id] || 0;
-    const bal = Number(c.amount || 0) - paid;
-    const dead = CS_DEAD.includes(c.status);
-    if (!dead) { totalCharged += Number(c.amount || 0); totalPaid += paid; }
+  const chargeDesc = {}; charges.forEach(c => chargeDesc[c.id] = c.description || '');
+
+  // יומן: חיוב = חובה, תשלום = זכות. חיובים מבוטלים לא נספרים ביתרה.
+  const entries = [];
+  charges.forEach(c => {
+    entries.push({
+      date: c.issued_date || '', type: 'charge', dead: CS_DEAD.includes(c.status),
+      desc: c.description || 'חיוב', ref: c.invoice_number || '', status: c.status,
+      debit: Number(c.amount || 0), credit: 0
+    });
+  });
+  pays.forEach(p => {
+    const base = _csPayMethod(p.method);
+    const forWhat = p.charge_id && chargeDesc[p.charge_id] ? ' — ' + chargeDesc[p.charge_id] : '';
+    entries.push({
+      date: p.paid_date || '', type: 'payment', dead: false,
+      desc: 'תשלום (' + base + ')' + forWhat + (p.check_due_date ? ' · פירעון ' + _csDate(p.check_due_date) : ''),
+      ref: '', status: '', debit: 0, credit: Number(p.amount || 0)
+    });
+  });
+  entries.sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.type === 'charge' ? -1 : 1));
+
+  let running = 0, totalCharged = 0, totalPaid = 0;
+  entries.forEach(e => {
+    if (!e.dead) { running += e.debit - e.credit; totalCharged += e.debit; totalPaid += e.credit; }
+    e.balance = running;
+  });
+
+  // יתרה פתוחה "רשמית" (לפי סטטוסים) + החוב הוותיק — כמו קודם
+  const paidByCharge = {};
+  pays.forEach(p => { if (p.charge_id) paidByCharge[p.charge_id] = (paidByCharge[p.charge_id] || 0) + Number(p.amount || 0); });
+  let outstanding = 0, oldestDue = null;
+  charges.forEach(c => {
+    const bal = Number(c.amount || 0) - (paidByCharge[c.id] || 0);
     if (CS_OPEN.includes(c.status) && bal > 0) {
       outstanding += bal;
       if (c.due_date && c.due_date < T && (!oldestDue || c.due_date < oldestDue)) oldestDue = c.due_date;
     }
-    return { c, paid, bal, dead };
   });
-  return { cust, rows, totalCharged, totalPaid, outstanding, oldestDue };
+  return { cust, entries, totalCharged, totalPaid, outstanding, oldestDue };
 }
 
 /* בונה HTML עצמאי (מסמך שלם) להדפסה / שמירה כ-PDF */
 function _csBuildHtml(data) {
-  const { cust, rows, totalCharged, totalPaid, outstanding, oldestDue } = data;
+  const { cust, entries, totalCharged, totalPaid, outstanding, oldestDue } = data;
   const now = new Date();
   const dateStr = now.toLocaleDateString('he-IL');
   const contact = [cust.contact_person, cust.phone, cust.email].filter(Boolean).map(_csEsc).join(' · ');
-  const bodyRows = rows.length ? rows.map(r => {
-    const c = r.c;
-    const balColor = r.bal > 0 ? '#b91c1c' : (r.bal < 0 ? '#047857' : '#111');
-    const style = r.dead ? 'color:#9ca3af;text-decoration:line-through' : '';
+  const bodyRows = entries.length ? entries.map(e => {
+    const balColor = e.balance > 0 ? '#b91c1c' : (e.balance < 0 ? '#047857' : '#111');
+    const style = e.dead ? 'color:#9ca3af;text-decoration:line-through' : '';
     return `<tr style="${style}">
-      <td>${_csDate(c.issued_date)}</td>
-      <td>${_csEsc(c.description || '')}</td>
-      <td class="ctr">${_csEsc(c.invoice_number || '—')}</td>
-      <td class="num">${_csMoney(c.amount)}</td>
-      <td class="num">${r.paid ? _csMoney(r.paid) : '—'}</td>
-      <td class="num" style="color:${balColor};font-weight:600">${_csMoney(r.bal)}</td>
-      <td class="ctr">${_csEsc(_csStatusHe(c.status))}</td>
+      <td>${_csDate(e.date)}</td>
+      <td>${_csEsc(e.desc)}${e.dead ? ' (' + _csEsc(_csStatusHe(e.status)) + ')' : ''}</td>
+      <td class="ctr">${_csEsc(e.ref || '—')}</td>
+      <td class="num">${e.debit ? _csMoney(e.debit) : '—'}</td>
+      <td class="num">${e.credit ? _csMoney(e.credit) : '—'}</td>
+      <td class="num" style="color:${balColor};font-weight:600">${e.dead ? '—' : _csMoney(e.balance)}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;color:#6b7280;padding:18px">אין חיובים רשומים ללקוח זה</td></tr>`;
+  }).join('') : `<tr><td colspan="6" style="text-align:center;color:#6b7280;padding:18px">אין תנועות רשומות ללקוח זה</td></tr>`;
 
   const overdueNote = oldestDue
     ? `<div class="warn">⚠ קיים חוב באיחור מתאריך ${_csDate(oldestDue)}. נודה על הסדרת התשלום.</div>` : '';
@@ -133,7 +162,7 @@ function _csBuildHtml(data) {
   <table>
     <thead><tr>
       <th>תאריך</th><th>פירוט</th><th class="ctr">חשבונית</th>
-      <th class="num">סכום</th><th class="num">שולם</th><th class="num">יתרה</th><th class="ctr">סטטוס</th>
+      <th class="num">חובה</th><th class="num">זכות</th><th class="num">יתרה</th>
     </tr></thead>
     <tbody>${bodyRows}</tbody>
   </table>

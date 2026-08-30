@@ -21,6 +21,7 @@ const reports = [
 { id: 'unsold', title: '📭 שטח שלא נמכר', desc: 'עמודים ריקים בכל גיליון — פוטנציאל מכירה', roles: ['admin', 'sales', 'editor'] },
 { id: 'churn', title: '⚠️ לקוחות שהפסיקו', desc: 'מפרסמים שלא חזרו — הזדמנות לחידוש', roles: ['admin', 'sales'] },
 { id: 'customer', title: '🏪 היסטוריית לקוח', desc: 'כל הפרסומים, החיובים והתשלומים', roles: ['admin', 'sales'] },
+{ id: 'ledger', title: '📒 כרטסות לרו"ח', desc: 'ייצוא חודשי לאקסל — כל תנועות הלקוחות עם יתרה רצה', roles: ['admin'] },
 ].filter(r => r.roles.includes(role));
 
 el.innerHTML = `
@@ -328,3 +329,127 @@ async function report_pnl() {
     <p class="muted" style="font-size:.78rem;margin-top:8px">הכנסות = שווי המודעות (נטו) לפי חודש הסגירה לדפוס של הגיליון · הוצאות = עלויות נטו שהוזנו (כולל עלויות הגיליון). מספרים ללא מע"מ.</p>`,
     `exportCsv('רווח_והפסד', ['חודש','הכנסות','הוצאות','רווח'], _repData)`);
 }
+
+/* ---------- כרטסות לרו"ח: ייצוא חודשי של כל התנועות (פיצ'ר #4) ---------- */
+// קריאה בלבד: charges + payments. לכל לקוח — יתרת פתיחה, תנועות התקופה
+// (חובה/זכות) ויתרה רצה. יוצא כקובץ Excel (גיליון RTL) דרך SheetJS הטעון.
+function report_ledger() {
+  const d = new Date(); d.setMonth(d.getMonth() - 1);
+  const defMonth = d.toISOString().slice(0, 7);
+  document.getElementById('reportArea').innerHTML = `
+<div class="card-pad">
+<b>📒 כרטסות לרו"ח — ייצוא חודשי</b>
+<p class="muted" style="font-size:.82rem;margin-top:4px">כל תנועות החיובים והתשלומים של כל הלקוחות בטווח שנבחר, עם יתרת פתיחה ויתרה רצה פר לקוח. קריאה בלבד — שום דבר לא משתנה במערכת.</p>
+<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:end">
+<div class="field" style="margin:0"><label style="font-size:.8rem">חודש</label><input id="ledMonth" type="month" value="${defMonth}"></div>
+<span class="muted" style="font-size:.8rem">או טווח:</span>
+<div class="field" style="margin:0"><label style="font-size:.8rem">מתאריך</label><input id="ledFrom" type="date"></div>
+<div class="field" style="margin:0"><label style="font-size:.8rem">עד תאריך</label><input id="ledTo" type="date"></div>
+<button class="btn btn-sm" onclick="reportLedgerRun()">הצגה</button>
+<button class="btn btn-sm btn-ghost" onclick="reportLedgerExport()">⬇ ייצוא לאקסל</button>
+</div>
+<div id="repTable" class="table-wrap" style="margin-top:14px"><div class="empty">בחר חודש (או טווח) ולחץ הצגה / ייצוא</div></div>
+</div>`;
+}
+
+function _ledRange() {
+  const from = document.getElementById('ledFrom')?.value;
+  const to = document.getElementById('ledTo')?.value;
+  if (from && to) return { from, to };
+  const m = document.getElementById('ledMonth')?.value;
+  if (!m) return null;
+  const [y, mo] = m.split('-').map(Number);
+  const last = new Date(y, mo, 0).getDate();
+  return { from: `${m}-01`, to: `${m}-${String(last).padStart(2, '0')}` };
+}
+
+// אוסף את כל התנועות עד סוף הטווח ומפצל ליתרת פתיחה + תנועות התקופה
+async function _ledGather() {
+  const range = _ledRange();
+  if (!range) { toast('בחר חודש או טווח תאריכים', true); return null; }
+  const [charges, payments] = await Promise.all([
+    run(db.from('charges').select('id,customer_id,amount,status,issued_date,description,invoice_number').lte('issued_date', range.to).limit(20000)),
+    run(db.from('payments').select('id,customer_id,charge_id,amount,method,paid_date,check_due_date').lte('paid_date', range.to).limit(20000)),
+  ]);
+  const dead = c => ['cancelled', 'lost'].includes(c.status);
+  const chargeCust = {}; charges.forEach(c => chargeCust[c.id] = c.customer_id);
+  const byCust = {};
+  const ent = (cid, e) => { (byCust[cid] = byCust[cid] || []).push(e); };
+  charges.forEach(c => {
+    if (dead(c)) return;
+    ent(c.customer_id, { date: c.issued_date || '', kind: 'חיוב', desc: c.description || 'חיוב', ref: c.invoice_number || '', debit: Number(c.amount || 0), credit: 0 });
+  });
+  payments.forEach(p => {
+    const cid = p.customer_id || chargeCust[p.charge_id];
+    if (!cid) return;
+    const method = (typeof PAY_METHODS !== 'undefined' && PAY_METHODS[p.method]) ? PAY_METHODS[p.method] : (p.method || '');
+    ent(cid, { date: p.paid_date || '', kind: 'תשלום', desc: 'תשלום (' + method + ')' + (p.check_due_date ? ' · פירעון ' + heDate(p.check_due_date) : ''), ref: '', debit: 0, credit: Number(p.amount || 0) });
+  });
+
+  const custs = Object.keys(byCust)
+    .map(cid => ({ cid: Number(cid), name: nameOf('customers', Number(cid)) || ('לקוח #' + cid) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  const out = [];
+  custs.forEach(cu => {
+    const list = byCust[cu.cid].sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.kind === 'חיוב' ? -1 : 1));
+    let opening = 0; const period = [];
+    list.forEach(e => {
+      if (e.date < range.from) opening += e.debit - e.credit;
+      else period.push(e);
+    });
+    if (!period.length && Math.abs(opening) < 0.005) return; // אין פעילות ואין יתרה — לא מייצאים
+    let bal = opening;
+    const rows = period.map(e => { bal += e.debit - e.credit; return { ...e, balance: bal }; });
+    out.push({ ...cu, opening, rows, closing: bal });
+  });
+  return { range, custs: out };
+}
+
+async function reportLedgerRun() {
+  toast('אוסף תנועות...');
+  const data = await _ledGather(); if (!data) return;
+  const totC = data.custs.reduce((s, c) => s + c.rows.reduce((x, r) => x + r.debit, 0), 0);
+  const totP = data.custs.reduce((s, c) => s + c.rows.reduce((x, r) => x + r.credit, 0), 0);
+  document.getElementById('repTable').innerHTML = `
+<div class="stats" style="margin-bottom:10px">
+${stat(data.custs.length, 'לקוחות עם פעילות/יתרה')}
+${stat(money(totC) || '₪0', 'חיובים בתקופה')}
+${stat(money(totP) || '₪0', 'תשלומים בתקופה')}
+</div>
+${data.custs.map(cu => `
+<div style="margin-bottom:14px">
+<b>${esc(cu.name)}</b> <span class="muted" style="font-size:.8rem">יתרת פתיחה: ${money(cu.opening) || '₪0'} · יתרת סגירה: <b style="color:${cu.closing > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(cu.closing) || '₪0'}</b></span>
+${cu.rows.length ? `<table class="data" style="margin-top:4px"><thead><tr><th>תאריך</th><th>סוג</th><th>פירוט</th><th>חשבונית</th><th>חובה</th><th>זכות</th><th>יתרה</th></tr></thead><tbody>
+${cu.rows.map(r => `<tr><td>${heDate(r.date)}</td><td>${r.kind}</td><td>${esc(r.desc)}</td><td>${esc(r.ref || '—')}</td><td>${r.debit ? money(r.debit) : '—'}</td><td>${r.credit ? money(r.credit) : '—'}</td><td><b>${money(r.balance)}</b></td></tr>`).join('')}
+</tbody></table>` : '<div class="muted" style="font-size:.8rem">אין תנועות בתקופה (יתרה קודמת בלבד)</div>'}
+</div>`).join('') || '<div class="empty">אין תנועות ואין יתרות בטווח שנבחר</div>'}`;
+}
+
+async function reportLedgerExport() {
+  toast('מכין קובץ לרו"ח...');
+  const data = await _ledGather(); if (!data) return;
+  if (!data.custs.length) { toast('אין תנועות ואין יתרות בטווח שנבחר', true); return; }
+  const headers = ['לקוח', 'תאריך', 'סוג', 'פירוט', 'מס\' חשבונית', 'חובה', 'זכות', 'יתרה'];
+  const aoa = [headers];
+  data.custs.forEach(cu => {
+    aoa.push([cu.name, data.range.from, 'יתרת פתיחה', '', '', '', '', round2(cu.opening)]);
+    cu.rows.forEach(r => aoa.push([cu.name, r.date, r.kind, r.desc, r.ref || '', r.debit ? round2(r.debit) : '', r.credit ? round2(r.credit) : '', round2(r.balance)]));
+    aoa.push([cu.name, data.range.to, 'יתרת סגירה', '', '', '', '', round2(cu.closing)]);
+  });
+  const fname = `כרטסות_${data.range.from}_${data.range.to}`;
+  try {
+    if (typeof XLSX === 'undefined') throw new Error('no-xlsx');
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 24 }, { wch: 11 }, { wch: 11 }, { wch: 40 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 11 }];
+    const wb = XLSX.utils.book_new();
+    wb.Workbook = { Views: [{ RTL: true }] };
+    XLSX.utils.book_append_sheet(wb, ws, 'כרטסות');
+    XLSX.writeFile(wb, fname + '.xlsx');
+  } catch (e) {
+    // נפילה חזרה ל-CSV אם ספריית האקסל לא נטענה
+    exportCsv(fname, headers, aoa.slice(1));
+  }
+  toast('✓ הקובץ ירד — מוכן לשליחה לרו"ח');
+}
+
+function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
