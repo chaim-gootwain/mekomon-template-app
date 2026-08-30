@@ -327,21 +327,39 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   const items = [{ details: header, amount: 1, price: 0 }, ...lines];
   const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
   document.getElementById('viewBack').classList.remove('open');
-  await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
-  // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד, גם בפיצול קטגוריות)
+  const _doc = await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
   try {
-    const _key = cid + '|' + ym;
-    const _allAds = (_mbCtx && _mbCtx.ads || []).filter(a => a.customer_id === cid);
-    const _issueIds = [...new Set(_allAds.map(a => a.issue_id))];
-    if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_key)) {
-      _mbClipsSent.add(_key);
-      toast('מכין גזירי החודש...');
-      const _r = await adProofSendMonth(cid, _issueIds, ym);
-      if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
-      else if (_r && _r.downloaded) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
-      else toast('גזירי החודש מוכנים');
+    if (isCenter) {
+      const _catHe = isSocial ? 'חברתי כלכלי' : 'כללי';
+      const _to = (typeof ecEmailOf === 'function') ? ecEmailOf(gk) : '';
+      const _catAds = cAds.map(a => a.id);
+      const _issueIds = [...new Set(cAds.map(a => a.issue_id))];
+      const _catKey = cid + '|' + ym + '|' + gk;
+      if (!(_doc && _doc.ok)) { /* הפקה נכשלה — לא שולחים מייל */ }
+      else if (!_to) {
+        toast('⚠️ קטגוריה ' + _catHe + ': לא הוגדר מייל — החשבונית הופקה אך לא נשלח מייל', true);
+      } else if (_issueIds.length && !_mbClipsSent.has(_catKey)) {
+        _mbClipsSent.add(_catKey);
+        toast('מכין מייל לקטגוריה ' + _catHe + '...');
+        const _num = _doc.document && _doc.document.doc_number ? _doc.document.doc_number : '';
+        const _r = await adProofSendMonth(cid, _issueIds, ym, { to_email: _to, ad_ids: _catAds, category_he: _catHe, note: 'חשבונית' + (_num ? " מס' " + _num : '') + ' — קטגוריה: ' + _catHe, invoice: _doc.document ? { doc_number: _doc.document.doc_number, doc_uuid: _doc.document.doc_uuid } : null });
+        if (_r && _r.emailed) toast('✅ נשלח מייל לקטגוריה ' + _catHe);
+        else toast('ℹ️ קטגוריה ' + _catHe + ': המייל לא אושר — בדוק', true);
+      }
+    } else {
+      const _key = cid + '|' + ym;
+      const _allAds = (_mbCtx && _mbCtx.ads || []).filter(a => a.customer_id === cid);
+      const _issueIds = [...new Set(_allAds.map(a => a.issue_id))];
+      if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_key)) {
+        _mbClipsSent.add(_key);
+        toast('מכין גזירי החודש...');
+        const _r = await adProofSendMonth(cid, _issueIds, ym);
+        if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
+        else if (_r && _r.downloaded) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
+        else toast('גזירי החודש מוכנים');
+      }
     }
-  } catch (e) { toast('הערה: שליחת גזירי החודש נכשלה — ' + (e && e.message || e), true); }
+  } catch (e) { toast('הערה: שליחת מייל החודש נכשלה — ' + (e && e.message || e), true); }
   await monthlyBillingReview(ym);
 }
 
