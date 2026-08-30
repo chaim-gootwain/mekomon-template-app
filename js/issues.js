@@ -720,6 +720,23 @@ ${published.map(i => `<option value="${i.id}">גיליון ${i.issue_number}</op
 <p class="muted" style="margin-bottom:12px;font-size:.85rem">
 לגיליון קיים: בחר גיליון ולחץ "העלאת PDF". לגיליונות היסטוריים שלפני המערכת: "העלאת גיליון ישן" —
 נותנים מספר ותאריך, והגיליון נכנס לארכיון.</p>
+${isAdmin ? (() => {
+const on = String((cache.settings || {}).public_archive_enabled || '0') === '1';
+const url = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '') + '/portal/archive.html';
+return `<div class="card card-pad" style="margin-bottom:14px;border-right:4px solid ${on ? 'var(--ok)' : 'var(--line)'}">
+<b>🌍 ארכיון ציבורי</b>
+<p class="muted" style="font-size:.82rem">דף פתוח לקהל עם גיליונות שפורסמו (רק כאלה שיש להם PDF). כבוי — הדף והקבצים חסומים לגמרי.</p>
+<label style="display:flex;gap:8px;align-items:center;margin-top:6px;cursor:pointer">
+<input type="checkbox" ${on ? 'checked' : ''} onchange="archivePublicToggle(this.checked)" style="width:18px;height:18px">
+הארכיון הציבורי פעיל
+</label>
+${on ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+<input readonly value="${esc(url)}" dir="ltr" style="font-size:.78rem;flex:1;min-width:220px" onclick="this.select()">
+<button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>toast('הקישור הועתק'))">העתקה</button>
+<a class="btn btn-sm btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">פתיחה</a>
+</div>` : ''}
+</div>`;
+})() : ''}
 <div class="card" id="archTable"></div>`;
 renderTable(document.getElementById('archTable'), withPdf, [
 { h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>` },
@@ -886,4 +903,12 @@ function hebHolidayBanner(issues) {
       <span class="muted" style="font-size:.8rem"> — שקול להקדים דדליינים ולתגבר מכירות.</span>
     </div>`;
   } catch (e) { return ''; }
+}
+
+/* מתג הארכיון הציבורי (פיצ'ר #20) — נאכף גם ב-DB (RPC + מדיניות storage) */
+async function archivePublicToggle(on) {
+  await run(db.from('settings').upsert({ key: 'public_archive_enabled', value: on ? '1' : '0' }));
+  cache.settings.public_archive_enabled = on ? '1' : '0';
+  toast(on ? '🌍 הארכיון הציבורי הופעל' : 'הארכיון הציבורי כובה — הדף והקבצים חסומים');
+  openPage('archive');
 }
