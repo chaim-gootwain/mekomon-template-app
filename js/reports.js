@@ -24,6 +24,7 @@ const reports = [
 { id: 'ledger', title: '📒 כרטסות לרו"ח', desc: 'ייצוא חודשי לאקסל — כל תנועות הלקוחות עם יתרה רצה', roles: ['admin'] },
 { id: 'weekly', title: '🗓️ דוח שבועי תפעולי', desc: 'מה נסגר, מה נכנס ומה תקוע — לשבוע שנבחר', roles: ['admin', 'sales'] },
 { id: 'agencies', title: '🏢 עמלות סוכנויות', desc: 'מחזור חודשי פר סוכנות × אחוז העמלה — תצוגה בלבד', roles: ['admin'] },
+{ id: 'profit', title: '📊 רווחיות', desc: 'פר גיליון / סוכן / לקוח — מי מכניס, מה רווחי, מי שוחק', roles: ['admin'] },
 ].filter(r => r.roles.includes(role));
 
 el.innerHTML = `
@@ -569,4 +570,99 @@ async function report_agencies() {
 ${_repData.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${r[1]}</td><td>${money(r[2])}</td><td><b>${money(r[3])}</b></td><td>${money(r[4])}</td><td>${money(r[5])}</td><td>${r[6]}%</td></tr>`).join('')}
 </tbody></table>`,
     `exportCsv('עמלות_סוכנויות', ['סוכנות','לקוחות','מחזור_נוכחי','עמלה_נוכחית','מחזור_קודם','עמלה_קודמת','אחוז'], _repData)`);
+}
+
+/* ---------- דוח רווחיות (פיצ'ר #3) — מנהל בלבד ---------- */
+// הכנסה = שווי מודעות נטו (מחיר−הנחה, בלי מבוטלות/נדחות).
+// הוצאות גיליון = רשומות expenses המתויגות #issue:<id> (נטו מ-#net:).
+// מנהל בלבד — סוכן לא רואה רווחיות כלל-מערכתית (וגם ה-UI מסתיר).
+let _profitDim = 'issue';
+
+async function report_profit() {
+  if (profile.role !== 'admin') { toast('דוח רווחיות זמין למנהל בלבד', true); return; }
+  document.getElementById('reportArea').innerHTML = `
+<div class="card-pad">
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+<b style="font-size:1.05rem">📊 רווחיות</b>
+<span style="display:flex;gap:6px;align-items:center">
+<select id="profitDim" onchange="_profitDim=this.value; reportProfitRun()">
+<option value="issue" ${_profitDim === 'issue' ? 'selected' : ''}>לפי גיליון</option>
+<option value="agent" ${_profitDim === 'agent' ? 'selected' : ''}>לפי סוכן</option>
+<option value="customer" ${_profitDim === 'customer' ? 'selected' : ''}>לפי לקוח</option>
+</select>
+<button class="btn btn-sm btn-ghost" onclick="exportCsv('רווחיות_' + _profitDim, _profitHead, _repData)">⬇ אקסל</button>
+</span>
+</div>
+<div id="repTable" class="table-wrap" style="margin-top:12px"><div class="empty">טוען...</div></div>
+</div>`;
+  reportProfitRun();
+}
+
+let _profitHead = [];
+async function reportProfitRun() {
+  const box = document.getElementById('repTable'); if (!box) return;
+  box.innerHTML = '<div class="empty">מחשב...</div>';
+  const [ads, expenses] = await Promise.all([
+    run(db.from('ads').select('issue_id,customer_id,price,discount,status').not('status', 'in', '("cancelled","rejected")').limit(10000)),
+    run(db.from('expenses').select('amount,notes').ilike('notes', '%#issue:%').limit(5000)),
+  ]);
+  const net = a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
+  const listPrice = a => Number(a.price) || 0;
+  const priced = ads.filter(a => net(a) > 0 || listPrice(a) > 0);
+  const expByIssue = {};
+  expenses.forEach(e => {
+    const m = String(e.notes || '').match(/#issue:(\d+)/); if (!m) return;
+    const nm = String(e.notes || '').match(/#net:([0-9.]+)/);
+    expByIssue[Number(m[1])] = (expByIssue[Number(m[1])] || 0) + (nm ? Number(nm[1]) : Number(e.amount || 0));
+  });
+  const custAgent = {}; (cache.customers || []).forEach(c => custAgent[c.id] = c.agent_id);
+  const R = Math.round;
+  let head, rows, html;
+
+  if (_profitDim === 'issue') {
+    const by = {};
+    priced.forEach(a => { if (!a.issue_id) return; const b = by[a.issue_id] = by[a.issue_id] || { rev: 0, count: 0 }; b.rev += net(a); b.count++; });
+    const items = Object.entries(by).map(([iid, v]) => {
+      const iss = (cache.issues || []).find(i => i.id === Number(iid));
+      const exp = expByIssue[Number(iid)] || 0;
+      return { label: iss ? 'גיליון ' + iss.issue_number : 'גיליון #' + iid, sort: iss ? iss.issue_number : 0, rev: v.rev, exp, profit: v.rev - exp, count: v.count };
+    }).sort((a, b) => b.sort - a.sort);
+    head = ['גיליון', 'מודעות', 'הכנסה נטו', 'הוצאות נטו', 'רווח', 'אחוז רווח'];
+    rows = items.map(it => [it.label, it.count, R(it.rev), R(it.exp), R(it.profit), it.rev ? R(it.profit / it.rev * 100) + '%' : '—']);
+    const tR = items.reduce((s, i) => s + i.rev, 0), tE = items.reduce((s, i) => s + i.exp, 0);
+    html = _profitTable(head, rows, [4, 5], `<tr style="border-top:2px solid var(--line)"><td><b>סה"כ</b></td><td></td><td><b>${money(tR)}</b></td><td><b>${money(tE)}</b></td><td><b style="color:${tR - tE >= 0 ? 'var(--ok)' : 'var(--danger)'}">${money(tR - tE)}</b></td><td>${tR ? R((tR - tE) / tR * 100) + '%' : '—'}</td></tr>`) +
+      '<p class="muted" style="font-size:.78rem;margin-top:8px">הוצאות לפי תיוג עלויות הגיליון (מסך "עלויות גיליון"). גיליון בלי עלויות מוזנות יראה רווח מלא.</p>';
+  } else if (_profitDim === 'agent') {
+    const by = {};
+    priced.forEach(a => { const ag = custAgent[a.customer_id] || 0; const b = by[ag] = by[ag] || { rev: 0, disc: 0, list: 0, count: 0 }; b.rev += net(a); b.disc += Math.max(0, Number(a.discount) || 0); b.list += listPrice(a); b.count++; });
+    const items = Object.entries(by).map(([ag, v]) => ({ label: Number(ag) ? (nameOf('agents', Number(ag)) || 'סוכן #' + ag) : 'ללא סוכן', ...v })).sort((a, b) => b.rev - a.rev);
+    head = ['סוכן', 'מודעות', 'הכנסה נטו', 'הנחות שניתנו', 'אחוז הנחה ממחירון'];
+    rows = items.map(it => [it.label, it.count, R(it.rev), R(it.disc), it.list ? R(it.disc / it.list * 100) + '%' : '—']);
+    html = _profitTable(head, rows, [3]) +
+      '<p class="muted" style="font-size:.78rem;margin-top:8px">הוצאות הגיליון אינן מפוצלות לפי סוכן — עמלות בפועל בדוח העמלות.</p>';
+  } else {
+    const by = {};
+    priced.forEach(a => { const b = by[a.customer_id] = by[a.customer_id] || { rev: 0, disc: 0, list: 0, count: 0 }; b.rev += net(a); b.disc += Math.max(0, Number(a.discount) || 0); b.list += listPrice(a); b.count++; });
+    const items = Object.entries(by).map(([cid, v]) => ({ label: nameOf('customers', Number(cid)) || 'לקוח #' + cid, ...v })).sort((a, b) => b.rev - a.rev).slice(0, 60);
+    head = ['לקוח', 'מודעות', 'הכנסה נטו', 'הנחות (שחיקה)', 'אחוז הנחה ממחירון'];
+    rows = items.map(it => [it.label, it.count, R(it.rev), R(it.disc), it.list ? R(it.disc / it.list * 100) + '%' : '—']);
+    html = _profitTable(head, rows, [3]) +
+      '<p class="muted" style="font-size:.78rem;margin-top:8px">"שחיקה" = כמה הנחה הלקוח מקבל ביחס למחירון. 60 הלקוחות הגדולים.</p>';
+  }
+  _profitHead = head; _repData = rows;
+  box.innerHTML = html;
+}
+
+function _profitTable(head, rows, moneyColsExtra, footRow) {
+  const moneyCols = new Set([2, 3, ...(moneyColsExtra || []).filter(i => i !== 5)]);
+  return `<table class="data"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
+${rows.map(r => `<tr>${r.map((v, i) => {
+    if (i === 0) return `<td><b>${esc(String(v))}</b></td>`;
+    if (moneyCols.has(i) && typeof v === 'number') {
+      const clr = (head[i] === 'רווח') ? `color:${v >= 0 ? 'var(--ok)' : 'var(--danger)'};font-weight:700` : '';
+      return `<td style="${clr}">${money(v)}</td>`;
+    }
+    return `<td>${esc(String(v))}</td>`;
+  }).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" class="empty">אין נתונים</td></tr>`}
+</tbody>${footRow ? `<tfoot>${footRow}</tfoot>` : ''}</table>`;
 }
