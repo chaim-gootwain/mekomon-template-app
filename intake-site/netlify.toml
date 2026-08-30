@@ -1,0 +1,3 @@
+# אתר סטטי — אין build. Netlify Forms מזהה את הטופס מ-index.html.
+[build]
+  publish = "."
