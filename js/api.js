@@ -324,3 +324,74 @@ async function phoneCall(phone) {
     toast('החייגן עדיין לא מחובר (ממתין להגדרת Voicenter)', true);
   }
 }
+
+/* ---------- 10. מעקב היסטוריה — Audit (פיצ'ר #11) ----------
+   צופה גנרי ברשומות audit_log של שורה: auditShow('customers', id, 'שם').
+   הכתיבה נעשית ע"י טריגרים ב-DB (מיגרציית audit_log) — לא מכאן. */
+
+const AUDIT_FIELD_HE = {
+  name: 'שם', invoice_name: 'שם לחשבונית', phone: 'טלפון', whatsapp: 'וואטסאפ', email: 'מייל',
+  contact_person: 'איש קשר', contact_role: 'תפקיד', city: 'עיר', address: 'כתובת', field: 'תחום',
+  business_id: 'ח.פ/עוסק', status: 'סטטוס', status_reason: 'סיבת סטטוס', crm_status: 'סטטוס CRM',
+  agent_id: 'סוכן', payment_terms: 'תנאי תשלום', credit_limit: 'מסגרת אשראי', notes: 'הערות',
+  amount: 'סכום', price: 'מחיר', discount: 'הנחה', due_date: 'תאריך יעד', issued_date: 'תאריך חיוב',
+  paid_date: 'תאריך תשלום', method: 'אמצעי תשלום', description: 'פירוט', invoice_number: 'מס\' חשבונית',
+  title: 'כותרת', page_number: 'עמוד', issue_id: 'גיליון', deal_stage: 'שלב עסקה', source: 'מקור',
+  follow_up: 'תאריך מעקב', follow_up_time: 'שעת מעקב', total_price: 'מחיר כולל', total_inserts: 'כמות פרסומים',
+  is_standing_order: 'הוראת קבע', standing_order_amount: 'סכום הו"ק', active: 'פעיל',
+  fixed_discount: 'הנחה קבועה', order_doc_type: 'סוג מסמך'
+};
+const AUDIT_ACTION_HE = { insert: '➕ נוצר', update: '✏️ עודכן', delete: '🗑 נמחק' };
+
+let _auditUsers = null;
+async function _auditUserName(uid) {
+  if (!uid) return 'מערכת';
+  if (!_auditUsers) {
+    _auditUsers = {};
+    try {
+      const rows = await run(db.from('profiles').select('id,full_name'));
+      rows.forEach(p => _auditUsers[p.id] = p.full_name || '');
+    } catch (e) { }
+  }
+  return _auditUsers[uid] || 'משתמש';
+}
+
+async function auditShow(tableName, rowId, title) {
+  let rows = [];
+  try {
+    rows = await run(db.from('audit_log').select('*')
+      .eq('table_name', tableName).eq('row_id', rowId)
+      .order('at', { ascending: false }).limit(200));
+  } catch (e) {
+    toast('טבלת ההיסטוריה עוד לא קיימת — יש להריץ את מיגרציית audit_log', true);
+    return;
+  }
+  await _auditUserName(rows.length ? rows[0].user_id : null); // טוען את מפת השמות
+  const fh = f => AUDIT_FIELD_HE[f] || f;
+  const val = v => v === '' || v == null ? '—' : esc(String(v).length > 60 ? String(v).slice(0, 60) + '…' : v);
+  const items = [];
+  for (const r of rows) {
+    const who = await _auditUserName(r.user_id);
+    if (r.action === 'update') {
+      items.push(`<tr><td style="white-space:nowrap">${heDateTime(r.at)}</td><td>${esc(who)}</td>
+        <td><b>${esc(fh(r.field))}</b></td><td dir="auto">${val(r.old_value)} ← ${val(r.new_value)}</td></tr>`);
+    } else {
+      items.push(`<tr><td style="white-space:nowrap">${heDateTime(r.at)}</td><td>${esc(who)}</td>
+        <td colspan="2"><b>${AUDIT_ACTION_HE[r.action] || r.action}</b></td></tr>`);
+    }
+  }
+  document.getElementById('auditOv')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'auditOv';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,40,.55);display:flex;align-items:center;justify-content:center;z-index:99998;padding:16px;direction:rtl';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:16px;padding:20px;max-width:640px;width:96%;max-height:86vh;overflow:auto">
+    <h3 style="margin:0 0 4px">🕘 היסטוריית שינויים${title ? ' — ' + esc(title) : ''}</h3>
+    <p class="muted" style="font-size:.8rem;margin:0 0 10px">מי שינה מה ומתי (עד 200 שינויים אחרונים). נרשם אוטומטית מרגע הפעלת המעקב.</p>
+    ${items.length ? `<div class="table-wrap"><table class="data">
+      <thead><tr><th>מתי</th><th>מי</th><th>שדה</th><th>שינוי (ישן ← חדש)</th></tr></thead>
+      <tbody>${items.join('')}</tbody></table></div>` : '<p class="empty">אין עדיין רשומות היסטוריה לשורה הזו</p>'}
+    <div style="margin-top:12px;text-align:left"><button class="btn btn-ghost" onclick="document.getElementById('auditOv').remove()">סגירה</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+}
