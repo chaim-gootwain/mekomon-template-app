@@ -106,7 +106,7 @@ document.getElementById('viewModal').innerHTML = `
 </div>
 <p class="muted" style="font-size:.85rem;margin-top:6px">${esc(c.description)}</p>
 ${pays.length ? `<b style="font-size:.88rem">תשלומים:</b>
-<ul class="dash-list">${pays.map(p => `<li><span>${heDate(p.paid_date)} · ${PAY_METHODS[p.method]}${p.check_due_date ? ' (פירעון ' + heDate(p.check_due_date) + ')' : ''}</span><b>${money(p.amount)}</b></li>`).join('')}</ul>` : ''}
+<ul class="dash-list">${pays.map(p => `<li><span>${heDate(p.paid_date)} · ${PAY_METHODS[p.method]}${p.check_due_date ? ' (פירעון ' + heDate(p.check_due_date) + ')' : ''}${p.bounced ? ` <span class="pill red">↩️ חזר${p.bounced_date ? ' ' + heDate(p.bounced_date) : ''}</span>` : ''}</span><b style="${Number(p.amount) < 0 ? 'color:var(--danger)' : ''}">${money(p.amount)}</b>${(!p.bounced && Number(p.amount) > 0) ? ` <button class="btn btn-sm btn-ghost" style="color:var(--danger)" onclick="paymentMarkBounced(${p.id}, ${id})" title="סימון התשלום כצ'ק שחזר / הוראה שנדחתה">↩️ חזר</button>` : ''}</li>`).join('')}</ul>` : ''}
 <div class="m-actions" style="flex-wrap:wrap">
 ${!c.invoice_number && !['cancelled', 'lost'].includes(c.status) ? `
 <button class="btn btn-sm" onclick="chargeSetInvoice(${id})">🧾 רישום מס' חשבונית (מחשבונית ירוקה)</button>` : ''}
@@ -267,4 +267,70 @@ notes: 'עמלת ' + month,
 }));
 toast('נרשם התשלום + הוצאה בתזרים');
 openPage('commissions');
+}
+
+/* ============================================================
+   צ'קים שחזרו (פיצ'ר #8)
+   ------------------------------------------------------------
+   סימון תשלום כ"חזר": מסמן את התשלום, מוסיף תנועת ביטול (תשלום
+   שלילי) כך שכל חישובי היתרה במערכת נשארים נכונים, פותח מחדש את
+   החיוב, רושם ביומן הלקוח ומדווח למנוע ההתראות. אין פעולה כספית.
+   ============================================================ */
+
+async function paymentMarkBounced(paymentId, chargeId) {
+  let p;
+  try {
+    p = await run(db.from('payments').select('*').eq('id', paymentId).single());
+  } catch (e) { toast('התשלום לא נמצא', true); return; }
+  if (p.bounced) { toast('התשלום כבר מסומן כחזר', true); return; }
+  if (!(Number(p.amount) > 0)) { toast('אי אפשר לסמן תנועת ביטול', true); return; }
+  const custName = nameOf('customers', p.customer_id) || 'הלקוח';
+  const reason = prompt(`סימון תשלום של ${money(p.amount)} מ-${custName} כצ'ק שחזר / הוראה שנדחתה.\nסיבה (לא חובה):`, '');
+  if (reason === null) return;
+  const T = today();
+
+  // 1) סימון התשלום המקורי — אם העמודות חסרות, עוצרים לפני שנוגעים בכסף
+  try {
+    await run(db.from('payments').update({ bounced: true, bounced_reason: reason || null, bounced_date: T }).eq('id', paymentId));
+  } catch (e) { toast('עמודות הסימון חסרות — יש להריץ את מיגרציית bounced_checks', true); return; }
+
+  // 2) תנועת ביטול — מאזנת את התשלום כך שהיתרה חוזרת להיות פתוחה
+  try {
+    await run(db.from('payments').insert({
+      charge_id: p.charge_id, customer_id: p.customer_id,
+      amount: -Number(p.amount), method: p.method, paid_date: T,
+      notes: 'ביטול תשלום — צ\'ק/תשלום חזר' + (reason ? ' (' + reason + ')' : '') + ' [bounce:' + paymentId + ']'
+    }));
+  } catch (e) { toast('יצירת תנועת הביטול נכשלה: ' + (e.message || e), true); return; }
+
+  // 3) פתיחת החיוב מחדש לפי היתרה המעודכנת
+  try {
+    const cid = chargeId || p.charge_id;
+    if (cid) {
+      const ch = await run(db.from('charges').select('id,amount,due_date,status').eq('id', cid).single());
+      const allPays = await run(db.from('payments').select('amount').eq('charge_id', cid));
+      const paid = allPays.reduce((s, x) => s + Number(x.amount || 0), 0);
+      let st = 'pending';
+      if (paid >= Number(ch.amount) - 0.005) st = 'paid';
+      else if (paid > 0.005) st = 'partial';
+      else if (ch.due_date && ch.due_date < T) st = 'overdue';
+      if (st !== ch.status && !['cancelled', 'lost'].includes(ch.status)) {
+        await run(db.from('charges').update({ status: st }).eq('id', cid));
+      }
+    }
+  } catch (e) { console.error('bounce/reopen', e); }
+
+  // 4) יומן + התראה
+  try { await addInteraction('customer', p.customer_id, `↩️ צ'ק/תשלום חזר — ${money(p.amount)}${reason ? ' (' + reason + ')' : ''}. החיוב נפתח מחדש.`); } catch (e) { }
+  try {
+    if (typeof alertsPublishEvent === 'function') {
+      await alertsPublishEvent('check_bounced', {
+        customer_id: p.customer_id, customer_name: custName,
+        amount: Number(p.amount), payment_id: paymentId
+      }, 'billing');
+    }
+  } catch (e) { }
+
+  toast('↩️ סומן כחזר — נוצרה תנועת ביטול והחיוב נפתח מחדש');
+  if (chargeId || p.charge_id) chargeCard(chargeId || p.charge_id);
 }
