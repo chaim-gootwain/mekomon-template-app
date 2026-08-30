@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הצטרפות למערכת — טופס קליטה לעיתון חדש</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --brand:#0e7a6c; --brand-dark:#0a4f46; --brand-light:#e2f2ef;
+  --accent:#e8a13d; --bg:#f7f5f1; --card:#ffffff; --ink:#22302e;
+  --muted:#6b7a77; --line:#e3e0da; --err:#c0392b; --ok:#1d8a4e;
+  --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Heebo',system-ui,-apple-system,sans-serif;
+  background:var(--bg); color:var(--ink); line-height:1.55;
+  min-height:100vh;
+}
+.wrap{max-width:720px;margin:0 auto;padding:16px 16px 60px}
+header.top{
+  text-align:center; padding:34px 12px 10px;
+}
+header.top .logo-dot{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:56px;height:56px;border-radius:18px;
+  background:linear-gradient(135deg,var(--brand),var(--brand-dark));
+  color:#fff;font-size:28px;margin-bottom:12px;box-shadow:0 8px 20px rgba(14,122,108,.25);
+}
+header.top h1{font-size:26px;font-weight:800;letter-spacing:-.3px}
+header.top p{color:var(--muted);max-width:520px;margin:8px auto 0;font-size:15px}
+
+/* ---- progress ---- */
+.progress{display:flex;justify-content:space-between;margin:28px 4px 18px;position:relative}
+.progress::before{
+  content:"";position:absolute;top:17px;right:12%;left:12%;height:3px;
+  background:var(--line);border-radius:2px;z-index:0;
+}
+.progress .bar{
+  position:absolute;top:17px;right:12%;height:3px;background:var(--brand);
+  border-radius:2px;z-index:1;transition:width .35s ease;
+}
+.pstep{position:relative;z-index:2;text-align:center;flex:1}
+.pstep .dot{
+  width:36px;height:36px;border-radius:50%;background:#fff;border:2px solid var(--line);
+  display:inline-flex;align-items:center;justify-content:center;font-weight:700;
+  color:var(--muted);transition:all .25s;
+}
+.pstep.active .dot{border-color:var(--brand);color:var(--brand);box-shadow:0 0 0 5px var(--brand-light)}
+.pstep.done .dot{background:var(--brand);border-color:var(--brand);color:#fff}
+.pstep .plabel{display:block;font-size:12px;color:var(--muted);margin-top:6px;font-weight:500}
+.pstep.active .plabel{color:var(--brand);font-weight:700}
+
+/* ---- card / steps ---- */
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:26px 22px;box-shadow:0 3px 16px rgba(34,48,46,.05);
+}
+.step{display:none;animation:fadein .3s ease}
+.step.on{display:block}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.step h2{font-size:20px;font-weight:800;margin-bottom:4px}
+.step .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+
+.field{margin-bottom:20px}
+.field>label{display:block;font-weight:700;font-size:15px;margin-bottom:5px}
+.req::after{content:" *";color:var(--err)}
+.hint{font-size:13px;color:var(--muted);margin:-2px 0 7px}
+input[type=text],input[type=tel],input[type=email],input[type=password],select,textarea{
+  width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:10px;
+  font:inherit;font-size:15px;background:#fff;color:var(--ink);
+  transition:border-color .15s, box-shadow .15s;
+}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-light);
+}
+textarea{resize:vertical;min-height:84px}
+.invalid{border-color:var(--err)!important;background:#fdf6f5}
+.err-msg{display:none;color:var(--err);font-size:13px;margin-top:5px;font-weight:500}
+.field.show-err .err-msg{display:block}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:560px){.grid2{grid-template-columns:1fr}}
+
+/* radios as cards */
+.choice-group{display:flex;flex-direction:column;gap:9px}
+.choice{
+  display:flex;align-items:flex-start;gap:10px;border:1.5px solid var(--line);
+  border-radius:11px;padding:12px 13px;cursor:pointer;transition:all .15s;background:#fff;
+}
+.choice:hover{border-color:#c8d8d4}
+.choice input{margin-top:4px;accent-color:var(--brand);flex-shrink:0}
+.choice.picked{border-color:var(--brand);background:var(--brand-light)}
+.choice .ct{font-weight:600;font-size:15px}
+.choice .cd{font-size:13px;color:var(--muted)}
+.choice-row{display:flex;flex-wrap:wrap;gap:9px}
+.choice-row .choice{flex:1 1 130px}
+
+.panel{
+  display:none;background:#f6faf9;border:1px dashed #bcd8d2;border-radius:11px;
+  padding:15px 14px;margin-top:11px;
+}
+.panel.on{display:block}
+.panel .howto{
+  font-size:13.5px;color:#3c5551;background:#fff;border-radius:9px;
+  padding:11px 12px;margin-bottom:13px;border:1px solid #e0ece9;
+}
+.panel .howto b{color:var(--brand-dark)}
+.panel .howto ol{margin:6px 18px 0 0}
+.panel .howto li{margin-bottom:3px}
+
+.lock-note{
+  display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#3c5551;
+  background:var(--brand-light);border-radius:10px;padding:10px 12px;margin-top:10px;
+}
+
+/* url fields */
+.url-row{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.url-row .num{font-weight:700;color:var(--muted);width:20px;flex-shrink:0;direction:ltr;unicode-bidi:isolate}
+.url-row input{direction:ltr;text-align:left}
+.url-suffix{color:var(--muted);font-size:14px;direction:ltr;flex-shrink:0}
+
+/* colors */
+.color-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px;margin-bottom:14px}
+.color-item{text-align:center}
+.color-item label{font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600}
+.color-item input[type=color]{
+  width:100%;height:44px;border:1.5px solid var(--line);border-radius:10px;cursor:pointer;background:#fff;padding:3px;
+}
+.preview-box{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.preview-box .pv-head{padding:13px 16px;color:#fff;font-weight:800;font-size:17px}
+.preview-box .pv-body{padding:16px}
+.preview-box .pv-title{font-weight:800;font-size:16px;margin-bottom:4px}
+.preview-box .pv-text{font-size:13.5px;margin-bottom:12px}
+.preview-box .pv-chip{display:inline-block;font-size:12.5px;border-radius:20px;padding:3px 12px;margin-inline-end:8px;font-weight:600}
+.preview-box .pv-btn{display:inline-block;border:none;border-radius:9px;padding:8px 20px;font:inherit;font-weight:700;font-size:14px;color:#fff}
+
+/* logo upload */
+.upload-zone{
+  border:2px dashed #c4cdc9;border-radius:12px;padding:24px;text-align:center;
+  cursor:pointer;transition:all .15s;background:#fbfbfa;
+}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--brand);background:var(--brand-light)}
+.upload-zone .uz-icon{font-size:30px}
+.upload-zone p{font-size:14px;color:var(--muted);margin-top:6px}
+.upload-zone input{display:none}
+.logo-preview{display:none;text-align:center;margin-top:12px}
+.logo-preview img{max-height:110px;max-width:100%;border-radius:10px;border:1px solid var(--line);padding:8px;background:
+  repeating-conic-gradient(#f0f0ee 0 25%,#fff 0 50%) 50%/22px 22px}
+.logo-preview .fname{font-size:13px;color:var(--muted);margin-top:6px}
+.logo-preview .rm{color:var(--err);font-size:13px;background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline}
+
+/* dynamic tables */
+.dyn-rows{display:flex;flex-direction:column;gap:9px;margin-bottom:9px}
+.dyn-row{display:flex;gap:8px;align-items:center}
+.dyn-row input,.dyn-row select{flex:1;min-width:0}
+.dyn-row .price-in{flex:0 0 108px}
+.dyn-row .del{
+  flex-shrink:0;background:none;border:none;color:#b6564a;font-size:19px;cursor:pointer;
+  width:32px;height:32px;border-radius:8px;line-height:1;
+}
+.dyn-row .del:hover{background:#fbeeec}
+.add-row{
+  background:none;border:1.5px dashed var(--brand);color:var(--brand);border-radius:9px;
+  padding:8px 16px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;
+}
+.add-row:hover{background:var(--brand-light)}
+
+/* nav */
+.nav{display:flex;justify-content:space-between;gap:10px;margin-top:28px}
+.btn{
+  border:none;border-radius:11px;padding:12px 26px;font:inherit;font-weight:700;
+  font-size:15.5px;cursor:pointer;transition:all .15s;
+}
+.btn-next{background:var(--brand);color:#fff;box-shadow:0 4px 12px rgba(14,122,108,.28)}
+.btn-next:hover{background:var(--brand-dark)}
+.btn-back{background:none;color:var(--muted);border:1.5px solid var(--line)}
+.btn-back:hover{color:var(--ink);border-color:#c6c2ba}
+.btn-send{background:var(--accent);color:#4a3312;box-shadow:0 4px 14px rgba(232,161,61,.35);font-size:16.5px;padding:13px 34px}
+.btn-send:hover{filter:brightness(1.05)}
+.btn:disabled{opacity:.55;cursor:wait;box-shadow:none}
+
+.step-err{
+  display:none;background:#fdf2f0;color:var(--err);border:1px solid #f0cdc7;
+  border-radius:10px;padding:11px 13px;font-size:14px;margin-top:16px;font-weight:500;
+}
+.step-err.on{display:block}
+
+/* review */
+.review-pre{
+  background:#f4f7f6;border:1px solid var(--line);border-radius:11px;padding:15px;
+  font-family:inherit;font-size:13.5px;white-space:pre-wrap;direction:rtl;text-align:right;
+  max-height:340px;overflow:auto;
+}
+
+/* thanks */
+#thanks{display:none;text-align:center;padding:14px 0}
+#thanks .big{font-size:52px}
+#thanks h2{font-size:24px;font-weight:800;margin:8px 0 6px}
+#thanks p{color:var(--muted);max-width:460px;margin:0 auto 18px;font-size:15px}
+.copy-wrap{position:relative;text-align:right;margin-top:14px}
+.copy-btn{
+  position:absolute;top:10px;left:10px;background:var(--brand);color:#fff;border:none;
+  border-radius:8px;padding:6px 14px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;
+}
+.copy-btn:hover{background:var(--brand-dark)}
+
+footer{text-align:center;color:#a5aca9;font-size:12.5px;margin-top:34px}
+.sec-note{
+  display:flex;gap:10px;align-items:flex-start;text-align:right;
+  background:var(--brand-light);border-radius:11px;padding:12px 14px;font-size:13.5px;
+  color:#2e4a45;margin-bottom:20px;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="logo-dot">📰</div>
+  <h1>ברוכים הבאים! בואו נקים את העיתון שלכם</h1>
+  <p>כמה דקות של מילוי — וכל מה שצריך כדי להקים לכם מערכת משלכם, עם המיתוג והחיבורים שלכם, יהיה אצלנו. אפשר לדלג על מה שאין לכם כרגע ולהשלים אחר כך.</p>
+</header>
+
+<div class="progress" id="progress">
+  <div class="bar" id="pbar"></div>
+  <div class="pstep" data-p="0"><span class="dot">1</span><span class="plabel">מיתוג ופרטים</span></div>
+  <div class="pstep" data-p="1"><span class="dot">2</span><span class="plabel">חיבורים</span></div>
+  <div class="pstep" data-p="2"><span class="dot">3</span><span class="plabel">תפעול</span></div>
+  <div class="pstep" data-p="3"><span class="dot">4</span><span class="plabel">סיכום ושליחה</span></div>
+</div>
+
+<div class="card" id="formCard">
+<form name="intake" method="POST" action="/" data-netlify="true" netlify-honeypot="bot-field" enctype="multipart/form-data" id="intakeForm" novalidate>
+  <input type="hidden" name="form-name" value="intake">
+  <p style="display:none"><label>אל תמלאו: <input name="bot-field"></label></p>
+
+  <!-- ═══════════ שלב 1: מיתוג ופרטי העיתון ═══════════ -->
+  <section class="step on" data-step="0">
+    <h2>מיתוג ופרטי העיתון</h2>
+    <p class="sub">הפרטים שיופיעו בכותרת המערכת, במסמכים ובמיילים שיוצאים ממנה.</p>
+
+    <div class="field" data-check="req">
+      <label class="req" for="paper_name">שם העיתון</label>
+      <input type="text" id="paper_name" name="paper_name" placeholder='למשל: "עמנואל שלי"'>
+      <div class="err-msg">איך קוראים לעיתון? בלי זה אי אפשר להתחיל 🙂</div>
+    </div>
+
+    <div class="field">
+      <label for="slogan">סלוגן / כותרת משנה</label>
+      <p class="hint">שורה קצרה שמופיעה מתחת לשם. אפשר להשאיר ריק.</p>
+      <input type="text" id="slogan" name="slogan" placeholder='למשל: "העיתון של כולנו"'>
+    </div>
+
+    <div class="grid2">
+      <div class="field" data-check="phone">
+        <label class="req" for="sys_phone">טלפון המערכת</label>
+        <p class="hint">המספר שיופיע לקוראים ולמפרסמים.</p>
+        <input type="tel" id="sys_phone" name="sys_phone" placeholder="050-1234567">
+        <div class="err-msg">נראה שהמספר לא תקין — צריך מספר ישראלי (קווי או נייד).</div>
+      </div>
+      <div class="field" data-check="email">
+        <label class="req" for="sys_email">מייל המערכת</label>
+        <p class="hint">הכתובת הרשמית של העיתון — ממנה גם יישלחו מיילים.</p>
+        <input type="email" id="sys_email" name="sys_email" placeholder="office@example.com" dir="ltr" style="text-align:left">
+        <div class="err-msg">כתובת המייל לא נראית תקינה.</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="area">אזור הפצה</label>
+      <input type="text" id="area" name="area" placeholder='למשל: "עמנואל והסביבה"'>
+    </div>
+
+    <div class="field" id="urlField">
+      <label class="req">כתובת אתר רצויה</label>
+      <p class="hint">תנו 2–3 אפשרויות לפי סדר עדיפות — אותיות באנגלית, מספרים ומקפים בלבד. הכתובת הסופית כפופה לזמינות.</p>
+      <div class="url-row"><span class="num">1)</span><input type="text" name="url1" id="url1" class="slug" placeholder="my-paper" dir="ltr"></div>
+      <div class="url-row"><span class="num">2)</span><input type="text" name="url2" id="url2" class="slug" placeholder="mypaper-news" dir="ltr"></div>
+      <div class="url-row"><span class="num">3)</span><input type="text" name="url3" id="url3" class="slug" placeholder="(לא חובה)" dir="ltr"></div>
+      <div class="err-msg" id="urlErr">צריך לפחות שתי אפשרויות, באותיות אנגליות/מספרים/מקפים בלבד.</div>
+    </div>
+
+    <div class="field">
+      <label for="own_domain">יש לכם כבר דומיין משלכם?</label>
+      <p class="hint">אם לעיתון יש דומיין קיים (למשל my-paper.co.il) ותרצו לחבר אותו — כתבו אותו כאן. אם אין, פשוט דלגו.</p>
+      <input type="text" id="own_domain" name="own_domain" placeholder="my-paper.co.il" dir="ltr" style="text-align:left">
+      <div class="panel" id="dnsPanel">
+        <label style="font-weight:700;font-size:14px;display:block;margin-bottom:8px">למי יש גישה לניהול ה-DNS של הדומיין?</label>
+        <div class="choice-row">
+          <label class="choice"><input type="radio" name="dns_access" value="אני (הלקוח)"><span class="ct">לי</span></label>
+          <label class="choice"><input type="radio" name="dns_access" value="בונה האתרים שלי"><span class="ct">לבונה האתרים שלי</span></label>
+          <label class="choice"><input type="radio" name="dns_access" value="לא יודע"><span class="ct">לא יודע/ת</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field" data-check="req">
+        <label class="req" for="contact_name">שם איש קשר</label>
+        <p class="hint">עם מי מדברים כשצריך משהו?</p>
+        <input type="text" id="contact_name" name="contact_name" placeholder="שם מלא">
+        <div class="err-msg">חסר שם איש קשר.</div>
+      </div>
+      <div class="field" data-check="phone">
+        <label class="req" for="contact_phone">טלפון ישיר</label>
+        <input type="tel" id="contact_phone" name="contact_phone" placeholder="050-1234567">
+        <div class="err-msg">נראה שהמספר לא תקין.</div>
+      </div>
+    </div>
+
+    <div class="field" data-check="email">
+      <label class="req" for="admin_email">מייל מנהל</label>
+      <p class="hint">הכתובת שאיתה תתחברו למערכת כמנהלים — היא תקבל הרשאות מלאות. אפשר שתהיה זהה למייל המערכת.</p>
+      <input type="email" id="admin_email" name="admin_email" placeholder="you@gmail.com" dir="ltr" style="text-align:left">
+      <div class="err-msg">כתובת המייל לא נראית תקינה.</div>
+    </div>
+
+    <div class="field">
+      <label>ערכת צבעים</label>
+      <div class="choice-group">
+        <label class="choice picked">
+          <input type="radio" name="color_mode" value="לפי גווני הלוגו" checked>
+          <span><span class="ct">לפי גווני הלוגו</span><br><span class="cd">אנחנו נגזור ערכת צבעים מהלוגו שתעלו למטה — הכי פשוט.</span></span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="color_mode" value="ידני">
+          <span><span class="ct">אני רוצה לבחור בעצמי</span><br><span class="cd">בחירת חמישה צבעים עם תצוגה מקדימה חיה.</span></span>
+        </label>
+      </div>
+      <div class="panel" id="colorPanel">
+        <div class="color-grid">
+          <div class="color-item"><label>ראשי</label><input type="color" name="color_brand" id="c_brand" value="#0e7a6c"></div>
+          <div class="color-item"><label>כהה</label><input type="color" name="color_dark" id="c_dark" value="#0a4f46"></div>
+          <div class="color-item"><label>בהיר</label><input type="color" name="color_light" id="c_light" value="#e2f2ef"></div>
+          <div class="color-item"><label>הדגשה</label><input type="color" name="color_accent" id="c_accent" value="#e8a13d"></div>
+          <div class="color-item"><label>רקע</label><input type="color" name="color_bg" id="c_bg" value="#f7f5f1"></div>
+        </div>
+        <div class="preview-box" id="pvBox">
+          <div class="pv-head" id="pvHead">שם העיתון שלכם</div>
+          <div class="pv-body" id="pvBody">
+            <div class="pv-title" id="pvTitle">כך תיראה כותרת במערכת</div>
+            <div class="pv-text" id="pvText">וכך ייראה טקסט רגיל על הרקע שבחרתם.</div>
+            <span class="pv-chip" id="pvChip">תגית לדוגמה</span>
+            <button type="button" class="pv-btn" id="pvBtn">כפתור לדוגמה</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field" id="logoField">
+      <label class="req">לוגו העיתון</label>
+      <p class="hint">PNG / JPG / SVG. עדיף קובץ באיכות הכי טובה שיש לכם (רצוי עם רקע שקוף) — הלוגו מופיע בכותרת, במסמכים ובמיילים, ולוגו חד נראה מקצועי בכל מקום.</p>
+      <label class="upload-zone" id="logoZone">
+        <span class="uz-icon">🖼️</span>
+        <p><b>לחצו להעלאת הלוגו</b> או גררו קובץ לכאן</p>
+        <input type="file" name="logo" id="logoInput" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml">
+      </label>
+      <div class="logo-preview" id="logoPreview">
+        <img id="logoImg" alt="תצוגה מקדימה של הלוגו">
+        <div class="fname" id="logoName"></div>
+        <button type="button" class="rm" id="logoRemove">הסרה והעלאת קובץ אחר</button>
+      </div>
+      <div class="err-msg" id="logoErr">צריך להעלות קובץ לוגו (PNG / JPG / SVG, עד 8MB).</div>
+    </div>
+
+    <div class="nav">
+      <span></span>
+      <button type="button" class="btn btn-next" data-go="1">לשלב הבא ←</button>
+    </div>
+    <div class="step-err">יש כמה שדות שצריך להשלים — סימנּו אותם באדום למעלה.</div>
+  </section>
+
+  <!-- ═══════════ שלב 2: חיבורים ═══════════ -->
+  <section class="step" data-step="1">
+    <h2>חיבורים למערכות שלכם</h2>
+    <p class="sub">הכול כאן <b>לא חובה</b> — מה שאין לכם עכשיו, נשלים יחד אחר כך.</p>
+
+    <div class="sec-note">
+      <span style="font-size:18px">🔒</span>
+      <span><b>למה בטוח למלא כאן מפתחות?</b> כל מפתח או סיסמה שתמלאו בעמוד הזה נשמרים ישירות במסד נתונים מאובטח וייעודי, בערוץ מוצפן — הם <b>לא</b> נשלחים במייל ולא מופיעים בשום סיכום. גם לנו הם נגישים רק דרך הממשק המאובטח.</span>
+    </div>
+
+    <div class="field">
+      <label>תוכנת חשבוניות</label>
+      <p class="hint">כדי שהמערכת תפיק חשבוניות וקבלות אוטומטית מול התוכנה שאתם כבר עובדים איתה.</p>
+      <div class="choice-group">
+        <label class="choice"><input type="radio" name="invoice_software" value="חשבונית ירוקה"><span class="ct">חשבונית ירוקה</span></label>
+        <label class="choice"><input type="radio" name="invoice_software" value="EZcount"><span class="ct">EZcount</span></label>
+        <label class="choice"><input type="radio" name="invoice_software" value="iCount"><span class="ct">iCount</span></label>
+        <label class="choice"><input type="radio" name="invoice_software" value="אחר"><span class="ct">אחר</span></label>
+        <label class="choice"><input type="radio" name="invoice_software" value="אין עדיין" checked><span class="ct">אין עדיין</span></label>
+      </div>
+
+      <div class="panel" data-panel="חשבונית ירוקה">
+        <div class="howto"><b>איפה מוצאים את המפתחות בחשבונית ירוקה?</b>
+          <ol>
+            <li>נכנסים לחשבון בחשבונית ירוקה (greeninvoice.co.il).</li>
+            <li>הגדרות (גלגל השיניים) ← <b>חשבון</b> ← לשונית <b>API</b>.</li>
+            <li>לוחצים <b>"הוספת מפתח"</b> — ומעתיקים לכאן את ה-Key ואת ה-Secret (ה-Secret מוצג פעם אחת בלבד — העתיקו מיד).</li>
+          </ol>
+        </div>
+        <div class="grid2">
+          <div class="field" style="margin-bottom:0"><label>API Key ID</label><input type="text" id="gi_key" data-secret="gi_key" dir="ltr" style="text-align:left" autocomplete="off"></div>
+          <div class="field" style="margin-bottom:0"><label>API Secret</label><input type="password" id="gi_secret" data-secret="gi_secret" dir="ltr" style="text-align:left" autocomplete="new-password"></div>
+        </div>
+      </div>
+
+      <div class="panel" data-panel="EZcount">
+        <div class="howto"><b>איפה מוצאים את המפתח ב-EZcount?</b>
+          <ol>
+            <li>נכנסים לחשבון EZcount.</li>
+            <li>הגדרות ← <b>הגדרות API</b> (או "פיתוח / API").</li>
+            <li>מייצרים / מעתיקים את ה-<b>API Key</b> ומדביקים כאן.</li>
+          </ol>
+          אם אתם לא מוצאים — כתבו בהערות בסוף ונעזור.
+        </div>
+        <div class="field" style="margin-bottom:0"><label>API Key</label><input type="password" id="ez_key" data-secret="ez_key" dir="ltr" style="text-align:left" autocomplete="new-password"></div>
+      </div>
+
+      <div class="panel" data-panel="iCount">
+        <div class="howto"><b>פרטי התחברות ל-iCount:</b> נצטרך את מזהה החברה (Company ID) ושם המשתמש שאיתם נכנסים ל-iCount, וסיסמה או API Token (אם יש לכם — הגדרות ← API).</div>
+        <div class="grid2">
+          <div class="field" style="margin-bottom:0"><label>Company ID</label><input type="text" id="ic_cid" data-secret="ic_cid" dir="ltr" style="text-align:left" autocomplete="off"></div>
+          <div class="field" style="margin-bottom:0"><label>שם משתמש</label><input type="text" id="ic_user" data-secret="ic_user" dir="ltr" style="text-align:left" autocomplete="off"></div>
+        </div>
+        <div class="field" style="margin:10px 0 0"><label>סיסמה / API Token</label><input type="password" id="ic_pass" data-secret="ic_pass" dir="ltr" style="text-align:left" autocomplete="new-password"></div>
+      </div>
+
+      <div class="panel" data-panel="אחר">
+        <div class="field"><label>איך קוראים לתוכנה?</label><input type="text" name="invoice_other_name" id="invoice_other_name"></div>
+        <div class="field" style="margin-bottom:0"><label>פרטי גישה שיש לכם (מפתח API, משתמש וכו')</label>
+          <p class="hint">כל מה שתכתבו כאן נשמר במסד המאובטח בלבד.</p>
+          <textarea id="other_inv_details" data-secret="other_inv_details" autocomplete="off"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>שליחת מיילים מהמערכת</label>
+      <p class="hint">המערכת שולחת ללקוחות שלכם דיוור, גזירי מודעות וחשבוניות במייל. מאיזו כתובת לשלוח?</p>
+      <div class="choice-group">
+        <label class="choice">
+          <input type="radio" name="email_mode" value="מייל המערכת">
+          <span><span class="ct">השתמשו במייל המערכת שמילאתי למעלה</span><br><span class="cd">נצטרך "סיסמה לאפליקציות" של Gmail — הסבר קצר בפנים.</span></span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="email_mode" value="תגדירו לי" checked>
+          <span><span class="ct">אין לי / תגדירו לי</span><br><span class="cd">נסתדר, נגדיר יחד אחר כך.</span></span>
+        </label>
+      </div>
+      <div class="panel" data-panel="מייל המערכת">
+        <div class="howto"><b>איך מייצרים סיסמה לאפליקציות ב-Gmail?</b> (לוקח דקה)
+          <ol>
+            <li>נכנסים ל-<span dir="ltr">myaccount.google.com</span> <b>מהחשבון של מייל המערכת</b> (זה שמילאתם למעלה — חשוב שזה אותו חשבון!).</li>
+            <li>בתפריט: <b>אבטחה</b> ← מוודאים ש<b>אימות דו-שלבי</b> פעיל (אם לא — מפעילים).</li>
+            <li>מחפשים בחיפוש למעלה <b>"סיסמאות לאפליקציות"</b> (App passwords) ← יוצרים סיסמה חדשה (שם חופשי, למשל "מערכת העיתון").</li>
+            <li>מעתיקים את 16 התווים לכאן — <b>בלי רווחים</b>.</li>
+          </ol>
+        </div>
+        <div class="field" style="margin-bottom:0"><label>סיסמה לאפליקציות — 16 תווים</label><input type="password" id="gmail_app_pass" data-secret="gmail_app_pass" dir="ltr" style="text-align:left" autocomplete="new-password" placeholder="abcdefghijklmnop"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>סליקת אשראי</label>
+      <p class="hint">אם אתם גובים מלקוחות בכרטיס אשראי — עם איזה ספק סליקה אתם עובדים?</p>
+      <div class="choice-row">
+        <label class="choice"><input type="radio" name="payment_provider" value="משולם"><span class="ct">משולם</span></label>
+        <label class="choice"><input type="radio" name="payment_provider" value="קארדקום"><span class="ct">קארדקום</span></label>
+        <label class="choice"><input type="radio" name="payment_provider" value="טרנזילה"><span class="ct">טרנזילה</span></label>
+        <label class="choice"><input type="radio" name="payment_provider" value="Grow"><span class="ct">Grow</span></label>
+        <label class="choice"><input type="radio" name="payment_provider" value="אחר"><span class="ct">אחר</span></label>
+        <label class="choice"><input type="radio" name="payment_provider" value="אין צורך" checked><span class="ct">אין צורך</span></label>
+      </div>
+      <div class="panel" id="payPanel">
+        <div class="field" id="payOtherName" style="display:none"><label>שם ספק הסליקה</label><input type="text" name="payment_other_name" id="payment_other_name"></div>
+        <div class="grid2">
+          <div class="field" style="margin-bottom:0"><label>מזהה מסוף / טרמינל</label><input type="text" id="pay_terminal" data-secret="pay_terminal" dir="ltr" style="text-align:left" autocomplete="off"></div>
+          <div class="field" style="margin-bottom:0"><label>מפתח API</label><input type="password" id="pay_key" data-secret="pay_key" dir="ltr" style="text-align:left" autocomplete="new-password"></div>
+        </div>
+        <p class="hint" style="margin-top:9px">לא בטוחים איפה זה? אין לחץ — אפשר לסמן את הספק ולהשלים את הפרטים אחר כך יחד עם חיים.</p>
+      </div>
+    </div>
+
+    <div class="field" style="margin-bottom:0">
+      <label for="other_integrations">חיבורים נוספים</label>
+      <p class="hint">מרכזיה / טלפוניה, מערכת דיוור, או כל מערכת אחרת שהעיתון עובד איתה וכדאי שנכיר.</p>
+      <textarea id="other_integrations" name="other_integrations" placeholder='למשל: "יש לנו מרכזיית Voicenter"'></textarea>
+    </div>
+
+    <div class="nav">
+      <button type="button" class="btn btn-back" data-go="0">→ חזרה</button>
+      <button type="button" class="btn btn-next" data-go="2">לשלב הבא ←</button>
+    </div>
+    <div class="step-err">משהו בשדות שמולאו לא תקין — בדקו את הסימונים באדום.</div>
+  </section>
+
+  <!-- ═══════════ שלב 3: תפעול ═══════════ -->
+  <section class="step" data-step="2">
+    <h2>איך העיתון שלכם עובד</h2>
+    <p class="sub">כמה פרטים תפעוליים כדי שהמערכת תתאים לקצב שלכם מהיום הראשון.</p>
+
+    <div class="field">
+      <label>תדירות ההוצאה</label>
+      <div class="grid2">
+        <div>
+          <select name="frequency" id="frequency">
+            <option value="שבועי" selected>שבועי</option>
+            <option value="דו-שבועי">דו-שבועי</option>
+            <option value="חודשי">חודשי</option>
+          </select>
+        </div>
+        <div>
+          <select name="publish_day" id="publish_day">
+            <option value="">— יום הפרסום —</option>
+            <option>ראשון</option><option>שני</option><option>שלישי</option>
+            <option>רביעי</option><option>חמישי</option><option>שישי</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="ad_deadline">מועד סגירת מודעות</label>
+      <p class="hint">עד מתי אפשר להכניס מודעות לגיליון הקרוב?</p>
+      <input type="text" id="ad_deadline" name="ad_deadline" placeholder='למשל: "יום שלישי ב-14:00"'>
+    </div>
+
+    <div class="field">
+      <label>קטגוריות מודעות ומחירון</label>
+      <p class="hint">אילו סוגי/גדלי מודעות אתם מוכרים, וכמה עולה כל אחד? הוסיפו שורה לכל סוג. אם יש לכם מחירון מוכן כקובץ — אפשר פשוט לצרף אותו למטה.</p>
+      <div class="dyn-rows" id="pricingRows"></div>
+      <button type="button" class="add-row" id="addPricing">+ הוספת סוג מודעה</button>
+      <div style="margin-top:13px">
+        <label style="font-weight:600;font-size:14px;display:block;margin-bottom:5px">או צרפו קובץ מחירון קיים:</label>
+        <input type="file" name="pricing_file" id="pricing_file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
+               style="font-size:14px">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>משתמשים נוספים במערכת</label>
+      <p class="hint">מי עוד בצוות צריך גישה? (גרפיקאי, מזכירה, מוכרן...) — כל אחד יקבל הזמנה למייל שלו.</p>
+      <div class="dyn-rows" id="userRows"></div>
+      <button type="button" class="add-row" id="addUser">+ הוספת משתמש</button>
+    </div>
+
+    <div class="field">
+      <label>פרטי העסק לחשבוניות</label>
+      <p class="hint">כפי שמופיע בתוכנת החשבוניות שלכם — כדי שהמסמכים ייצאו נכון.</p>
+      <div class="grid2">
+        <div><input type="text" name="business_name" id="business_name" placeholder="שם העסק הרשמי"></div>
+        <div>
+          <select name="business_type" id="business_type">
+            <option value="">— סוג העסק —</option>
+            <option>עוסק פטור</option>
+            <option>עוסק מורשה</option>
+            <option>חברה בע"מ</option>
+            <option>עמותה</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav">
+      <button type="button" class="btn btn-back" data-go="1">→ חזרה</button>
+      <button type="button" class="btn btn-next" data-go="3">לשלב הבא ←</button>
+    </div>
+  </section>
+
+  <!-- ═══════════ שלב 4: סיכום ושליחה ═══════════ -->
+  <section class="step" data-step="3">
+    <h2>רגע לפני שליחה</h2>
+    <p class="sub">עברו על הסיכום — אם משהו לא מדויק, אפשר לחזור אחורה ולתקן. מה שסומן "חסר להשלמה" נשלים יחד אחר כך, זה בסדר גמור.</p>
+
+    <div class="field">
+      <label for="notes">הערות / בקשות מיוחדות</label>
+      <textarea id="notes" name="notes" placeholder="כל דבר שחשוב שנדע..."></textarea>
+    </div>
+
+    <pre class="review-pre" id="reviewPre"></pre>
+
+    <!-- שדות נסתרים שמסוכמים ב-JS ונשלחים ל-Netlify (ללא סודות) -->
+    <input type="hidden" name="invoice_status" id="f_invoice_status">
+    <input type="hidden" name="email_status" id="f_email_status">
+    <input type="hidden" name="payment_status" id="f_payment_status">
+    <textarea name="pricing_list" id="f_pricing_list" style="display:none"></textarea>
+    <textarea name="extra_users" id="f_extra_users" style="display:none"></textarea>
+    <textarea name="missing" id="f_missing" style="display:none"></textarea>
+    <textarea name="summary" id="f_summary" style="display:none"></textarea>
+
+    <div class="step-err" id="sendErr"></div>
+
+    <div class="nav">
+      <button type="button" class="btn btn-back" data-go="2">→ חזרה</button>
+      <button type="submit" class="btn btn-send" id="sendBtn">🚀 שליחת הטופס</button>
+    </div>
+  </section>
+</form>
+
+<!-- ═══════════ מסך תודה ═══════════ -->
+<div id="thanks">
+  <div class="big">🎉</div>
+  <h2 id="thanksTitle">הטופס נשלח — תודה!</h2>
+  <p>קיבלנו את כל הפרטים ומתחילים להקים לכם את המערכת. חיים ייצור אתכם קשר בהמשך עם כתובת האתר והפרטים הראשונים. הנה סיכום של מה ששלחתם:</p>
+  <div class="copy-wrap">
+    <button type="button" class="copy-btn" id="copyBtn">📋 העתק</button>
+    <pre class="review-pre" id="thanksPre" style="max-height:none"></pre>
+  </div>
+</div>
+</div>
+
+<footer>מערכת ניהול מקומונים · הפרטים נשמרים באופן מאובטח ומשמשים להקמת המופע שלכם בלבד</footer>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   הגדרות Supabase — פרויקט intake ייעודי (טבלה INSERT-only ל-anon).
+   הסודות נשלחים רק לכאן, לעולם לא ל-Netlify Forms / מייל.
+   ════════════════════════════════════════════════════════════════ */
+var SUPABASE_URL = "@@INTAKE_SUPABASE_URL@@";
+var SUPABASE_ANON_KEY = "@@INTAKE_SUPABASE_KEY@@";
+var supabaseReady = SUPABASE_URL.indexOf("https://") === 0;
+
+/* ---------- ניווט בין שלבים ---------- */
+var steps = Array.prototype.slice.call(document.querySelectorAll(".step"));
+var psteps = Array.prototype.slice.call(document.querySelectorAll(".pstep"));
+var pbar = document.getElementById("pbar");
+var current = 0;
+
+function showStep(i){
+  steps.forEach(function(s,idx){ s.classList.toggle("on", idx===i); });
+  psteps.forEach(function(p,idx){
+    p.classList.toggle("active", idx===i);
+    p.classList.toggle("done", idx<i);
+  });
+  pbar.style.width = (i/(steps.length-1))*76 + "%";
+  current = i;
+  window.scrollTo({top:0, behavior:"smooth"});
+  if(i===3) renderReview();
+}
+
+document.querySelectorAll("[data-go]").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    var target = parseInt(btn.dataset.go,10);
+    if(target > current && !validateStep(current)){
+      var se = steps[current].querySelector(".step-err");
+      if(se){ se.classList.add("on"); setTimeout(function(){se.classList.remove("on");},4000); }
+      var bad = steps[current].querySelector(".invalid");
+      if(bad) bad.scrollIntoView({behavior:"smooth", block:"center"});
+      return;
+    }
+    showStep(target);
+  });
+});
+
+/* ---------- ולידציה ---------- */
+function normPhone(v){ return v.replace(/[^\d+]/g,"").replace(/^\+972/,"0"); }
+function validPhone(v){
+  var d = normPhone(v);
+  return /^0(?:[23489]\d{7}|[57]\d{8})$/.test(d);
+}
+function validEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()); }
+function validSlug(v){ return /^[a-z0-9][a-z0-9-]{1,62}$/.test(v.trim()); }
+
+function markField(fieldEl, inputEl, ok){
+  fieldEl.classList.toggle("show-err", !ok);
+  if(inputEl) inputEl.classList.toggle("invalid", !ok);
+  return ok;
+}
+
+function validateStep(i){
+  var ok = true;
+  var sec = steps[i];
+
+  sec.querySelectorAll(".field[data-check]").forEach(function(f){
+    var inp = f.querySelector("input,textarea,select");
+    if(!inp) return;
+    var v = inp.value.trim(), good = true, kind = f.dataset.check;
+    if(kind==="req") good = v.length>0;
+    else if(kind==="phone") good = v.length>0 && validPhone(v);
+    else if(kind==="email") good = v.length>0 && validEmail(v);
+    if(!markField(f, inp, good)) ok = false;
+  });
+
+  if(i===0){
+    // כתובות אתר: לפחות 2 תקינות
+    var u1=document.getElementById("url1"), u2=document.getElementById("url2"), u3=document.getElementById("url3");
+    var urlsOk = true;
+    [u1,u2].forEach(function(u){
+      var g = validSlug(u.value);
+      u.classList.toggle("invalid", !g);
+      if(!g) urlsOk=false;
+    });
+    if(u3.value.trim() && !validSlug(u3.value)){ u3.classList.add("invalid"); urlsOk=false; }
+    else u3.classList.remove("invalid");
+    document.getElementById("urlField").classList.toggle("show-err", !urlsOk);
+    if(!urlsOk) ok=false;
+
+    // לוגו חובה
+    var lf = document.getElementById("logoInput").files[0];
+    var logoOk = !!lf;
+    document.getElementById("logoField").classList.toggle("show-err", !logoOk);
+    if(!logoOk) ok=false;
+  }
+
+  return ok;
+}
+
+/* נקה סימון שגיאה בהקלדה */
+document.getElementById("intakeForm").addEventListener("input", function(e){
+  var t = e.target;
+  if(t.classList.contains("invalid")){
+    t.classList.remove("invalid");
+    var f = t.closest(".field"); if(f) f.classList.remove("show-err");
+  }
+  if(t.classList.contains("slug")){
+    var pos = t.selectionStart;
+    t.value = t.value.toLowerCase().replace(/[^a-z0-9-]/g,"");
+    try{ t.setSelectionRange(pos,pos); }catch(_){}
+  }
+});
+
+/* ---------- בחירות (radio cards) ---------- */
+document.querySelectorAll(".choice input[type=radio]").forEach(function(r){
+  r.addEventListener("change", function(){
+    document.querySelectorAll('.choice input[name="'+r.name+'"]').forEach(function(o){
+      o.closest(".choice").classList.toggle("picked", o.checked);
+    });
+    updatePanels();
+  });
+});
+
+function radioVal(name){
+  var r = document.querySelector('input[name="'+name+'"]:checked');
+  return r ? r.value : "";
+}
+
+function updatePanels(){
+  // חשבוניות
+  var inv = radioVal("invoice_software");
+  document.querySelectorAll('[data-panel]').forEach(function(p){
+    var key = p.dataset.panel;
+    if(["חשבונית ירוקה","EZcount","iCount","אחר"].indexOf(key)>-1)
+      p.classList.toggle("on", key===inv);
+  });
+  // מייל
+  var em = radioVal("email_mode");
+  document.querySelector('[data-panel="מייל המערכת"]').classList.toggle("on", em==="מייל המערכת");
+  // סליקה
+  var pay = radioVal("payment_provider");
+  var payOn = pay && pay!=="אין צורך";
+  document.getElementById("payPanel").classList.toggle("on", payOn);
+  document.getElementById("payOtherName").style.display = (pay==="אחר") ? "" : "none";
+}
+updatePanels();
+
+/* דומיין קיים → שאלת DNS */
+document.getElementById("own_domain").addEventListener("input", function(){
+  document.getElementById("dnsPanel").classList.toggle("on", this.value.trim().length>0);
+});
+
+/* ---------- צבעים + תצוגה מקדימה ---------- */
+var colorPanel = document.getElementById("colorPanel");
+document.querySelectorAll('input[name="color_mode"]').forEach(function(r){
+  r.addEventListener("change", function(){
+    colorPanel.classList.toggle("on", radioVal("color_mode")==="ידני");
+  });
+});
+function paintPreview(){
+  var b=document.getElementById("c_brand").value, d=document.getElementById("c_dark").value,
+      l=document.getElementById("c_light").value, a=document.getElementById("c_accent").value,
+      g=document.getElementById("c_bg").value;
+  document.getElementById("pvHead").style.background = "linear-gradient(135deg,"+b+","+d+")";
+  var body=document.getElementById("pvBody"); body.style.background=g;
+  document.getElementById("pvTitle").style.color=d;
+  document.getElementById("pvText").style.color="#4a5553";
+  var chip=document.getElementById("pvChip"); chip.style.background=l; chip.style.color=d;
+  var btn=document.getElementById("pvBtn"); btn.style.background=a;
+  var name=document.getElementById("paper_name").value.trim();
+  document.getElementById("pvHead").textContent = name || "שם העיתון שלכם";
+}
+["c_brand","c_dark","c_light","c_accent","c_bg","paper_name"].forEach(function(id){
+  document.getElementById(id).addEventListener("input", paintPreview);
+});
+paintPreview();
+
+/* ---------- לוגו ---------- */
+var logoInput=document.getElementById("logoInput"), logoZone=document.getElementById("logoZone"),
+    logoPreview=document.getElementById("logoPreview");
+function showLogo(file){
+  if(!file) return;
+  var okType = /\.(png|jpe?g|svg)$/i.test(file.name);
+  if(!okType || file.size > 8*1024*1024){
+    logoInput.value="";
+    document.getElementById("logoField").classList.add("show-err");
+    return;
+  }
+  document.getElementById("logoField").classList.remove("show-err");
+  var reader=new FileReader();
+  reader.onload=function(e){
+    document.getElementById("logoImg").src=e.target.result;
+    document.getElementById("logoName").textContent=file.name+" ("+Math.round(file.size/1024)+"KB)";
+    logoZone.style.display="none"; logoPreview.style.display="block";
+  };
+  reader.readAsDataURL(file);
+}
+logoInput.addEventListener("change", function(){ showLogo(this.files[0]); });
+logoZone.addEventListener("dragover", function(e){ e.preventDefault(); this.classList.add("drag"); });
+logoZone.addEventListener("dragleave", function(){ this.classList.remove("drag"); });
+logoZone.addEventListener("drop", function(e){
+  e.preventDefault(); this.classList.remove("drag");
+  if(e.dataTransfer.files.length){ logoInput.files=e.dataTransfer.files; showLogo(logoInput.files[0]); }
+});
+document.getElementById("logoRemove").addEventListener("click", function(){
+  logoInput.value=""; logoPreview.style.display="none"; logoZone.style.display="block";
+});
+
+/* ---------- טבלאות דינמיות ---------- */
+function makeDelBtn(row){
+  var b=document.createElement("button");
+  b.type="button"; b.className="del"; b.textContent="✕"; b.title="הסרה";
+  b.addEventListener("click", function(){ row.remove(); });
+  return b;
+}
+function addPricingRow(label, price){
+  var row=document.createElement("div"); row.className="dyn-row";
+  row.innerHTML='<input type="text" class="p-label" placeholder=\'סוג/גודל — למשל "רבע עמוד"\'>'+
+                '<input type="text" class="p-price price-in" inputmode="decimal" placeholder="מחיר ב-₪">';
+  row.querySelector(".p-label").value=label||"";
+  row.querySelector(".p-price").value=price||"";
+  row.appendChild(makeDelBtn(row));
+  document.getElementById("pricingRows").appendChild(row);
+}
+function addUserRow(){
+  var row=document.createElement("div"); row.className="dyn-row";
+  row.innerHTML='<input type="text" class="u-name" placeholder="שם">'+
+                '<input type="email" class="u-email" placeholder="מייל" dir="ltr" style="text-align:left">'+
+                '<input type="text" class="u-role" list="rolesList" placeholder="תפקיד">';
+  row.appendChild(makeDelBtn(row));
+  document.getElementById("userRows").appendChild(row);
+}
+document.getElementById("addPricing").addEventListener("click", function(){ addPricingRow(); });
+document.getElementById("addUser").addEventListener("click", addUserRow);
+addPricingRow(); addPricingRow();
+
+var dl=document.createElement("datalist"); dl.id="rolesList";
+["גרפיקאי/ת","מזכיר/ה","מוכרן/ית","עורך/ת","הנהלת חשבונות"].forEach(function(r){
+  var o=document.createElement("option"); o.value=r; dl.appendChild(o);
+});
+document.body.appendChild(dl);
+
+/* ---------- איסוף נתונים ---------- */
+function val(id){ var el=document.getElementById(id); return el?el.value.trim():""; }
+function orDash(v){ return v ? v : "—"; }
+
+function collectPricing(){
+  var out=[];
+  document.querySelectorAll("#pricingRows .dyn-row").forEach(function(r){
+    var l=r.querySelector(".p-label").value.trim(), p=r.querySelector(".p-price").value.trim();
+    if(l||p) out.push(l + (p ? " — "+p+" ₪" : ""));
+  });
+  return out;
+}
+function collectUsers(){
+  var out=[];
+  document.querySelectorAll("#userRows .dyn-row").forEach(function(r){
+    var n=r.querySelector(".u-name").value.trim(), e=r.querySelector(".u-email").value.trim(),
+        ro=r.querySelector(".u-role").value.trim();
+    if(n||e||ro) out.push(n+(e?" <"+e+">":"")+(ro?" — "+ro:""));
+  });
+  return out;
+}
+function collectSecrets(){
+  var s={}, inv=radioVal("invoice_software");
+  if(inv==="חשבונית ירוקה" && (val("gi_key")||val("gi_secret")))
+    s.invoices={software:inv, api_key_id:val("gi_key"), api_secret:val("gi_secret")};
+  else if(inv==="EZcount" && val("ez_key"))
+    s.invoices={software:inv, api_key:val("ez_key")};
+  else if(inv==="iCount" && (val("ic_cid")||val("ic_user")||val("ic_pass")))
+    s.invoices={software:inv, company_id:val("ic_cid"), user:val("ic_user"), password_or_token:val("ic_pass")};
+  else if(inv==="אחר" && val("other_inv_details"))
+    s.invoices={software:val("invoice_other_name")||"אחר", details:val("other_inv_details")};
+
+  if(radioVal("email_mode")==="מייל המערכת" && val("gmail_app_pass"))
+    s.email={gmail_user:val("sys_email"), app_password:val("gmail_app_pass").replace(/\s+/g,"")};
+
+  var pay=radioVal("payment_provider");
+  if(pay && pay!=="אין צורך" && (val("pay_terminal")||val("pay_key")))
+    s.payments={provider: pay==="אחר" ? (val("payment_other_name")||"אחר") : pay,
+                terminal:val("pay_terminal"), api_key:val("pay_key")};
+  return s;
+}
+
+function computeStatuses(){
+  var secrets=collectSecrets();
+  var inv=radioVal("invoice_software");
+  var invName = inv==="אחר" ? (val("invoice_other_name")||"אחר") : inv;
+  var st={};
+
+  if(inv==="אין עדיין") st.invoice = "אין עדיין";
+  else st.invoice = invName + " — " + (secrets.invoices ? "✓ התקבלו פרטי חיבור" : "לא סופקו פרטי חיבור");
+
+  if(radioVal("email_mode")==="מייל המערכת")
+    st.email = "מייל המערכת — " + (secrets.email ? "✓ התקבל App Password" : "חסר App Password");
+  else st.email = "תגדירו לי";
+
+  var pay=radioVal("payment_provider");
+  if(!pay || pay==="אין צורך") st.payment = "אין צורך";
+  else{
+    var payName = pay==="אחר" ? (val("payment_other_name")||"אחר") : pay;
+    st.payment = payName + " — " + (secrets.payments ? "✓ התקבלו פרטים" : "יושלם בהמשך");
+  }
+  return st;
+}
+
+function computeMissing(){
+  var m=[], secrets=collectSecrets(), inv=radioVal("invoice_software");
+  if(inv!=="אין עדיין" && !secrets.invoices) m.push("פרטי חיבור לתוכנת החשבוניות");
+  if(inv==="אין עדיין") m.push("תוכנת חשבוניות (אין עדיין)");
+  if(radioVal("email_mode")==="מייל המערכת" && !secrets.email) m.push("App Password למייל השליחה");
+  if(radioVal("email_mode")==="תגדירו לי") m.push("הגדרת מייל שליחה (ביקשו שנגדיר)");
+  var pay=radioVal("payment_provider");
+  if(pay && pay!=="אין צורך" && !secrets.payments) m.push("פרטי הסליקה ("+pay+")");
+  if(!collectPricing().length && !document.getElementById("pricing_file").files[0]) m.push("מחירון מודעות");
+  if(!val("publish_day")) m.push("יום פרסום");
+  if(!val("ad_deadline")) m.push("מועד סגירת מודעות");
+  if(!val("business_name")) m.push("פרטי עסק לחשבוניות");
+  return m;
+}
+
+function buildSummary(){
+  var st=computeStatuses();
+  var urls=[val("url1"),val("url2"),val("url3")].filter(Boolean)
+    .map(function(u,i){ return (i+1)+") "+u; }).join(" ");
+  var colors = radioVal("color_mode")==="ידני"
+    ? "ידני: brand="+val("c_brand")+" dark="+val("c_dark")+" light="+val("c_light")+" accent="+val("c_accent")+" bg="+val("c_bg")
+    : "לפי גווני הלוגו";
+  var domain = val("own_domain")
+    ? val("own_domain")+" (גישה ל-DNS: "+(radioVal("dns_access")||"לא צוין")+")" : "אין";
+  var pricing = collectPricing();
+  var pricingTxt = pricing.length ? pricing.join(" | ") : "";
+  if(document.getElementById("pricing_file").files[0])
+    pricingTxt += (pricingTxt?" | ":"")+"צורף קובץ מחירון";
+  var users=collectUsers();
+  var missing=computeMissing();
+  var biz = val("business_name") ? val("business_name")+(val("business_type")?" ("+val("business_type")+")":"") : "";
+
+  return [
+    "--- לקוח חדש: "+val("paper_name")+" ---",
+    "שם העיתון: "+val("paper_name"),
+    "סלוגן: "+orDash(val("slogan")),
+    "טלפון מערכת: "+val("sys_phone"),
+    "מייל מערכת: "+val("sys_email"),
+    "אזור הפצה: "+orDash(val("area")),
+    "כתובות אתר רצויות: "+urls,
+    "דומיין קיים: "+domain,
+    "איש קשר: "+val("contact_name")+" (טלפון: "+val("contact_phone")+")",
+    "מייל מנהל: "+val("admin_email"),
+    "צבעים: "+colors,
+    "לוגו: מצורף לשליחה",
+    "חשבוניות: "+st.invoice,
+    "מייל שליחה: "+st.email,
+    "סליקה: "+st.payment,
+    "תדירות: "+val("frequency")+" | יום פרסום: "+orDash(val("publish_day"))+" | סגירת מודעות: "+orDash(val("ad_deadline")),
+    "מחירון: "+orDash(pricingTxt),
+    "משתמשים נוספים: "+orDash(users.join(" | ")),
+    "פרטי עסק לחשבוניות: "+orDash(biz),
+    "חיבורים נוספים: "+orDash(val("other_integrations")),
+    "הערות: "+orDash(val("notes")),
+    "חסר להשלמה: "+(missing.length?missing.join(", "):"כלום — הכול מולא! 🎉")
+  ].join("\n");
+}
+
+function renderReview(){
+  document.getElementById("reviewPre").textContent = buildSummary();
+}
+document.getElementById("notes").addEventListener("input", renderReview);
+
+/* ---------- שליחה ---------- */
+function encodeSecretsPayload(){
+  var secrets=collectSecrets();
+  if(!Object.keys(secrets).length) return null;
+  return {
+    paper_name: val("paper_name"),
+    contact_name: val("contact_name"),
+    contact_phone: val("contact_phone"),
+    secrets: secrets
+  };
+}
+
+document.getElementById("intakeForm").addEventListener("submit", function(e){
+  e.preventDefault();
+  var sendErr=document.getElementById("sendErr");
+  sendErr.classList.remove("on");
+
+  // ולידציה כוללת של שלבים 1-3
+  for(var i=0;i<3;i++){
+    if(!validateStep(i)){
+      showStep(i);
+      var se=steps[i].querySelector(".step-err");
+      if(se){ se.classList.add("on"); setTimeout(function(){se.classList.remove("on");},4000); }
+      return;
+    }
+  }
+
+  var btn=document.getElementById("sendBtn");
+  btn.disabled=true; btn.textContent="רק רגע, שולחים...";
+
+  var st=computeStatuses(), missing=computeMissing(), summary=buildSummary();
+  document.getElementById("f_invoice_status").value=st.invoice;
+  document.getElementById("f_email_status").value=st.email;
+  document.getElementById("f_payment_status").value=st.payment;
+  document.getElementById("f_pricing_list").value=collectPricing().join("\n");
+  document.getElementById("f_extra_users").value=collectUsers().join("\n");
+  document.getElementById("f_missing").value=missing.join(", ");
+  document.getElementById("f_summary").value=summary;
+
+  var fail=function(msg){
+    btn.disabled=false; btn.textContent="🚀 שליחת הטופס";
+    sendErr.textContent=msg; sendErr.classList.add("on");
+    sendErr.scrollIntoView({behavior:"smooth", block:"center"});
+  };
+
+  var secretsPayload=encodeSecretsPayload();
+
+  var sendSecrets = Promise.resolve(true);
+  if(secretsPayload){
+    if(!supabaseReady){
+      fail("מצטערים — מנגנון השמירה המאובטחת של המפתחות עדיין לא חובר. אפשר לרוקן בינתיים את שדות המפתחות ולשלוח בלעדיהם (נשלים יחד אחר כך), או לנסות שוב מאוחר יותר.");
+      return;
+    }
+    sendSecrets = fetch(SUPABASE_URL+"/rest/v1/intake_secrets", {
+      method:"POST",
+      headers:{
+        "apikey":SUPABASE_ANON_KEY,
+        "Authorization":"Bearer "+SUPABASE_ANON_KEY,
+        "Content-Type":"application/json",
+        "Prefer":"return=minimal"
+      },
+      body: JSON.stringify(secretsPayload)
+    }).then(function(r){
+      if(!r.ok) throw new Error("supabase "+r.status);
+      return true;
+    });
+  }
+
+  sendSecrets.then(function(){
+    // הסודות נשמרו (או שאין) — עכשיו שולחים את השאר ל-Netlify Forms.
+    // שדות סודיים הם ללא name ולכן לא נכללים ב-FormData.
+    var fd=new FormData(document.getElementById("intakeForm"));
+    return fetch("/", {method:"POST", body:fd});
+  }).then(function(r){
+    if(!r.ok) throw new Error("netlify "+r.status);
+    document.getElementById("formCard").querySelector("form").style.display="none";
+    document.getElementById("thanksPre").textContent=summary;
+    document.getElementById("thanks").style.display="block";
+    document.getElementById("progress").style.display="none";
+    window.scrollTo({top:0, behavior:"smooth"});
+  }).catch(function(err){
+    fail("אופס, השליחה לא הצליחה ("+err.message+"). בדקו את חיבור האינטרנט ונסו שוב — אם זה חוזר על עצמו, צרו קשר עם חיים והוא יעזור.");
+  });
+});
+
+/* ---------- העתקה ---------- */
+document.getElementById("copyBtn").addEventListener("click", function(){
+  var txt=document.getElementById("thanksPre").textContent, btn=this;
+  function done(){ btn.textContent="✓ הועתק!"; setTimeout(function(){btn.textContent="📋 העתק";},2000); }
+  if(navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(done);
+  else{
+    var ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta);
+    ta.select(); document.execCommand("copy"); ta.remove(); done();
+  }
+});
+</script>
+</body>
+</html>
