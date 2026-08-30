@@ -121,6 +121,7 @@ ${['admin', 'sales'].includes(profile.role) ? `<button class="btn btn-ghost" onc
 </div>
 </div>
 ${typeof hebHolidayBanner === 'function' ? hebHolidayBanner(_issues) : ''}
+${typeof issueRemindersBanner === 'function' ? issueRemindersBanner() : ''}
 <div class="card" id="issuesTable"></div>
 <div id="issuesTrends"></div>`;
 renderTable(document.getElementById('issuesTable'), _issues, [
@@ -964,4 +965,111 @@ async function issueTypesSave() {
   cache.settings.issue_type_pct_vacation = String(Math.round(vac));
   cache.settings.issue_type_pct_extra = String(Math.round(ext));
   toast('מכפילי סוגי הגיליון נשמרו');
+}
+
+/* ============================================================
+   תזכורת "סגירת גיליון" למפרסמים קבועים (פיצ'ר #17)
+   ------------------------------------------------------------
+   כשהמתג settings.issue_reminders_enabled דלוק והדדליין של הגיליון
+   הקרוב בתוך יומיים — באנר בעמוד הגיליונות שפותח סבב תזכורות:
+   רשימת המפרסמים הקבועים עם הודעת וואטסאפ מוכנה ("מפרסמים השבוע?").
+   שליחה בלחיצה פר לקוח (wa.me) — לא שליחה אוטומטית עיוורת. מי
+   שנשלח מסומן ✓ (נשמר פר גיליון) ונרשם ביומן הלקוח.
+   ============================================================ */
+
+function _irOn() { return String((cache.settings || {}).issue_reminders_enabled || '0') === '1'; }
+function _irSentKey(issueId) { return 'issue_rem_sent_' + issueId; }
+function _irSent(issueId) { try { return JSON.parse((cache.settings || {})[_irSentKey(issueId)] || '[]'); } catch (e) { return []; } }
+
+/* הגיליון הקרוב שדדליין המודעות שלו בתוך יומיים */
+function _irUpcomingIssue() {
+  const now = Date.now(), max = now + 2 * 86400000;
+  return (_issues || []).filter(i => {
+    if (!i.ads_deadline || ['closed', 'published'].includes(i.status)) return false;
+    const t = new Date(i.ads_deadline).getTime();
+    return !isNaN(t) && t > now && t <= max;
+  }).sort((a, b) => String(a.ads_deadline).localeCompare(String(b.ads_deadline)))[0] || null;
+}
+
+function issueRemindersBanner() {
+  if (!_irOn() || !['admin', 'sales'].includes(profile.role)) return '';
+  const iss = _irUpcomingIssue();
+  if (!iss) return '';
+  const regs = (cache.customers || []).filter(c => c.regular_advertiser);
+  if (!regs.length) return '';
+  const sent = _irSent(iss.id).length;
+  return `<div class="card card-pad" style="border-right:4px solid var(--brand,#333);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <span>📣 <b>גיליון ${iss.issue_number} נסגר ${heDateTime(iss.ads_deadline)}</b> — ${regs.length} מפרסמים קבועים${sent ? ` · נשלחו ${sent}` : ''}</span>
+    <button class="btn btn-sm" onclick="issueRemindersOpen(${iss.id})">💬 סבב תזכורות "מפרסמים השבוע?"</button>
+  </div>`;
+}
+
+async function issueRemindersOpen(issueId) {
+  const iss = (_issues || []).find(i => i.id === issueId) || (cache.issues || []).find(i => i.id === issueId);
+  if (!iss) { toast('גיליון לא נמצא', true); return; }
+  const regs = (cache.customers || []).filter(c => c.regular_advertiser)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
+  if (!regs.length) { toast('אין לקוחות המסומנים "מפרסם קבוע" — מסמנים בטופס הלקוח', true); return; }
+  const sent = new Set(_irSent(issueId));
+  const msgFor = c => `שלום ${c.name || ''}, כאן @@PAPER_NAME@@ 😊\n` +
+    `גיליון ${iss.issue_number} נסגר ${heDateTime(iss.ads_deadline)} — מפרסמים השבוע?\n` +
+    `נשמח לשריין לך מקום. לתיאום: @@PAPER_PHONE@@`;
+  const rows = regs.map(c => {
+    const raw = String(c.whatsapp || c.phone || '').replace(/\D/g, '');
+    let intl = raw; if (intl.startsWith('0')) intl = '972' + intl.slice(1); else if (intl && !intl.startsWith('972')) intl = '972' + intl;
+    const done = sent.has(c.id);
+    return `<tr id="irRow${c.id}" style="${done ? 'opacity:.55' : ''}">
+      <td><b>${esc(c.name)}</b></td>
+      <td dir="ltr">${esc(c.phone || c.whatsapp || '—')}</td>
+      <td>${done ? '<span class="pill green">נשלח ✓</span>' : (intl
+        ? `<button class="btn btn-sm" onclick="issueReminderSend(${issueId}, ${c.id}, '${intl}')">💬 שלח תזכורת</button>`
+        : '<span class="muted">אין טלפון</span>')}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('viewModal').innerHTML = `
+    <h3>📣 תזכורות סגירה — גיליון ${iss.issue_number}</h3>
+    <p class="muted" style="font-size:.85rem">דדליין: ${heDateTime(iss.ads_deadline)} · כל לחיצה פותחת וואטסאפ עם ההודעה מוכנה — אתה רק שולח. נרשם ביומן הלקוח.</p>
+    <div class="table-wrap" style="margin-top:8px"><table class="data">
+      <thead><tr><th>מפרסם קבוע</th><th>טלפון</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="m-actions" style="margin-top:12px">
+      <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
+    </div>`;
+  document.getElementById('viewBack').classList.add('open');
+  window._irCtx = { issueId, msgFor: Object.fromEntries(regs.map(c => [c.id, msgFor(c)])) };
+}
+
+async function issueReminderSend(issueId, customerId, intl) {
+  const ctx = window._irCtx || {};
+  const msg = (ctx.msgFor || {})[customerId] || '';
+  window.open('https://wa.me/' + intl + '?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+  const key = _irSentKey(issueId);
+  const arr = _irSent(issueId);
+  if (!arr.includes(customerId)) arr.push(customerId);
+  try {
+    await db.from('settings').upsert({ key, value: JSON.stringify(arr) });
+    cache.settings[key] = JSON.stringify(arr);
+  } catch (e) { }
+  try { await addInteraction('customer', customerId, '📣 נשלחה תזכורת סגירת גיליון (וואטסאפ)'); } catch (e) { }
+  const row = document.getElementById('irRow' + customerId);
+  if (row) { row.style.opacity = '.55'; row.lastElementChild.innerHTML = '<span class="pill green">נשלח ✓</span>'; }
+}
+
+/* כרטיס הגדרות — מתג התזכורות */
+function issueRemindersCard() {
+  const on = _irOn();
+  return `
+<div class="card card-pad">
+<b>תזכורות סגירת גיליון 📣</b>
+<p class="muted" style="font-size:.82rem">יומיים לפני דדליין המודעות מופיע בעמוד הגיליונות סבב תזכורות למפרסמים הקבועים — הודעת "מפרסמים השבוע?" מוכנה לשליחה בוואטסאפ, לחיצה פר לקוח. מסמנים "מפרסם קבוע" בטופס הלקוח.</p>
+<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+<input type="checkbox" ${on ? 'checked' : ''} onchange="issueRemindersToggle(this.checked)" style="width:18px;height:18px">
+תזכורות סגירה פעילות במופע הזה
+</label>
+</div>`;
+}
+
+async function issueRemindersToggle(on) {
+  await run(db.from('settings').upsert({ key: 'issue_reminders_enabled', value: on ? '1' : '0' }));
+  cache.settings.issue_reminders_enabled = on ? '1' : '0';
+  toast(on ? 'תזכורות הסגירה הופעלו' : 'תזכורות הסגירה כובו');
 }
