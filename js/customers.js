@@ -507,54 +507,135 @@ async function customerDelete(id) {
 עמודות מזוהות אוטומטית לפי הכותרת בשורה הראשונה:
 שם (חובה) · טלפון · אימייל · איש קשר · כתובת · תחום · ח.פ · הערות
 כפילות לפי טלפון או שם — מדולגת ומדווחת בסוף */
-async function customersImport() {
-const input = document.getElementById('custImportFile');
-const file = input.files[0];
-if (!file) return;
-input.value = '';
-let rows;
-try { rows = await readSpreadsheet(file); }
-catch (e) { toast('לא הצלחתי לקרוא את הקובץ: ' + e.message, true); return; }
-if (!rows.length) { toast('הקובץ ריק או שאין שורת כותרות', true); return; }
+/* ==================== ייבוא לקוחות מאקסל (פיצ'ר #14) ====================
+   פרסור → זיהוי עמודות אוטומטי → מסך אישור (תצוגה מקדימה + כפילויות +
+   עמודות לא מזוהות שנשמרות כהערות שוליים) → הכנסה במנות. */
 
-const existing = await run(db.from('customers').select('name, phone'));
-const knownPhones = new Set(existing.map(c => c.phone).filter(Boolean));
-const knownNames = new Set(existing.map(c => c.name.trim()));
-
-const toInsert = [], skipped = [];
-for (const row of rows) {
-const name = pickField(row, ['שם העסק', 'שם עסק', 'שם הלקוח', 'שם לקוח', 'עסק', 'שם']);
-if (!name) { skipped.push('(שורה בלי שם)'); continue; }
-const phone = pickField(row, ['טלפון', 'נייד', 'פלאפון', 'סלולרי', 'phone']);
-if ((phone && knownPhones.has(phone)) || knownNames.has(name)) { skipped.push(name); continue; }
-toInsert.push({
-name, phone,
-email: pickField(row, ['אימייל', 'מייל', 'דוא', 'email']),
-contact_person: pickField(row, ['איש קשר', 'איש', 'קשר']),
-address: pickField(row, ['כתובת']),
-city: pickField(row, ['יישוב', 'ישוב', 'עיר']),
-whatsapp: pickField(row, ['וואטסאפ', 'ווטסאפ', 'whatsapp', 'טלפון נוסף', 'נייד נוסף']),
-field: pickField(row, ['תחום', 'ענף', 'קטגוריה']),
-business_id: pickField(row, ['ח.פ', 'חפ', 'עוסק', 'ע.מ']),
-payment_terms: _importTerms(pickField(row, ['תנאי תשלום', 'תשלום', 'שוטף'])),
-notes: pickField(row, ['הערות', 'הערה']),
-agent_id: matchAgent(row, null), // עמודת "סוכן" בקובץ
-});
-if (phone) knownPhones.add(phone);
-knownNames.add(name);
+const _CI_FIELD_NAMES = {
+  name: ['שם העסק', 'שם עסק', 'שם הלקוח', 'שם לקוח', 'עסק', 'שם'],
+  phone: ['טלפון', 'נייד', 'פלאפון', 'סלולרי', 'phone'],
+  email: ['אימייל', 'מייל', 'דוא', 'email'],
+  contact_person: ['איש קשר', 'איש', 'קשר'],
+  address: ['כתובת'],
+  city: ['יישוב', 'ישוב', 'עיר'],
+  whatsapp: ['וואטסאפ', 'ווטסאפ', 'whatsapp', 'טלפון נוסף', 'נייד נוסף'],
+  field: ['תחום', 'ענף', 'קטגוריה'],
+  business_id: ['ח.פ', 'חפ', 'עוסק', 'ע.מ'],
+  payment_terms: ['תנאי תשלום', 'תשלום', 'שוטף'],
+  notes: ['הערות', 'הערה'],
+  agent: ['סוכן'],
+};
+function _ciIsKnownKey(key) {
+  const k = String(key || '').trim();
+  return Object.values(_CI_FIELD_NAMES).some(list => list.some(n => k === n || k.includes(n)));
 }
 
-if (!toInsert.length) { toast('אין שורות חדשות לייבוא (הכל כפול או ריק)', true); return; }
-if (!confirm(`נמצאו ${toInsert.length} לקוחות חדשים לייבוא` +
-(skipped.length ? `\n(${skipped.length} דולגו — כפולים או בלי שם)` : '') + '\n\nלהמשיך?')) return;
+let _ciData = null; // {toInsert, skipped, extraCols}
 
-// הכנסה במנות של 50 — יציב גם לקבצים גדולים
-for (let i = 0; i < toInsert.length; i += 50)
-await run(db.from('customers').insert(toInsert.slice(i, i + 50)));
+async function customersImport() {
+  const input = document.getElementById('custImportFile');
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  let rows;
+  try { rows = await readSpreadsheet(file); }
+  catch (e) { toast('לא הצלחתי לקרוא את הקובץ: ' + e.message, true); return; }
+  if (!rows.length) { toast('הקובץ ריק או שאין שורת כותרות', true); return; }
 
-await refreshCache();
-toast(`✓ יובאו ${toInsert.length} לקוחות` + (skipped.length ? ` · דולגו ${skipped.length}` : ''));
-openPage('customers');
+  const existing = await run(db.from('customers').select('name, phone'));
+  const knownPhones = new Set(existing.map(c => c.phone).filter(Boolean));
+  const knownNames = new Set(existing.map(c => c.name.trim()));
+
+  const F = _CI_FIELD_NAMES;
+  const toInsert = [], skipped = [];
+  const extraCols = new Set();
+  for (const row of rows) {
+    const name = pickField(row, F.name);
+    if (!name) { skipped.push('(שורה בלי שם)'); continue; }
+    const phone = pickField(row, F.phone);
+    if ((phone && knownPhones.has(phone)) || knownNames.has(name)) { skipped.push(name); continue; }
+    // הערות שוליים: כל עמודה שלא זוהתה נאספת ל"הערות" — שום מידע לא הולך לאיבוד
+    const extras = [];
+    Object.keys(row).forEach(k => {
+      const v = String(row[k] ?? '').trim();
+      if (v && !_ciIsKnownKey(k)) { extras.push(k.trim() + ': ' + v); extraCols.add(k.trim()); }
+    });
+    const baseNotes = pickField(row, F.notes);
+    toInsert.push({
+      name, phone,
+      email: pickField(row, F.email),
+      contact_person: pickField(row, F.contact_person),
+      address: pickField(row, F.address),
+      city: pickField(row, F.city),
+      whatsapp: pickField(row, F.whatsapp),
+      field: pickField(row, F.field),
+      business_id: pickField(row, F.business_id),
+      payment_terms: _importTerms(pickField(row, F.payment_terms)),
+      notes: baseNotes,
+      _extras: extras.join(' · '),
+      agent_id: matchAgent(row, null), // עמודת "סוכן" בקובץ
+    });
+    if (phone) knownPhones.add(phone);
+    knownNames.add(name);
+  }
+
+  if (!toInsert.length) { toast('אין שורות חדשות לייבוא (הכל כפול או ריק)', true); return; }
+  _ciData = { toInsert, skipped, extraCols: [...extraCols] };
+  _ciReview();
+}
+
+/* מסך האישור — תצוגה מקדימה לפני ההכנסה */
+function _ciReview() {
+  const d = _ciData; if (!d) return;
+  const prev = d.toInsert.slice(0, 8);
+  document.getElementById('ciOv')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'ciOv';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,40,.55);display:flex;align-items:center;justify-content:center;z-index:99997;padding:16px;direction:rtl';
+  ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:16px;padding:20px;max-width:720px;width:96%;max-height:88vh;overflow:auto">
+    <h3 style="margin:0 0 4px">⬆ אישור ייבוא לקוחות</h3>
+    <div class="stats" style="margin:10px 0">
+      ${stat(d.toInsert.length, 'לקוחות חדשים לייבוא')}
+      ${stat(d.skipped.length, 'דולגו (כפולים / בלי שם)', d.skipped.length ? 'red' : '')}
+      ${stat(d.extraCols.length, 'עמודות לא מזוהות')}
+    </div>
+    ${d.extraCols.length ? `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;background:#fff7e6;border:1px solid #ffe0a3;border-radius:10px;padding:9px 12px;font-size:.88rem">
+      <input type="checkbox" id="ciExtras" checked style="width:17px;height:17px">
+      לצרף להערות הלקוח את העמודות שלא זוהו: <b>${d.extraCols.map(esc).join(', ')}</b>
+    </label>` : ''}
+    <div class="table-wrap" style="margin-top:10px"><table class="data">
+      <thead><tr><th>שם</th><th>טלפון</th><th>יישוב</th><th>סוכן</th><th>הערות (כולל שוליים)</th></tr></thead>
+      <tbody>${prev.map(r => `<tr><td><b>${esc(r.name)}</b></td><td dir="ltr">${esc(r.phone || '—')}</td>
+        <td>${esc(r.city || '—')}</td><td>${esc(nameOf('agents', r.agent_id) || '—')}</td>
+        <td style="font-size:.8rem">${esc([r.notes, r._extras].filter(Boolean).join(' · ') || '—')}</td></tr>`).join('')}
+      ${d.toInsert.length > prev.length ? `<tr><td colspan="5" class="muted">ועוד ${d.toInsert.length - prev.length} שורות...</td></tr>` : ''}</tbody>
+    </table></div>
+    ${d.skipped.length ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:.82rem">מי דולג (${d.skipped.length})</summary>
+      <p class="muted" style="font-size:.8rem">${d.skipped.slice(0, 40).map(esc).join(', ')}${d.skipped.length > 40 ? '...' : ''}</p></details>` : ''}
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn" onclick="customersImportCommit()">✓ ייבא ${d.toInsert.length} לקוחות</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('ciOv').remove(); _ciData=null">ביטול</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+}
+
+async function customersImportCommit() {
+  const d = _ciData; if (!d) return;
+  const withExtras = !d.extraCols.length || document.getElementById('ciExtras')?.checked;
+  const rows = d.toInsert.map(r => {
+    const { _extras, ...rec } = r;
+    rec.notes = [rec.notes, withExtras ? _extras : ''].filter(Boolean).join(' · ') || null;
+    return rec;
+  });
+  document.getElementById('ciOv')?.remove();
+  toast('מייבא...');
+  // הכנסה במנות של 50 — יציב גם לקבצים גדולים
+  for (let i = 0; i < rows.length; i += 50)
+    await run(db.from('customers').insert(rows.slice(i, i + 50)));
+  await refreshCache();
+  toast(`✓ יובאו ${rows.length} לקוחות` + (d.skipped.length ? ` · דולגו ${d.skipped.length}` : ''));
+  _ciData = null;
+  openPage('customers');
 }
 
 async function portalTokenReset(id) {
