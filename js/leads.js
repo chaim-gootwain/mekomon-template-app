@@ -4,8 +4,11 @@ leads.js — מודול לידים
 - הוספת ליד בלחיצת כפתור (שם + טלפון מספיקים) — הזמן נרשם אוטומטית
 - קנבן: גרירת ליד בין שלבי המשפך, כל גרירה מתועדת
 - לידים ללא שיוך: מאגר משותף שסוכן יכול "לתפוס" לעצמו
-- הרשאות סוכן: רואה רק את שלו + את המאגר (נאכף גם ב-RLS בשרת)
+- צפייה משותפת: כל סוכן רואה את כל הלידים (כולל של סוכנים אחרים) —
+  אבל עורך/גורר רק את שלו; ליד של סוכן אחר נפתח לצפייה בלבד (נאכף גם ב-RLS)
 - חסימת כפילות לפי טלפון: אם המספר כבר אצל סוכן אחר — הסוכן לא יכול להזין
+- סימון כפילות מול לקוחות: ליד שהטלפון שלו קיים אצל לקוח מקבל תג "קיים כלקוח"
+  (RPC ‏lead_customer_duplicates — עובד גם כשהסוכן לא רואה את הלקוח ישירות)
 - מסע לקוח: פולו-אפ עם תזכורת, ורישום סטטוס מחדש אחרי כל פולו-אפ
 - סגירת ליד ללקוח: הנפשת "כל הכבוד" עם גביע ומטבעות זהב
 ============================================================ */
@@ -14,6 +17,7 @@ leads.js — מודול לידים
 
 const LEAD_STAGES = ['new', 'contacted', 'meeting', 'proposal']; // עמודות הקנבן
 let _leads = [];
+let _leadDups = {}; // lead_id -> { customer_id, customer_name } — כפילות מול לקוח קיים
 let _leadsView = localStorage.getItem('leads_view') || 'kanban'; // kanban / table
 
 /* ---------- עזרי תפקיד ---------- */
@@ -23,11 +27,27 @@ function myAgentId() {
   const a = cache.agents.find(x => x.profile_id === profile.id);
   return a ? a.id : null;
 }
+/* צפייה משותפת: סוכן יכול לפעול רק על ליד שלו; ליד של סוכן אחר — צפייה בלבד
+   (ליד מהמאגר נתפס דרך "תפוס ליד", לא בעריכה ישירה) */
+function leadEditable(l) { return isAdmin() || !isSales() || l.agent_id === myAgentId(); }
+/* תג כפילות מול לקוח קיים */
+function leadDupTag(l) {
+  const d = _leadDups[l.id];
+  return d ? `<span class="pill amber" title="הטלפון של הליד קיים אצל לקוח במערכת">👥 קיים כלקוח: ${esc(d.customer_name)}</span>` : '';
+}
 
 Pages.leads = {
   render: async (el) => {
-    // ה-RLS בשרת כבר מחזיר רק את מה שמותר (שלי + מאגר לסוכן, הכל למנהל)
+    // צפייה משותפת: כולם רואים את כל הלידים; ההגבלה בשרת היא על כתיבה בלבד
     _leads = await run(db.from('leads').select('*').order('created_at', { ascending: false }));
+
+    // כפילות מול לקוחות (RPC עם security definer — רואה את כל הלקוחות).
+    // אם המיגרציה עוד לא רצה במופע — ממשיכים בשקט בלי תגי כפילות.
+    _leadDups = {};
+    try {
+      const { data } = await db.rpc('lead_customer_duplicates');
+      (data || []).forEach(d => _leadDups[d.lead_id] = d);
+    } catch (e) { /* הפונקציה עוד לא קיימת במופע הזה */ }
 
     const scopeBar = isAdmin()
       ? `<select id="leadAgentFilter" onchange="leadsDraw()">
@@ -39,6 +59,7 @@ Pages.leads = {
            <option value="mine">הלידים שלי</option>
            <option value="pool">מאגר ללא שיוך</option>
            <option value="mine_pool">שלי + מאגר</option>
+           <option value="all">👁 כל הלידים (צפייה משותפת)</option>
          </select>`;
 
     el.innerHTML = `
@@ -62,6 +83,7 @@ Pages.leads = {
       </div>
       <div id="leadDelReqs"></div>
       <div id="leadsArea"></div>`;
+    emuEnsureStyles(); // סגנונות הכרטיסים (תפיסה/מאגר/צפייה-בלבד) כבר ברינדור
     leadsDraw();
     if (isAdmin() && typeof leadRenderDelReqs === 'function') leadRenderDelReqs();
   }
@@ -88,6 +110,7 @@ function leadsFiltered() {
     const mine = myAgentId();
     if (scope === 'pool') scopeMatch = l => l.agent_id == null;
     else if (scope === 'mine') scopeMatch = l => l.agent_id === mine;
+    else if (scope === 'all') scopeMatch = () => true; // צפייה משותפת — כולל של סוכנים אחרים
     else scopeMatch = l => l.agent_id === mine || l.agent_id == null; // mine_pool
   }
 
@@ -117,7 +140,8 @@ function leadsDraw() {
       items.map(l => {
         const overdue = l.follow_up && l.follow_up <= today() && !['won', 'lost'].includes(l.status);
         const unassigned = l.agent_id == null;
-        return `<div class="kanban-card ${overdue ? 'overdue' : ''} ${unassigned ? 'pool' : ''}" draggable="true"
+        const canDrag = leadEditable(l); // ליד של סוכן אחר — לא נגרר (צפייה בלבד)
+        return `<div class="kanban-card ${overdue ? 'overdue' : ''} ${unassigned ? 'pool' : ''} ${canDrag ? '' : 'shared-view'}" draggable="${canDrag}"
             ondragstart="event.dataTransfer.setData('text/plain','${l.id}')"
             onclick="openLeadCard(${l.id})">
             <div class="kc-name">${l.temperature ? tempDot(l.temperature) : ''}${esc(l.name)}</div>
@@ -125,6 +149,7 @@ function leadsDraw() {
               ${l.phone ? `<span dir="ltr">${esc(l.phone)}</span> · ` : ''}${esc(nameOf('agents', l.agent_id)) || '<b style="color:var(--danger,@@COLOR_GRAD@@)">ללא שיוך</b>'}
               ${l.follow_up ? `<br>מעקב: <b ${overdue ? 'style="color:var(--danger)"' : ''}>${heDate(l.follow_up)}${l.follow_up_time ? ' ' + l.follow_up_time.slice(0, 5) : ''}</b>` : ''}
             </div>
+            ${leadDupTag(l) ? `<div style="margin-top:6px">${leadDupTag(l)}</div>` : ''}
             ${unassigned && isSales() ? `<button class="btn btn-sm claim-btn" onclick="event.stopPropagation();leadClaim(${l.id})">🎯 תפוס ליד</button>` : ''}
           </div>`;
       }).join('') + `</div></div>`;
@@ -133,7 +158,7 @@ function leadsDraw() {
 
 function leadsDrawTable(area, rows) {
   renderTable(area, rows, [
-    { h: 'שם', f: r => esc(r.name) },
+    { h: 'שם', f: r => esc(r.name) + (leadDupTag(r) ? ' ' + leadDupTag(r) : '') },
     { h: 'טלפון', f: r => `<span dir="ltr">${esc(r.phone)}</span>` },
     { h: 'מקור', f: r => esc(r.source) },
     { h: 'סוכן', f: r => esc(nameOf('agents', r.agent_id)) || '<span class="pill amber">ללא שיוך</span>' },
@@ -164,6 +189,7 @@ async function leadDrop(ev, stage) {
   const id = Number(ev.dataTransfer.getData('text/plain'));
   const lead = _leads.find(l => l.id === id);
   if (!lead || lead.status === stage) return;
+  if (!leadEditable(lead)) { toast(lead.agent_id == null ? 'ליד מהמאגר — קודם "תפוס ליד"' : 'ליד של סוכן אחר — צפייה בלבד', true); return; }
   if (stage === 'lost') { leadMarkLost(id); return; } // אבוד — דורש סיבה
   if (stage === 'won') { leadConvert(id); return; }   // נסגר — המרה ללקוח + חגיגה
   const from = STATUS.lead[lead.status][0], to = STATUS.lead[stage][0];
@@ -275,9 +301,13 @@ async function openLeadCard(id) {
   const closed = ['won', 'lost'].includes(l.status);
   const unassigned = l.agent_id == null;
   const overdue = l.follow_up && l.follow_up <= today() && !closed;
+  /* צפייה משותפת: ליד משויך לסוכן אחר — רואים הכל, בלי כפתורי פעולה */
+  const viewOnly = !leadEditable(l) && !unassigned;
+  const dup = _leadDups[id];
   const modal = document.getElementById('viewModal');
   modal.innerHTML = `
-    <h3>${esc(l.name)} ${pill('lead', l.status)}</h3>
+    <h3>${esc(l.name)} ${pill('lead', l.status)}
+      ${viewOnly ? '<span class="pill amber">👁 צפייה בלבד — ליד של סוכן אחר</span>' : ''}</h3>
     <div class="grid2" style="font-size:.9rem">
       <div><label>טלפון</label><b dir="ltr">${esc(l.phone) || '—'}</b></div>
       <div><label>אימייל</label><b dir="ltr">${esc(l.email) || '—'}</b></div>
@@ -287,20 +317,26 @@ async function openLeadCard(id) {
       <div><label>מתעניין ב</label><b>${esc(l.interest) || '—'}</b></div>
       <div><label>מעקב הבא</label><b ${overdue ? 'style="color:var(--danger)"' : ''}>${heDate(l.follow_up) || '—'}${l.follow_up_time ? ' ' + l.follow_up_time.slice(0, 5) : ''}${overdue ? ' ⏰' : ''}</b></div>
       <div><label>נוצר</label><b>${heDateTime(l.created_at)}</b></div>
+      ${dup ? `<div style="grid-column:1/-1"><label>כפילות מול לקוח</label>
+        <span class="pill amber">👥 הטלפון קיים אצל הלקוח "${esc(dup.customer_name)}"</span>
+        ${(isAdmin() || cache.customers.some(c => c.id === dup.customer_id)) && window.openCustomerCard
+          ? `<button class="btn btn-sm btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open');openPage('customers').then(()=>openCustomerCard(${dup.customer_id}))">פתח את כרטיס הלקוח</button>` : ''}
+      </div>` : ''}
       ${l.lost_reason ? `<div><label>סיבת אובדן</label><b>${esc(l.lost_reason)}</b></div>` : ''}
       ${l.notes ? `<div style="grid-column:1/-1"><label>הערות</label>${esc(l.notes)}</div>` : ''}
       ${l.pending_delete && isAdmin() ? `<div style="grid-column:1/-1;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px;font-size:.85rem;color:#991b1b">🗑 <b>בקשת מחיקה</b> מאת ${esc(nameOf('agents', l.delete_requested_by)) || 'סוכן'} — ${esc(l.delete_reason || '')}</div>` : ''}
     </div>
     <div class="m-actions" style="flex-wrap:wrap">
-      ${closed ? '' : `
+      ${closed || viewOnly ? '' : `
       ${unassigned && isSales() ? `<button class="btn btn-sm claim-btn" onclick="leadClaim(${id})">🎯 תפוס ליד</button>` : ''}
       ${phoneBtn(l.phone)}
+      ${leadEditable(l) ? `
       <button class="btn btn-sm" onclick="leadFollowup(${id})">📅 פולו-אפ / עדכון סטטוס</button>
       <button class="btn btn-sm btn-ghost" onclick="leadAddNote(${id})">+ הערה לציר הזמן</button>
       <button class="btn btn-sm btn-ghost" onclick="leadEdit(${id})">עריכת פרטים</button>
       <button class="btn btn-sm btn-gold" onclick="leadConvert(${id})">➜ המרה ללקוח</button>
       <button class="btn btn-sm btn-ghost" onclick="leadQuotePlaceholder(${id})">הצעת מחיר</button>
-      <button class="btn btn-sm btn-danger-ghost" onclick="leadMarkLost(${id})">סימון כאבוד</button>`}
+      <button class="btn btn-sm btn-danger-ghost" onclick="leadMarkLost(${id})">סימון כאבוד</button>` : ''}`}
       ${l.pending_delete && isAdmin() ? `<button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="leadApproveDelete(${id})">✅ אשר מחיקה</button> <button class="btn btn-sm btn-ghost" onclick="leadRejectDelete(${id})">↩ דחה (העבר אליי)</button>` : ''}
       ${!l.pending_delete && (isAdmin() || (isSales() && l.agent_id === myAgentId())) ? `<button class="btn btn-sm btn-danger-ghost" onclick="leadDelete(${id})">🗑 מחיקה</button>` : ''}
       <button class="btn btn-sm btn-ghost" style="margin-right:auto"
@@ -477,6 +513,8 @@ function emuEnsureStyles() {
   /* כפתור תפיסת ליד */
   .claim-btn{margin-top:8px;background:@@COLOR_BRAND@@;color:#fff;border:none}
   .kanban-card.pool{border-inline-start:4px solid @@COLOR_GRAD@@}
+  /* צפייה משותפת: ליד של סוכן אחר — מעומעם קלות ולא נגרר */
+  .kanban-card.shared-view:not(.pool){opacity:.75;cursor:default}
   /* שכבת-על משותפת */
   .emu-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
     background:rgba(17,20,40,.55);backdrop-filter:blur(2px);animation:emuFade .25s ease}
