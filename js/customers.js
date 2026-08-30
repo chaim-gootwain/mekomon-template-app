@@ -336,6 +336,7 @@ ${canWrite ? `<div class="cc-toolbar">
 <button class="btn" onclick="ccMenuClose();dealNew(${id})">💼 עסקה חדשה</button>
 <div class="cc-msep"></div>
 <button id="csBtn" class="btn" onclick="ccMenuClose();customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
+${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<button class="btn" onclick="ccMenuClose();debtReminderSend(${id})">💬 שלח תזכורת חוב</button>` : ''}
 </div>
 </div>
 <div class="cc-mwrap">
