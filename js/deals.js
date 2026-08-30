@@ -50,11 +50,18 @@ function dealNew(customerId) {
       <b>סה"כ העסקה</b><b id="dlTotal" style="font-size:1.3rem;color:#0369a1">₪0</b>
     </div>
 
+    <div class="grid2">
     <div class="field"><label>תשלום</label>
       <select id="dlPayMode" onchange="dealRecalc()">
         <option value="full">תשלום מלא מראש</option>
         <option value="plan">פריסה לתשלומים</option>
       </select></div>
+    <div class="field"><label>מועד החיוב (חבילה)</label>
+      <select id="dlBillMode">
+        <option value="upfront">מראש — בתחילת החבילה</option>
+        <option value="on_completion">בסיום — כשהחבילה נוצלה</option>
+      </select></div>
+    </div>
     <div id="dlPlanCfg" class="grid3 hidden">
       <div class="field"><label>מספר תשלומים</label><input type="number" id="dlN" min="2" value="3" oninput="dealRecalc()"></div>
       <div class="field"><label>תאריך ראשון</label><input type="date" id="dlFirst" value="${today()}" onchange="dealRecalc()"></div>
@@ -183,7 +190,7 @@ async function dealSave() {
     cadence: cadence,
     selected_dates: selDates,
     total_price: _dealState.total,
-    billing_mode: 'upfront',
+    billing_mode: (document.getElementById('dlBillMode')?.value === 'on_completion') ? 'on_completion' : 'upfront',
     start_date: today(),
     active: true,
     agent_id: _dealState.cust ? _dealState.cust.agent_id : null,
@@ -433,4 +440,56 @@ async function standingOrdersToggleAuto(on) {
   await run(db.from('settings').upsert({ key: 'standing_orders_auto', value: on ? '1' : '0' }));
   cache.settings.standing_orders_auto = on ? '1' : '0';
   toast(on ? 'יצירה אוטומטית הופעלה — תרוץ פעם בחודש' : 'יצירה אוטומטית כובתה (הכפתור הידני עדיין עובד)');
+}
+
+/* ============================================================
+   מעקב חבילות (פיצ'ר #6) — שיוך מודעה לחבילה פעילה
+   ------------------------------------------------------------
+   החבילות הן החוזים הקיימים (total_inserts / ניצול לפי ads.contract_id).
+   כאן: איתור חבילה פעילה עם יתרה, ושיוך מודעה ידנית אליה כדי
+   שהמונה "X מתוך Y" ירד גם על מודעות שלא נוצרו אוטומטית.
+   ============================================================ */
+
+/* חבילות פעילות עם יתרת ניצול ללקוח: [{ct, used, total, left}] */
+async function packagesWithRemaining(customerId) {
+  let contracts = [];
+  try {
+    contracts = await run(db.from('contracts').select('*').eq('customer_id', customerId).eq('active', true));
+  } catch (e) { return []; }
+  if (!contracts.length) return [];
+  const out = [];
+  for (const ct of contracts) {
+    const total = Number(ct.total_inserts) || 0;
+    if (!total) continue;
+    let count = 0;
+    try {
+      const r = await db.from('ads').select('id', { count: 'exact', head: true })
+        .eq('contract_id', ct.id).not('status', 'in', '("cancelled","rejected")');
+      count = r.count || 0;
+    } catch (e) { }
+    const used = count + (Number(ct.used_offset) || 0);
+    if (used < total) out.push({ ct, used, total, left: total - used });
+  }
+  return out;
+}
+
+/* שיוך מודעה חדשה לחבילה פעילה (נקרא אחרי שמירת מודעה ידנית).
+   חבילה אחת → שיוך אוטומטי; כמה → בחירה; אין → לא קורה כלום. */
+async function packageLinkAd(adId, customerId) {
+  try {
+    const pkgs = await packagesWithRemaining(customerId);
+    if (!pkgs.length) return;
+    let chosen = pkgs[0];
+    if (pkgs.length > 1) {
+      const menu = pkgs.map((p, i) => `${i + 1}. ${nameOf('priceList', p.ct.price_item_id) || 'חבילה'} — נותרו ${p.left} מתוך ${p.total}`).join('\n');
+      const raw = prompt(`ללקוח כמה חבילות פעילות — לאיזו לשייך את המודעה?\n${menu}\n\n(מספר, או ביטול לבלי שיוך)`, '1');
+      if (raw === null) return;
+      chosen = pkgs[Math.min(pkgs.length, Math.max(1, Number(raw) || 1)) - 1];
+    } else {
+      if (!confirm(`ללקוח חבילה פעילה: ${nameOf('priceList', chosen.ct.price_item_id) || 'חבילה'} — נותרו ${chosen.left} מתוך ${chosen.total}.\nלשייך את המודעה לחבילה? (המונה יירד)`)) return;
+    }
+    await run(db.from('ads').update({ contract_id: chosen.ct.id }).eq('id', adId));
+    await addInteraction('ad', adId, `שויך לחבילה (${nameOf('priceList', chosen.ct.price_item_id) || ''}) — נותרו ${chosen.left - 1} מתוך ${chosen.total}`);
+    toast(`✓ שויך לחבילה — נותרו ${chosen.left - 1} מתוך ${chosen.total}` + (chosen.left - 1 === 0 ? ' · החבילה נוצלה! 🎉' : ''));
+  } catch (e) { console.error('package link', e); }
 }
