@@ -46,7 +46,7 @@ location.reload();
 }
 
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
-const cache = { customers: [], agents: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
+const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
 async function refreshCache() {
 const role = profile.role;
@@ -55,8 +55,14 @@ db.from('price_list').select('*').eq('active', true).order('sort').then(r => cac
 db.from('issues').select('id,issue_number,publish_date,print_date,status').order('issue_number', { ascending: false }).limit(30).then(r => cache.issues = r.data || []),
 db.from('settings').select('*').then(r => { (r.data || []).forEach(s => cache.settings[s.key] = s.value); }),
 ];
-if (['admin', 'sales', 'editor', 'graphics'].includes(role))
-jobs.push(db.from('customers').select('id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms').order('name').then(r => cache.customers = r.data || []));
+if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
+jobs.push(db.from('customers').select('id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id').order('name').then(r => {
+  // נפילה בטוחה: אם עמודת agency_id עוד לא קיימת במופע — נטען בלעדיה
+  if (r.error) return db.from('customers').select('id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms').order('name').then(r2 => cache.customers = r2.data || []);
+  cache.customers = r.data || [];
+}));
+jobs.push(db.from('agencies').select('*').order('name').then(r => cache.agencies = r.data || []));
+}
 if (['admin', 'sales', 'editor'].includes(role)) {
 jobs.push(db.from('agents').select('*').order('name').then(r => cache.agents = r.data || []));
 jobs.push(db.from('profiles').select('id,full_name,role,active').then(r => cache.profiles = r.data || []));

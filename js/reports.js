@@ -23,6 +23,7 @@ const reports = [
 { id: 'customer', title: '🏪 היסטוריית לקוח', desc: 'כל הפרסומים, החיובים והתשלומים', roles: ['admin', 'sales'] },
 { id: 'ledger', title: '📒 כרטסות לרו"ח', desc: 'ייצוא חודשי לאקסל — כל תנועות הלקוחות עם יתרה רצה', roles: ['admin'] },
 { id: 'weekly', title: '🗓️ דוח שבועי תפעולי', desc: 'מה נסגר, מה נכנס ומה תקוע — לשבוע שנבחר', roles: ['admin', 'sales'] },
+{ id: 'agencies', title: '🏢 עמלות סוכנויות', desc: 'מחזור חודשי פר סוכנות × אחוז העמלה — תצוגה בלבד', roles: ['admin'] },
 ].filter(r => r.roles.includes(role));
 
 el.innerHTML = `
@@ -531,4 +532,41 @@ ${m.debts ? `<p style="font-size:.85rem"><b>חובות כעת:</b> ${money(m.deb
 <div style="display:flex;gap:8px;margin-top:8px">
 <button class="btn btn-sm btn-ghost" onclick="exportCsv('דוח_שבועי_${from}_${to}', ['מדד','כמות','₪'], _repData)">⬇ אקסל</button>
 </div>`;
+}
+
+/* ---------- עמלות סוכנויות (פיצ'ר #7) — חישוב תצוגה בלבד ---------- */
+// מחזור החיובים החודשי של לקוחות כל סוכנות × אחוז העמלה שלה.
+// שום תשלום עמלה לא מבוצע מכאן — מספרים להצגה ולהתחשבנות ידנית.
+async function report_agencies() {
+  const agencies = cache.agencies || [];
+  if (!agencies.length) {
+    document.getElementById('reportArea').innerHTML = '<div class="card-pad"><p class="empty">אין סוכנויות מוגדרות — מוסיפים בהגדרות → "סוכנויות פרסום 🏢"</p></div>';
+    return;
+  }
+  const ym = new Date().toISOString().slice(0, 7);
+  const d = new Date(); d.setMonth(d.getMonth() - 1);
+  const prevYm = d.toISOString().slice(0, 7);
+  const charges = await run(db.from('charges').select('customer_id,amount,status,issued_date')
+    .gte('issued_date', prevYm + '-01').not('status', 'in', '("cancelled","lost")'));
+  const custAgency = {}; (cache.customers || []).forEach(c => { if (c.agency_id) custAgency[c.id] = c.agency_id; });
+  const sums = {}; // agency_id -> {cur, prev}
+  charges.forEach(c => {
+    const aid = custAgency[c.customer_id]; if (!aid) return;
+    const m = String(c.issued_date || '').slice(0, 7);
+    const s = sums[aid] = sums[aid] || { cur: 0, prev: 0 };
+    if (m === ym) s.cur += Number(c.amount || 0);
+    else if (m === prevYm) s.prev += Number(c.amount || 0);
+  });
+  _repData = agencies.map(a => {
+    const s = sums[a.id] || { cur: 0, prev: 0 };
+    const pct = Number(a.commission_pct) || 0;
+    const n = (cache.customers || []).filter(c => c.agency_id === a.id).length;
+    return [a.name, n, Math.round(s.cur), Math.round(s.cur * pct) / 100, Math.round(s.prev), Math.round(s.prev * pct) / 100, pct];
+  }).sort((x, y) => y[2] - x[2]);
+  reportShell('עמלות סוכנויות — ' + ym + ' (תצוגה בלבד)', `
+<p class="muted" style="font-size:.8rem;margin-bottom:8px">מחזור = חיובים שהופקו ללקוחות הסוכנות בחודש (בלי מבוטלים/אבודים). העמלה מחושבת להצגה — התשלום לסוכנות ידני.</p>
+<table class="data"><thead><tr><th>סוכנות</th><th>לקוחות</th><th>מחזור ${ym}</th><th>עמלה ${ym}</th><th>מחזור ${prevYm}</th><th>עמלה ${prevYm}</th><th>%</th></tr></thead><tbody>
+${_repData.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${r[1]}</td><td>${money(r[2])}</td><td><b>${money(r[3])}</b></td><td>${money(r[4])}</td><td>${money(r[5])}</td><td>${r[6]}%</td></tr>`).join('')}
+</tbody></table>`,
+    `exportCsv('עמלות_סוכנויות', ['סוכנות','לקוחות','מחזור_נוכחי','עמלה_נוכחית','מחזור_קודם','עמלה_קודמת','אחוז'], _repData)`);
 }
