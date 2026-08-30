@@ -88,9 +88,20 @@ border-bottom:1px solid var(--line); font-size:.9rem; flex-wrap:wrap; }
 <div class="msg" id="msg"></div>
 </div>
 
+<div class="card" id="proofsCard" style="display:none;border:2px solid var(--brand)">
+<h2>⏳ מודעות שממתינות לאישור שלך</h2>
+<p style="font-size:.85rem;color:var(--muted);margin-bottom:8px">לחיצה על "צפייה ואישור" פותחת את המודעה המעוצבת — שם מאשרים או מבקשים תיקון.</p>
+<ul class="status-list" id="proofsList"></ul>
+</div>
+
 <div class="card">
 <h2>המודעות שלך</h2>
 <ul class="status-list" id="adsList"></ul>
+</div>
+
+<div class="card" id="docsCard" style="display:none">
+<h2>🧾 החשבוניות שלך</h2>
+<ul class="status-list" id="docsList"></ul>
 </div>
 </div>
 </div>
@@ -127,6 +138,39 @@ document.getElementById('adsList').innerHTML = data.ads.length
 
 document.getElementById('loading').style.display = 'none';
 document.getElementById('portal').style.display = 'block';
+loadExtra(); // חשבוניות + פרופים ממתינים — נטען בנפרד, לא חוסם את הדף
+}
+
+/* חשבוניות + מודעות שממתינות לאישור פרוף (portal_extra — שלב ב של הפורטל).
+   אם ה-RPC עדיין לא קיים במופע — הכרטיסים פשוט לא מוצגים. */
+const DOC_KIND_HE = { proforma: 'חשבון עסקה', tax_invoice: 'חשבונית מס', invoice_receipt: 'חשבונית מס-קבלה', receipt: 'קבלה', credit: 'חשבונית זיכוי' };
+async function loadExtra() {
+try {
+const { data, error } = await db.rpc('portal_extra', { p_token: token });
+if (error || !data) return;
+
+const proofs = data.proofs || [];
+if (proofs.length) {
+const base = location.href.replace(/index\.html.*$/, '').replace(/portal\/?([?#].*)?$/, '').replace(/\/$/, '');
+document.getElementById('proofsList').innerHTML = proofs.map(p => `<li>
+<span>${escapeHtml(p.title || 'מודעה')}${p.round > 1 ? ` <small style="color:var(--muted)">(סבב ${p.round})</small>` : ''}</span>
+<a class="pill" style="text-decoration:none" href="${base}/approve/?t=${encodeURIComponent(p.proof_token)}">👁 צפייה ואישור</a>
+</li>`).join('');
+document.getElementById('proofsCard').style.display = 'block';
+}
+
+const docs = data.docs || [];
+if (docs.length) {
+const money = v => '₪' + Number(v || 0).toLocaleString('he-IL', { maximumFractionDigits: 2 });
+document.getElementById('docsList').innerHTML = docs.map(d => `<li>
+<span>${escapeHtml(DOC_KIND_HE[d.kind] || d.kind)} ${escapeHtml(d.number || '')}<br>
+<small style="color:var(--muted)">${escapeHtml(d.date || '')}</small></span>
+<span style="display:flex;gap:8px;align-items:center">${d.total != null ? '<b>' + money(d.total) + '</b>' : ''}
+${d.pdf ? `<a class="pill" style="text-decoration:none" href="${escapeHtml(d.pdf)}" target="_blank" rel="noopener">PDF</a>` : ''}</span>
+</li>`).join('');
+document.getElementById('docsCard').style.display = 'block';
+}
+} catch (e) { /* המיגרציה טרם רצה במופע — שקט */ }
 }
 
 function showInvalid() {
