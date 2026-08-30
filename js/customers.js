@@ -361,6 +361,7 @@ ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href=
 ${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" onclick="ccMenuClose();ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>
 <button class="btn" onclick="ccMenuClose();customerAddNote(${id})">＋ הוסף הערה</button>
+${typeof auditShow === 'function' ? `<button class="btn" onclick="ccMenuClose();auditShow('customers', ${id}, '${esc(c.name).replace(/'/g, '&#39;')}')">🕘 היסטוריית שינויים</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerStatusChange(${id})">🔄 שינוי סטטוס</button>
 <button class="btn" onclick="custPortalShow()">🔗 קישור פורטל</button>
 ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-danger-ghost" onclick="ccMenuClose();customerDelete(${id})">🗑 מחיקת לקוח</button>` : ''}
