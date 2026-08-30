@@ -158,7 +158,13 @@ function _apDownloadB64(b64, fname) {
 async function adProofSendMonth(customerId, issueIds, ym, opts) {
   opts = opts || {};
   const wantEmail = opts.email !== false;
-  const { data, error } = await db.functions.invoke('send-clip-month', { body: { customer_id: customerId, issue_ids: issueIds, ym, send_email: wantEmail } });
+  const _b = { customer_id: customerId, issue_ids: issueIds, ym, send_email: wantEmail };
+  if (opts.to_email) _b.to_email = opts.to_email;
+  if (Array.isArray(opts.ad_ids) && opts.ad_ids.length) _b.ad_ids = opts.ad_ids;
+  if (opts.category_he) _b.category_he = opts.category_he;
+  if (opts.note) _b.note = opts.note;
+  if (opts.invoice) _b.invoice = opts.invoice;
+  const { data, error } = await db.functions.invoke('send-clip-month', { body: _b });
   if (error) { let d = ''; try { if (error.context && error.context.json) { const j = await error.context.json(); d = j.detail || j.error || ''; } } catch (e) { } throw new Error(d || error.message || 'שליחה נכשלה'); }
   if (data && data.pdf_b64 && (opts.download || (wantEmail && !data.emailed))) {
     _apDownloadB64(data.pdf_b64, 'גזירי_החודש_' + ym + '.pdf');
