@@ -140,33 +140,58 @@ ${Object.entries(bySource).map(([s, n]) => `<tr><td>${esc(s)}</td><td>${n}</td><
 `exportCsv('משפך_מכירות', ['שלב','לידים'], _repData)`);
 }
 
-/* ---------- גיול חובות ---------- */
+/* ---------- גיול חובות — פר לקוח, יתרות אמת (פיצ'ר #9) ---------- */
+// יתרה פר חיוב = סכום פחות תשלומים (תשלום חלקי לא נספר כחוב).
+// כל לקוח בשורה: היתרה מפוצלת לחלונות זמן לפי ימי האיחור, ממוין
+// מהחוב הגבוה לנמוך. סוכן מכירות רואה רק את הלקוחות שלו.
+const AGING_BUCKETS = ['שוטף', '1-30 יום', '31-60 יום', '61-90 יום', 'מעל 90 יום'];
+
 async function report_aging() {
-const charges = await run(db.from('charges').select('*').in('status', ['pending', 'invoiced', 'partial', 'overdue']));
-const buckets = { 'שוטף': [], '1-30 יום': [], '31-60 יום': [], '61-90 יום': [], 'מעל 90 יום': [] };
+const charges = await run(db.from('charges').select('id,customer_id,amount,status,due_date').in('status', ['pending', 'invoiced', 'partial', 'overdue']));
+const ids = charges.map(c => c.id);
+const paid = {};
+if (ids.length) {
+try {
+const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', ids));
+pays.forEach(p => paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount || 0));
+} catch (e) { }
+}
+// סוכן רואה רק את הלקוחות שלו (בנוסף ל-RLS בצד השרת)
+const mine = (typeof myAgentId === 'function') ? myAgentId() : null;
+const custAgent = {}; (cache.customers || []).forEach(c => custAgent[c.id] = c.agent_id);
 const now = new Date();
+const byCust = {};
 charges.forEach(c => {
-const due = c.due_date ? new Date(c.due_date) : null;
-const days = due ? Math.floor((now - due) / 86400000) : 0;
-const b = days <= 0 ? 'שוטף' : days <= 30 ? '1-30 יום' : days <= 60 ? '31-60 יום' : days <= 90 ? '61-90 יום' : 'מעל 90 יום';
-buckets[b].push(c);
+if (profile.role === 'sales' && custAgent[c.customer_id] !== mine) return;
+const bal = Number(c.amount || 0) - (paid[c.id] || 0);
+if (bal <= 0.005) return;
+const days = c.due_date ? Math.floor((now - new Date(c.due_date)) / 86400000) : 0;
+const bi = days <= 0 ? 0 : days <= 30 ? 1 : days <= 60 ? 2 : days <= 90 ? 3 : 4;
+const row = byCust[c.customer_id] = byCust[c.customer_id] || { buckets: [0, 0, 0, 0, 0], total: 0, oldest: 0 };
+row.buckets[bi] += bal; row.total += bal;
+if (days > row.oldest) row.oldest = days;
 });
-_repData = [];
-reportShell('גיול חובות', `
-<table class="data"><thead><tr><th>טווח</th><th>חיובים</th><th>סכום</th></tr></thead><tbody>
-${Object.entries(buckets).map(([b, list]) => {
-const sum = list.reduce((s, c) => s + Number(c.amount), 0);
-_repData.push([b, list.length, sum]);
-return `<tr><td>${b}</td><td>${list.length}</td><td><b>${money(sum) || '—'}</b></td></tr>`;
-}).join('')}
-</tbody></table>
-<br><b style="font-size:.9rem">פירוט מעל 30 יום:</b>
-<table class="data"><thead><tr><th>לקוח</th><th>סכום</th><th>תאריך יעד</th></tr></thead><tbody>
-${[...buckets['31-60 יום'], ...buckets['61-90 יום'], ...buckets['מעל 90 יום']]
-.map(c => `<tr><td>${esc(nameOf('customers', c.customer_id))}</td><td>${money(c.amount)}</td><td>${heDate(c.due_date)}</td></tr>`).join('')
-|| '<tr><td colspan="3">אין 🎉</td></tr>'}
-</tbody></table>`,
-`exportCsv('גיול_חובות', ['טווח','חיובים','סכום'], _repData)`);
+const rows = Object.entries(byCust)
+.map(([cid, v]) => ({ cid: Number(cid), name: nameOf('customers', Number(cid)) || ('לקוח #' + cid), ...v }))
+.sort((a, b) => b.total - a.total);
+const colSum = [0, 0, 0, 0, 0]; let grand = 0;
+rows.forEach(r => { r.buckets.forEach((v, i) => colSum[i] += v); grand += r.total; });
+_repData = rows.map(r => [r.name, ...r.buckets.map(v => Math.round(v * 100) / 100), Math.round(r.total * 100) / 100, r.oldest]);
+const fmt = v => v > 0.005 ? money(v) : '—';
+reportShell(`גיול חובות — ${rows.length} לקוחות · ${money(grand) || '₪0'} סה"כ`, `
+<p class="muted" style="font-size:.8rem;margin-bottom:8px">יתרה אמיתית (אחרי תשלומים חלקיים), מפוצלת לפי ימי איחור מתאריך היעד. ממוין מהחוב הגבוה לנמוך.</p>
+<table class="data"><thead><tr><th>לקוח</th>${AGING_BUCKETS.map(b => `<th>${b}</th>`).join('')}<th>סה"כ</th><th>ותק מרבי</th><th></th></tr></thead><tbody>
+${rows.map(r => `<tr>
+<td><b>${esc(r.name)}</b></td>
+${r.buckets.map((v, i) => `<td style="${i >= 3 && v > 0.005 ? 'color:var(--danger);font-weight:600' : ''}">${fmt(v)}</td>`).join('')}
+<td><b>${money(r.total)}</b></td>
+<td>${r.oldest > 0 ? r.oldest + ' ימים' : '—'}</td>
+<td style="white-space:nowrap">${typeof collReminderBtn === 'function' ? collReminderBtn(r.cid, r.total) : ''} <button class="btn btn-sm btn-ghost" onclick="customerStatement(${r.cid})">📄</button></td>
+</tr>`).join('') || `<tr><td colspan="${AGING_BUCKETS.length + 4}">אין חובות פתוחים 🎉</td></tr>`}
+</tbody>
+${rows.length ? `<tfoot><tr style="border-top:2px solid var(--line)"><td><b>סה"כ</b></td>${colSum.map(v => `<td><b>${fmt(v)}</b></td>`).join('')}<td><b>${money(grand)}</b></td><td></td><td></td></tr></tfoot>` : ''}
+</table>`,
+`exportCsv('גיול_חובות', ['לקוח',${AGING_BUCKETS.map(b => `'${b}'`).join(',')},'סה"כ','ותק_מרבי_ימים'], _repData)`);
 }
 
 /* ---------- דו"ח גיליון ---------- */
