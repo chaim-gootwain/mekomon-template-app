@@ -157,6 +157,7 @@ const CUSTOMER_FIELDS = [
 { name: 'crm_status', label: 'סטטוס CRM', type: 'select', default: 'active',
   options: [{ v: 'prospect', t: 'מתעניין' }, { v: 'active', t: 'פעיל' }, { v: 'past', t: 'לקוח בעבר' }] },
 { name: 'agency_id', label: 'סוכנות פרסום (אם מגיע דרך סוכנות)', type: 'select', options: 'agencies' },
+{ name: 'regular_advertiser', label: 'מפרסם קבוע (נכלל בתזכורות סגירת גיליון)', type: 'checkbox' },
 { name: 'invoice_name', label: 'שם לחשבונית' },
 { type: 'html', html: '<button type="button" class="btn btn-sm btn-ghost" onclick="custInvoiceCopy()">⬅ זהה לשם הלקוח</button>' },
 { name: 'business_id', label: 'ח.פ / עוסק', dir: 'ltr' },

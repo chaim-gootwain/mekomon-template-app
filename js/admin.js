@@ -243,6 +243,8 @@ ${typeof agenciesCard === 'function' ? agenciesCard() : ''}
 
 ${typeof issueTypesCard === 'function' ? issueTypesCard() : ''}
 
+${typeof issueRemindersCard === 'function' ? issueRemindersCard() : ''}
+
 <div class="card card-pad">
 <b>יומן פעילות אחרון</b>
 <div id="activityLog" style="margin-top:8px"><div class="empty">טוען...</div></div>

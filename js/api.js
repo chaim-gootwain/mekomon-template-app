@@ -56,8 +56,8 @@ db.from('issues').select('id,issue_number,publish_date,print_date,status').order
 db.from('settings').select('*').then(r => { (r.data || []).forEach(s => cache.settings[s.key] = s.value); }),
 ];
 if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
-jobs.push(db.from('customers').select('id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id').order('name').then(r => {
-  // נפילה בטוחה: אם עמודת agency_id עוד לא קיימת במופע — נטען בלעדיה
+jobs.push(db.from('customers').select('id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser').order('name').then(r => {
+  // נפילה בטוחה: אם עמודות חדשות עוד לא קיימות במופע — נטען בלעדיהן
   if (r.error) return db.from('customers').select('id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms').order('name').then(r2 => cache.customers = r2.data || []);
   cache.customers = r.data || [];
 }));
