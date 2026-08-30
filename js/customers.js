@@ -13,6 +13,9 @@ let _customers = [];
 let _custDebt = {};
 
 const CUSTOMER_STATUS = { active: ['פעיל', 'green'], frozen: ['מוקפא', 'amber'], blacklist: ['רשימה שחורה', 'red'] };
+// סטטוס CRM (פיצ'ר #13) — ממד נפרד מהסטטוס התפעולי שלמעלה:
+// איפה הלקוח במחזור החיים, לא האם מותר לעבוד איתו.
+const CRM_STATUS = { prospect: ['מתעניין', 'amber'], active: ['פעיל', 'green'], past: ['לקוח בעבר', ''] };
 
 /* ---- שיפורים: הנחה קבועה · שער סטטוס · מפת חוב · מיפוי תנאי תשלום בייבוא ---- */
 function _custFind(id) { return (cache.customers || []).find(x => x.id === id) || (_customers || []).find(x => x.id === id) || null; }
@@ -76,6 +79,12 @@ ${profile.role === 'admin' ? `<button class="btn btn-ghost" onclick="customerMer
 <option value="">כל הסוכנים</option>
 ${cache.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
 </select>
+<select id="custCrmFilter" onchange="customersDraw()">
+<option value="">כל סטטוסי ה-CRM</option>
+<option value="prospect">מתעניינים</option>
+<option value="active">פעילים</option>
+<option value="past">לקוחות בעבר</option>
+</select>
 <select id="custStatusFilter" onchange="customersDraw()">
 <option value="">כל הסטטוסים</option>
 <option value="active">פעילים</option>
@@ -100,10 +109,12 @@ function _customersFiltered() {
 const term = (document.getElementById('custSearch')?.value || '').trim();
 const agent = document.getElementById('custAgentFilter')?.value || '';
 const status = document.getElementById('custStatusFilter')?.value || '';
+const crm = document.getElementById('custCrmFilter')?.value || '';
 const tag = document.getElementById('custTagFilter')?.value || '';
 return _customers.filter(c =>
 (!agent || c.agent_id === Number(agent)) &&
 (!status || c.status === status) &&
+(!crm || (c.crm_status || 'active') === crm) &&
 (!tag || (c.tags || []).includes(tag)) &&
 (!term || [c.name, c.phone, c.whatsapp, c.contact_person, c.field, c.email, c.business_id, c.city, c.invoice_name].some(v => (v || '').includes(term))));
 }
@@ -135,6 +146,7 @@ renderTable(document.getElementById('custTable'), rows, [
 { h: 'תנאי תשלום', f: r => PAY_TERMS[r.payment_terms] || '' },
 { h: 'יתרת חוב', f: r => { const d = _custDebt[r.id]; if (!d || !(d.debt > 0)) return '<span class="muted">—</span>'; return `<b style="color:${d.overdue ? '#b91c1c' : '#334155'}">${money(d.debt)}${d.overdue ? ' ⏰' : ''}</b>`; } },
 { h: 'סטטוס', f: r => { const s = CUSTOMER_STATUS[r.status]; return `<span class="pill ${s[1]}">${s[0]}</span>`; } },
+{ h: 'CRM', f: r => { const s = CRM_STATUS[r.crm_status || 'active']; return s ? `<span class="pill ${s[1]}">${s[0]}</span>` : ''; } },
 ], { onRow: r => openCustomerCard(r.id), empty: 'אין לקוחות תואמים' });
 if (typeof custBulkBarUpdate === 'function') custBulkBarUpdate();
 }
@@ -142,6 +154,8 @@ if (typeof custBulkBarUpdate === 'function') custBulkBarUpdate();
 const CUSTOMER_FIELDS = [
 { type: 'section', label: 'זיהוי' },
 { name: 'name', label: 'שם לקוח', required: true },
+{ name: 'crm_status', label: 'סטטוס CRM', type: 'select', default: 'active',
+  options: [{ v: 'prospect', t: 'מתעניין' }, { v: 'active', t: 'פעיל' }, { v: 'past', t: 'לקוח בעבר' }] },
 { name: 'invoice_name', label: 'שם לחשבונית' },
 { type: 'html', html: '<button type="button" class="btn btn-sm btn-ghost" onclick="custInvoiceCopy()">⬅ זהה לשם הלקוח</button>' },
 { name: 'business_id', label: 'ח.פ / עוסק', dir: 'ltr' },
@@ -280,7 +294,7 @@ const portalUrl = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '')
 
 const modal = document.getElementById('viewModal');
 modal.innerHTML = `
-<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span></h3>
+<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span>${(c.crm_status && c.crm_status !== 'active' && CRM_STATUS[c.crm_status]) ? ` <span class="pill ${CRM_STATUS[c.crm_status][1]}">${CRM_STATUS[c.crm_status][0]}</span>` : ''}</h3>
 ${c.status !== 'active' && c.status_reason ? `<p style="color:var(--danger);font-size:.85rem;margin-top:-10px">סיבה: ${esc(c.status_reason)}</p>` : ''}
 ${(canWrite && !(c.business_id && String(c.business_id).trim())) ? `<div style="background:#fdecec;border:1px solid #f5b5b5;color:#b91c1c;border-radius:9px;padding:8px 12px;margin:6px 0;font-size:.86rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">⚠ חסר <b>ח.פ / עוסק</b> — יש להשלים לפני הפקת חשבונית. <button class="btn btn-sm" style="background:var(--brand)" onclick="customerEdit(${id})">✎ השלמת ח.פ</button></div>` : ''}
 ${canWrite ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px">
