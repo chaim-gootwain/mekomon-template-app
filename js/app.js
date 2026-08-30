@@ -78,6 +78,7 @@ setTimeout(async () => {
   try { if (typeof weeklyReviewCheckPending === 'function' && await weeklyReviewCheckPending()) return; } catch (e) { }
   try { if (typeof adStatusCheckPending === 'function') await adStatusCheckPending(); } catch (e) { }
   try { if (typeof weeklySummaryAutoCheck === 'function') await weeklySummaryAutoCheck(); } catch (e) { }
+  try { if (typeof standingOrdersAutoCheck === 'function') await standingOrdersAutoCheck(); } catch (e) { }
 }, 1200);
 }
 

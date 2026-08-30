@@ -392,7 +392,7 @@ ${custAdsGroupedHtml(ads, id)}
 ${canMoney ? `
 <div id="ccContracts" class="cc-tab hidden">
 ${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th></tr></thead><tbody>
-${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}</td>
+${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}${ct.is_standing_order ? ' <span class="pill amber" title="הוראת קבע חודשית">🔁 הו"ק</span>' : ''}</td>
 <td id="ctUsed${ct.id}">—</td><td>${money(ct.total_price)}</td>
 <td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td></tr>`).join('')}
 </tbody></table></div>` : '<p class="muted">אין חוזים</p>'}
