@@ -128,6 +128,8 @@ else { await run(db.from('ad_files').insert({ ad_id: data.id, storage_path: _pat
 }
 } catch (e) { }
 await addInteraction('ad', data.id, 'המודעה נוצרה ידנית');
+// חבילות (#6): אם ללקוח חבילה פעילה עם יתרה — הצעת שיוך שמורידה מהמונה
+if (!data.contract_id && typeof packageLinkAd === 'function') { try { await packageLinkAd(data.id, rec.customer_id); } catch (e) { } }
 toast('המודעה נוספה');
 openPage('ads');
 });
@@ -366,10 +368,16 @@ async function adAddByCustomerPicked(customerId) {
     }
     const { data: recent } = await db.from('ads').select('id,title,issue_id,status')
       .eq('customer_id', Number(customerId)).order('created_at', { ascending: false }).limit(3);
+    let pkgTxt = '';
+    if (typeof packagesWithRemaining === 'function') {
+      const pkgs = await packagesWithRemaining(Number(customerId));
+      if (pkgs.length) pkgTxt = `<div style="margin-top:6px;color:#0369a1">📦 ${pkgs.map(p => `${esc(nameOf('priceList', p.ct.price_item_id) || 'חבילה')}: נותרו <b>${p.left}</b> מתוך ${p.total}`).join(' · ')}</div>`;
+    }
     box.innerHTML = `<div style="border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:10px;font-size:.85rem;background:#fbfdff">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px">
         <span>סוכן: <b>${esc(nameOf('agents', c.agent_id) || '—')}</b></span>${balTxt}
       </div>
+      ${pkgTxt}
       ${(recent || []).length ? `<div class="muted" style="margin-top:6px">פרסומים אחרונים: ${(recent || []).map(a => esc(a.title || 'מודעה')).join(' · ')}</div>` : '<div class="muted" style="margin-top:6px">אין פרסומים קודמים</div>'}
     </div>`;
   } catch (e) { box.innerHTML = ''; }
