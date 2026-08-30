@@ -1,15 +1,18 @@
-// alerts-engine — מנוע ההתראות הגנרי (שלב 1)
+// alerts-engine — מנוע ההתראות הגנרי (שלב 2)
 // ------------------------------------------------------------
 // זרימה: alert_events (לא-מעובדים) → כללים פעילים → condition →
 //        dedup+throttle → alerts + alert_deliveries → משלוח לערוצים.
+// יצרני אירועים: סורקים יומיים (alerts_scan_all) + RPC גנרי
+//                alerts_publish_event שכל מודול במערכת יכול לקרוא.
 // פעולות (body.action): 'run' (ברירת מחדל: scan+process+deliver),
 //                       'scan' | 'process' | 'deliver'.
 // עקרונות-על: המנוע מודיע בלבד — לעולם לא מבצע פעולה כספית.
 //             מתג ראשי (settings.alerts_enabled='1') כבוי → לא קורה כלום.
 // הרשאות: מנהל פעיל (JWT) — או קריאה מתוזמנת עם מפתח ה-anon
 //         (Scheduled Function / pg_cron+pg_net; אין בה חשיפת נתונים).
-// ערוצים: inapp פעיל; email/whatsapp = stub שלא שולח כלום
-//         (TODO: pending provider/secret).
+// ערוצים: inapp פעיל; email פעיל דרך send-email (Gmail) — דורש מתג
+//         alerts_email_enabled + נמען settings.alerts_email_to;
+//         whatsapp = stub (TODO: pending provider/secret).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -37,13 +40,18 @@ function moneyIL(v) {
   }) : String(v ?? '');
 }
 // בדיקת condition של כלל מול payload של אירוע.
-// קונבנציה גנרית: {"threshold": N} → payload.balance (או payload.amount) >= N.
+// קונבנציות גנריות: {"threshold": N}    → payload.balance (או payload.amount) >= N.
+//                   {"hours_before": N} → payload.hours_left <= N.
 // condition ריק → הכלל תמיד תואם. פיצ'רים עתידיים מוסיפים מפתחות משלהם כאן.
 function conditionMatches(condition, payload) {
   const cond = condition || {};
   if (cond.threshold !== undefined) {
     const v = Number(payload?.balance ?? payload?.amount);
     if (!Number.isFinite(v) || v < Number(cond.threshold)) return false;
+  }
+  if (cond.hours_before !== undefined) {
+    const h = Number(payload?.hours_left);
+    if (!Number.isFinite(h) || h > Number(cond.hours_before)) return false;
   }
   return true;
 }
@@ -53,7 +61,10 @@ function dedupKeyFor(eventType, rule, payload) {
   if (eventType === 'debt_over_threshold') {
     return `debt_over:${payload?.customer_id}:${rule?.condition?.threshold ?? ''}`;
   }
-  return `${eventType}:${rule.id}:${payload?.customer_id ?? payload?.id ?? ''}`;
+  if (eventType === 'issue_deadline') {
+    return `issue_deadline:${payload?.issue_id}`;
+  }
+  return `${eventType}:${rule.id}:${payload?.customer_id ?? payload?.issue_id ?? payload?.id ?? ''}`;
 }
 function buildAlertText(eventType, rule, payload) {
   const vars = {
@@ -68,15 +79,38 @@ function buildAlertText(eventType, rule, payload) {
       severity: 'warning'
     };
   }
+  if (eventType === 'issue_deadline') {
+    return {
+      title: `דדליין מודעות מתקרב — גיליון ${payload?.issue_number ?? ''}`,
+      body: rule.template ? fillTemplate(rule.template, vars) : `דדליין המודעות לגיליון ${payload?.issue_number ?? ''} בעוד ${payload?.hours_left ?? '?'} שעות`,
+      severity: 'warning'
+    };
+  }
+  if (eventType === 'payment_failed') {
+    return {
+      title: `תשלום נכשל — ${payload?.customer_name || 'לקוח'}`,
+      body: rule.template ? fillTemplate(rule.template, { ...vars, amount: moneyIL(payload?.amount) }) : `תשלום של ${payload?.customer_name || ''} נכשל (${moneyIL(payload?.amount)})`,
+      severity: 'critical'
+    };
+  }
+  if (eventType === 'check_bounced') {
+    return {
+      title: `צ'ק חזר — ${payload?.customer_name || 'לקוח'}`,
+      body: rule.template ? fillTemplate(rule.template, { ...vars, amount: moneyIL(payload?.amount) }) : `צ'ק של ${payload?.customer_name || ''} חזר (${moneyIL(payload?.amount)})`,
+      severity: 'critical'
+    };
+  }
   return {
     title: rule.template ? fillTemplate(rule.template, vars) : eventType,
     body: rule.template ? fillTemplate(rule.template, vars) : JSON.stringify(payload),
     severity: 'info'
   };
 }
-/* ---------- שלבי המנוע ---------- */ // שלב א: סריקה — יצרן האירוע debt_over_threshold (SQL, security definer)
+/* ---------- שלבי המנוע ---------- */ // שלב א: סריקה — כל הסורקים (SQL, security definer).
+// נפילה חזרה ל-alerts_scan_debts אם מיגרציית שלב 2 עוד לא הורצה במופע.
 async function stepScan(svc) {
-  const { data, error } = await svc.rpc('alerts_scan_debts');
+  let { data, error } = await svc.rpc('alerts_scan_all');
+  if (error) ({ data, error } = await svc.rpc('alerts_scan_debts'));
   if (error) throw new Error('scan: ' + error.message);
   return {
     events_created: data ?? 0
@@ -166,14 +200,37 @@ async function sendInapp() {
     ok: true
   };
 }
-// email: stub — לא שולח כלום עד שיוגדרו ספק וסוד.
-// TODO: pending provider/secret — כשיוחלט על ספק (למשל Resend/SMTP):
-//   לקרוא סוד מ-Deno.env, לכבד את settings.alerts_email_enabled,
-//   לשלוח לפי rule.recipients, ולמלא provider_msg_id.
-async function sendEmailStub() {
-  return {
+// email: שולח דרך פונקציית send-email הקיימת (Gmail SMTP).
+// נמען: settings.alerts_email_to (ריק → לא שולחים). קריאה פנימית עם
+// מפתח ה-service_role — send-email מזהה אותה ומדלגת על אימות משתמש.
+async function sendEmailAlert(settings, alert) {
+  const to = String(settings.alerts_email_to || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+    return {
+      ok: false,
+      error: 'no recipient (settings.alerts_email_to)'
+    };
+  }
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const res = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/send-email', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + key,
+      apikey: key
+    },
+    body: JSON.stringify({
+      to,
+      subject: '📣 ' + (alert?.title || 'התראת מערכת'),
+      body: (alert?.body || alert?.title || '') + '\n\n— מנוע ההתראות, @@PAPER_NAME@@'
+    })
+  });
+  const out = await res.json().catch(()=>({}));
+  return out?.ok ? {
+    ok: true
+  } : {
     ok: false,
-    error: 'channel not configured'
+    error: out?.detail || out?.error || 'http ' + res.status
   };
 }
 // whatsapp: stub — לא שולח כלום עד שיוחלט על ספק (לא רלוונטי לשלב זה).
@@ -187,7 +244,7 @@ async function sendWhatsappStub() {
 }
 // שלב ג: משלוח — עובר על רשומות queued ומסמן sent/failed
 async function stepDeliver(svc, settings) {
-  const { data: queued, error: qErr } = await svc.from('alert_deliveries').select('*').eq('status', 'queued').order('created_at', {
+  const { data: queued, error: qErr } = await svc.from('alert_deliveries').select('*, alerts(title, body)').eq('status', 'queued').order('created_at', {
     ascending: true
   }).limit(BATCH);
   if (qErr) throw new Error('deliver/queued: ' + qErr.message);
@@ -201,10 +258,9 @@ async function stepDeliver(svc, settings) {
     if (d.channel === 'inapp') {
       res = await sendInapp();
     } else if (d.channel === 'email') {
-      // גם כשהמתג דלוק — אין ספק/סוד עדיין, ולכן לא נשלח דבר (stub)
-      res = settings.alerts_email_enabled === '1' ? await sendEmailStub() : {
+      res = settings.alerts_email_enabled === '1' ? await sendEmailAlert(settings, d.alerts) : {
         ok: false,
-        error: 'channel not configured'
+        error: 'channel disabled'
       };
     } else if (d.channel === 'whatsapp') {
       res = settings.alerts_whatsapp_enabled === '1' ? await sendWhatsappStub() : {
@@ -272,7 +328,8 @@ async function stepDeliver(svc, settings) {
     const { data: sRows } = await svc.from('settings').select('key,value').in('key', [
       'alerts_enabled',
       'alerts_email_enabled',
-      'alerts_whatsapp_enabled'
+      'alerts_whatsapp_enabled',
+      'alerts_email_to'
     ]);
     const settings = {};
     (sRows || []).forEach((r)=>settings[r.key] = r.value);
