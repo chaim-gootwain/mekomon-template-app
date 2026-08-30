@@ -39,7 +39,8 @@ return ao - bo || String(a.created_at).localeCompare(String(b.created_at));
 _gfxQueue = queue;
 
 el.innerHTML = `
-<div class="page-head"><h2>תור גרפיקה <span class="muted">(${queue.length})</span></h2></div>
+<div class="page-head"><h2>תור גרפיקה <span class="muted">(${queue.length})</span></h2>
+<button class="btn btn-ghost btn-sm" onclick="gfxBoardRender(document.getElementById('content'))">🗂 לוח עומסים</button></div>
 <p class="muted" style="font-size:.82rem;margin-top:-8px">גרור עם ▲▼ לקביעת קדימות · דדליין אדום = עבר (מתריע, לא חוסם)</p>
 <div class="card" id="gfxTable"></div>`;
 
@@ -214,5 +215,78 @@ ${!cust ? `<button class="btn btn-sm btn-ghost" onclick="proofSendCustomerEmail(
 <button class="btn btn-sm btn-danger-ghost" onclick="proofRequestRevision(${a.id})">✎ בקשת תיקון</button>
 </div>
 <p class="muted" style="font-size:.76rem;margin-top:6px">כששני האישורים יתקבלו — המודעה תעבור אוטומטית לוועדה.</p>
+</div>`;
+}
+
+/* ============================================================
+   לוח עומסים לגרפיקה (פיצ'ר #19) — קנבן קריאה-בלבד
+   ------------------------------------------------------------
+   שלוש עמודות: 🔥 דחוף (בעבודה + דדליין עבר/קרוב) · 🎨 בעבודה ·
+   👀 ממתין לאישור (פרוף — עם חיווי מי מעכב: לקוח / הנהלה).
+   לחיצה על כרטיס פותחת את כרטיס המודעה. מעבר חזרה לתצוגת התור.
+   ============================================================ */
+
+async function gfxBoardRender(el) {
+  el.innerHTML = '<div class="empty">טוען את הלוח...</div>';
+  const open = await loadAds(['in_graphics', 'proof']);
+  _ads = open;
+  const issIds = [...new Set(open.map(a => a.issue_id).filter(Boolean))];
+  const issRows = issIds.length ? await run(db.from('issues').select('id,issue_number,ads_deadline').in('id', issIds)) : [];
+  const issMap = {}; issRows.forEach(i => issMap[i.id] = i);
+
+  const now = Date.now(), soon = now + 48 * 3600 * 1000;
+  const urgency = a => {
+    const iss = issMap[a.issue_id];
+    if (!iss || !iss.ads_deadline) return 0;
+    const t = new Date(iss.ads_deadline).getTime();
+    if (isNaN(t)) return 0;
+    return t < now ? 2 : (t <= soon ? 1 : 0);
+  };
+  const daysIn = a => Math.max(0, Math.floor((now - (Date.parse(a.updated_at || a.created_at) || now)) / 86400000));
+
+  const cols = [
+    { key: 'urgent', title: '🔥 דחוף', hint: 'בעבודה ודדליין המודעות עבר או בתוך 48 שעות', color: '#b91c1c', items: [] },
+    { key: 'working', title: '🎨 בעבודה', hint: 'בתור הגרפיקה, בלי לחץ דדליין', color: '@@COLOR_BRAND@@', items: [] },
+    { key: 'waiting', title: '👀 ממתין לאישור', hint: 'פרוף נשלח — מי שמסומן ⏳ מעכב', color: '#a16207', items: [] },
+  ];
+  open.forEach(a => {
+    if (a.status === 'proof') cols[2].items.push(a);
+    else if (urgency(a) > 0) cols[0].items.push(a);
+    else cols[1].items.push(a);
+  });
+  cols[0].items.sort((a, b) => urgency(b) - urgency(a));
+  cols[2].items.sort((a, b) => String(a.updated_at || a.created_at).localeCompare(String(b.updated_at || b.created_at)));
+
+  const cardHtml = a => {
+    const iss = issMap[a.issue_id];
+    const u = urgency(a);
+    const dl = iss && iss.ads_deadline ? `<div style="font-size:.74rem;color:${u === 2 ? '#b91c1c' : u === 1 ? '#a16207' : 'var(--muted,#6b7280)'}">${u === 2 ? '❗ עבר: ' : '⏰ '}${heDateTime(iss.ads_deadline)}</div>` : '';
+    const approvals = a.status === 'proof'
+      ? `<div style="display:flex;gap:6px;margin-top:4px">
+          <span class="pill ${a.proof_cust_at ? 'green' : 'amber'}" style="font-size:.68rem">${a.proof_cust_at ? '✓ לקוח' : '⏳ לקוח'}</span>
+          <span class="pill ${a.proof_mgmt_at ? 'green' : 'amber'}" style="font-size:.68rem">${a.proof_mgmt_at ? '✓ הנהלה' : '⏳ הנהלה'}</span>
+          ${a.proof_round > 1 ? `<span class="pill" style="font-size:.68rem">סבב ${a.proof_round}</span>` : ''}
+        </div>` : (a.revision_note ? '<span class="pill amber" style="font-size:.68rem">בתיקון</span>' : '');
+    return `<div onclick="openAdCard(${a.id})" style="background:var(--card,#fff);border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:9px 11px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.05)">
+      <b style="font-size:.88rem">${esc(a.title || 'מודעה')}</b>
+      <div style="font-size:.78rem;color:var(--muted,#6b7280)">${esc(nameOf('customers', a.customer_id))}${iss ? ' · גיליון ' + iss.issue_number : ''}</div>
+      ${dl}${approvals}
+      <div style="font-size:.7rem;color:var(--muted,#9ca3af);margin-top:3px">${daysIn(a)} ימים בסטטוס</div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+<div class="page-head"><h2>לוח עומסים — גרפיקה <span class="muted">(${open.length})</span></h2>
+<button class="btn btn-ghost btn-sm" onclick="openPage('graphics')">📋 חזרה לתור</button></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;align-items:start">
+${cols.map(c => `<div style="background:#f4f6fb;border-radius:12px;padding:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+    <b style="color:${c.color}">${c.title}</b><span class="pill">${c.items.length}</span>
+  </div>
+  <div class="muted" style="font-size:.72rem;margin-bottom:8px">${c.hint}</div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    ${c.items.map(cardHtml).join('') || '<div class="muted" style="font-size:.8rem;text-align:center;padding:12px">ריק 👍</div>'}
+  </div>
+</div>`).join('')}
 </div>`;
 }
