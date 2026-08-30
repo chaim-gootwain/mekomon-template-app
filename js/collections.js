@@ -91,15 +91,70 @@ function showDebtGateModal(customerId, bal, actionLabel) {
   });
 }
 
+/* ---------- תזכורת חוב בוואטסאפ (פיצ'ר #1) ---------- */
+// מתג פר-מופע: הכפתורים מוצגים רק כשהוא דלוק (settings.whatsapp_enabled).
+function waRemindersOn() { return String((cache.settings || {}).whatsapp_enabled || '0') === '1'; }
+
+// שליחת תזכורת: מחשב יתרה עדכנית, בונה הודעה מנומסת עם פירוט,
+// פותח wa.me (שליחה ידנית — בלי API), ורושם לוג ב-debt_reminders.
+// תזכורת בלבד — שום חיוב לא מתבצע מכאן.
+async function debtReminderSend(customerId) {
+  const cust = (cache.customers || []).find(c => c.id === customerId);
+  if (!cust) { toast('לקוח לא נמצא', true); return; }
+  const raw = String(cust.whatsapp || cust.phone || '').replace(/\D/g, '');
+  if (!raw) { toast('ללקוח אין מספר טלפון/וואטסאפ', true); return; }
+  let intl = raw;
+  if (intl.startsWith('0')) intl = '972' + intl.slice(1);
+  else if (!intl.startsWith('972')) intl = '972' + intl;
+
+  toast('מחשב יתרה...');
+  const bal = await customerOpenBalance(customerId);
+  if (!(bal.total > 0)) { toast('אין ללקוח חוב פתוח 👍', true); return; }
+
+  const ageTxt = bal.oldestDue ? ` (הוותיק שבהם מ-${heDate(bal.oldestDue)})` : '';
+  const msg = `שלום ${cust.name || ''}, כאן @@PAPER_NAME@@.\n` +
+    `תזכורת ידידותית: קיימת יתרת חוב פתוחה של ${money(bal.total)} על ${bal.count} חיובים${ageTxt}.\n` +
+    `נשמח להסדרה בהקדם. לפירוט מלא או לתיאום תשלום: @@PAPER_PHONE@@.\nתודה רבה! 🙏`;
+
+  window.open(`https://wa.me/${intl}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+
+  // לוג — נכשל בשקט אם המיגרציה debt_reminders עוד לא הורצה במופע
+  try {
+    await db.from('debt_reminders').insert({
+      customer_id: customerId, amount: Math.round(bal.total * 100) / 100,
+      channel: 'whatsapp', message: msg, status: 'opened', created_by: profile.id
+    });
+  } catch (e) { console.warn('debt_reminders log', e); }
+  try { await addInteraction('customer', customerId, `💬 נשלחה תזכורת חוב בוואטסאפ (${money(bal.total)})`); } catch (e) { }
+  toast('✓ נפתח וואטסאפ עם התזכורת — נרשם ביומן');
+}
+
 /* ---------- דו"ח חוב לפי גיל (מוזרק לעמוד הגבייה) ---------- */
 function collReminderBtn(customerId, total) {
+  if (!waRemindersOn()) return '';
   const cust = (cache.customers || []).find(c => c.id === customerId);
-  const phone = cust && cust.phone ? String(cust.phone).replace(/\D/g, '') : '';
-  if (!phone) return '';
-  let intl = phone;
-  if (intl.startsWith('0')) intl = '972' + intl.slice(1);
-  const msg = encodeURIComponent(`שלום, כאן @@PAPER_NAME@@. רצינו להזכיר בעדינות שקיימת יתרת חוב פתוחה של ${money(total)}. נשמח להסדרה, ותודה רבה!`);
-  return `<a class="btn btn-sm btn-ghost" href="https://wa.me/${intl}?text=${msg}" target="_blank" rel="noopener">💬 תזכורת</a>`;
+  if (!cust || !(cust.whatsapp || cust.phone)) return '';
+  return `<button class="btn btn-sm btn-ghost" onclick="debtReminderSend(${customerId})">💬 תזכורת</button>`;
+}
+
+/* כרטיס הגדרות קטן — מתג התזכורות (מוצג במסך ההגדרות של המנהל) */
+function collSettingsCard() {
+  const on = waRemindersOn();
+  return `
+<div class="card card-pad">
+<b>תזכורות חוב בוואטסאפ 💬</b>
+<p class="muted" style="font-size:.82rem">כפתור "שלח תזכורת חוב" בכרטיס הלקוח ובדו"ח הגבייה: פותח וואטסאפ עם הודעה מנוסחת הכוללת את היתרה, ורושם לוג. תזכורת בלבד — שום חיוב לא מתבצע.</p>
+<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+<input type="checkbox" id="setWaReminders" ${on ? 'checked' : ''} onchange="collToggleWaReminders(this.checked)" style="width:18px;height:18px">
+תזכורות וואטסאפ פעילות במופע הזה
+</label>
+</div>`;
+}
+
+async function collToggleWaReminders(on) {
+  await run(db.from('settings').upsert({ key: 'whatsapp_enabled', value: on ? '1' : '0' }));
+  cache.settings.whatsapp_enabled = on ? '1' : '0';
+  toast(on ? 'תזכורות וואטסאפ הופעלו' : 'תזכורות וואטסאפ כובו');
 }
 
 async function collRenderAging(el) {
