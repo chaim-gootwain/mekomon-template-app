@@ -51,7 +51,7 @@ Deno.serve(async (req)=>{
       error: "forbidden"
     }, 403);
     const body = await req.json();
-    const { customer_id, charge_id, doc_kind, items = [], vat_included = false, payment = null, transaction_id: txnIn, comment, parent = null, doc_date = null } = body || {};
+    const { customer_id, charge_id, doc_kind, items = [], vat_included = false, payment = null, transaction_id: txnIn, comment, parent = null, doc_date = null, bill_to_name = null, bill_to_crn = null } = body || {};
     const type = KIND_TO_TYPE[doc_kind];
     if (!type) return json({
       ok: false,
@@ -115,12 +115,13 @@ Deno.serve(async (req)=>{
       type,
       transaction_id: txn,
       lang: "he",
-      customer_name: cust.invoice_name || cust.name || "לקוח",
+      // סוכנות (פיצ'ר #7): דריסת שם/ח.פ הנמען במסמך בלבד — החוב נשאר על הלקוח
+      customer_name: bill_to_name || cust.invoice_name || cust.name || "לקוח",
       customerAction: "ASSOC_CREATE",
       send_copy: 1,
       dont_send_email: autosend ? 0 : 1
     };
-    payload.customer_crn = cust.business_id || String(cust.id);
+    payload.customer_crn = bill_to_name ? (bill_to_crn || String(cust.id)) : (cust.business_id || String(cust.id));
     if (parent) payload.parent = parent;
     if (doc_date) {
       const _dp = String(doc_date).split('-');

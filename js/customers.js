@@ -156,6 +156,7 @@ const CUSTOMER_FIELDS = [
 { name: 'name', label: 'שם לקוח', required: true },
 { name: 'crm_status', label: 'סטטוס CRM', type: 'select', default: 'active',
   options: [{ v: 'prospect', t: 'מתעניין' }, { v: 'active', t: 'פעיל' }, { v: 'past', t: 'לקוח בעבר' }] },
+{ name: 'agency_id', label: 'סוכנות פרסום (אם מגיע דרך סוכנות)', type: 'select', options: 'agencies' },
 { name: 'invoice_name', label: 'שם לחשבונית' },
 { type: 'html', html: '<button type="button" class="btn btn-sm btn-ghost" onclick="custInvoiceCopy()">⬅ זהה לשם הלקוח</button>' },
 { name: 'business_id', label: 'ח.פ / עוסק', dir: 'ltr' },
@@ -294,7 +295,7 @@ const portalUrl = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '')
 
 const modal = document.getElementById('viewModal');
 modal.innerHTML = `
-<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span>${(c.crm_status && c.crm_status !== 'active' && CRM_STATUS[c.crm_status]) ? ` <span class="pill ${CRM_STATUS[c.crm_status][1]}">${CRM_STATUS[c.crm_status][0]}</span>` : ''}</h3>
+<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span>${(c.crm_status && c.crm_status !== 'active' && CRM_STATUS[c.crm_status]) ? ` <span class="pill ${CRM_STATUS[c.crm_status][1]}">${CRM_STATUS[c.crm_status][0]}</span>` : ''}${(() => { const ag = c.agency_id && (cache.agencies || []).find(a => a.id === c.agency_id); return ag ? ` <span class="pill blue" title="לקוח דרך סוכנות">🏢 ${esc(ag.name)}</span>` : ''; })()}</h3>
 ${c.status !== 'active' && c.status_reason ? `<p style="color:var(--danger);font-size:.85rem;margin-top:-10px">סיבה: ${esc(c.status_reason)}</p>` : ''}
 ${(canWrite && !(c.business_id && String(c.business_id).trim())) ? `<div style="background:#fdecec;border:1px solid #f5b5b5;color:#b91c1c;border-radius:9px;padding:8px 12px;margin:6px 0;font-size:.86rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">⚠ חסר <b>ח.פ / עוסק</b> — יש להשלים לפני הפקת חשבונית. <button class="btn btn-sm" style="background:var(--brand)" onclick="customerEdit(${id})">✎ השלמת ח.פ</button></div>` : ''}
 ${canWrite ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px">
@@ -631,4 +632,69 @@ function _custLedgerHtml(charges, payments) {
     </tr>`;
   }).join('');
   return `<div class="table-wrap"><table class="data"><thead><tr><th>תאריך</th><th>תיאור</th><th>חיוב</th><th>תשלום</th><th>יתרה</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* ============================================================
+   סוכנויות פרסום (פיצ'ר #7) — ניהול + כרטיס הגדרות
+   ------------------------------------------------------------
+   ישות סוכנות: אחוז עמלה להחזר + על שם מי מונפקת החשבונית.
+   חישוב העמלה הוא בדוח בלבד — שום תשלום לא מבוצע אוטומטית.
+   ============================================================ */
+
+const AGENCY_FIELDS = [
+  { name: 'name', label: 'שם הסוכנות', required: true },
+  { name: 'invoice_name', label: 'שם לחשבונית (ריק = שם הסוכנות)' },
+  { name: 'business_id', label: 'ח.פ / עוסק', dir: 'ltr' },
+  { name: 'contact_person', label: 'איש קשר' },
+  { name: 'phone', label: 'טלפון', dir: 'ltr' },
+  { name: 'email', label: 'מייל', dir: 'ltr' },
+  { name: 'commission_pct', label: '% עמלה להחזר לסוכנות', type: 'number', default: 0 },
+  { name: 'invoice_target', label: 'חשבונית כברירת מחדל על שם', type: 'select', default: 'customer',
+    options: [{ v: 'customer', t: 'הלקוח' }, { v: 'agency', t: 'הסוכנות' }] },
+  { name: 'notes', label: 'הערות', type: 'textarea', rows: 2 },
+];
+
+function agenciesCard() {
+  const list = cache.agencies || [];
+  const rows = list.map(a => {
+    const n = (cache.customers || []).filter(c => c.agency_id === a.id).length;
+    return `<tr>
+      <td><b>${esc(a.name)}</b></td><td>${Number(a.commission_pct) || 0}%</td>
+      <td>${a.invoice_target === 'agency' ? 'הסוכנות' : 'הלקוח'}</td><td>${n}</td>
+      <td><button class="btn btn-sm btn-ghost" onclick="agencyEdit(${a.id})">✎</button></td>
+    </tr>`;
+  }).join('');
+  return `
+<div class="card card-pad">
+<b>סוכנויות פרסום 🏢</b>
+<p class="muted" style="font-size:.82rem">סוכנות = אחוז עמלה להחזר + על שם מי מונפקת החשבונית. משייכים לקוח לסוכנות בטופס הלקוח. חישוב העמלות — בדוח "עמלות סוכנויות" (תצוגה בלבד, בלי תשלום אוטומטי).</p>
+${list.length ? `<div class="table-wrap" style="margin-top:8px"><table class="data">
+<thead><tr><th>סוכנות</th><th>עמלה</th><th>חשבונית ע"ש</th><th>לקוחות</th><th></th></tr></thead>
+<tbody>${rows}</tbody></table></div>` : '<p class="muted" style="font-size:.82rem">אין סוכנויות עדיין.</p>'}
+<div style="display:flex;gap:8px;margin-top:10px">
+<button class="btn btn-sm" onclick="agencyAdd()">＋ סוכנות חדשה</button>
+</div>
+</div>`;
+}
+
+function agencyAdd() {
+  openForm('סוכנות חדשה', AGENCY_FIELDS, {}, async (rec) => {
+    rec.commission_pct = Math.min(100, Math.max(0, Number(rec.commission_pct) || 0));
+    const { error } = await db.from('agencies').insert(rec);
+    if (error) { toast(/relation|exist/i.test(error.message) ? 'טבלת הסוכנויות חסרה — יש להריץ את מיגרציית agencies' : 'שגיאה: ' + error.message, true); return; }
+    await refreshCache();
+    toast('הסוכנות נוספה');
+    openPage('admin');
+  });
+}
+
+function agencyEdit(id) {
+  const a = (cache.agencies || []).find(x => x.id === id); if (!a) return;
+  openForm('עריכת סוכנות — ' + a.name, AGENCY_FIELDS, a, async (rec) => {
+    rec.commission_pct = Math.min(100, Math.max(0, Number(rec.commission_pct) || 0));
+    await run(db.from('agencies').update(rec).eq('id', id));
+    await refreshCache();
+    toast('נשמר');
+    openPage('admin');
+  });
 }

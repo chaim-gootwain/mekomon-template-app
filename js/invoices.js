@@ -184,10 +184,13 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
   const _lines = (opts.lines && opts.lines.length)
     ? opts.lines.map(l => ({ details: l.details, amount: (l.amount != null ? l.amount : 1), price: (l.price != null ? l.price : '') }))
     : [_line];
+  // סוכנות (פיצ'ר #7): ברירת המחדל של "על שם מי" נקבעת בהגדרות הסוכנות
+  const _agency = (c.agency_id && (cache.agencies || []).find(a => a.id === c.agency_id)) || null;
   _invState = {
     cid: c.id, name: c.name, kind, isPayment, issueId: (opts.issueId != null ? opts.issueId : issueId),
     parentUuid: opts.parentUuid || null, srcNumber: opts.srcNumber || null,
     hpMissing: !(c.business_id && String(c.business_id).trim()),
+    agency: _agency, billTo: (_agency && _agency.invoice_target === 'agency') ? 'agency' : 'customer',
     lines: _lines,
     vatInc: (opts.vatInc != null ? opts.vatInc : (isPayment ? true : false)), method: 'cash', date: '',
     docDate: today(),
@@ -233,6 +236,12 @@ function invRenderModal() {
     </div>` : '';
   document.getElementById('invOv').innerHTML = `<div class="inv-box">
     <h3>הנפקת ${DOC_KIND_HE[s.kind]} — ${esc(s.name)}</h3>
+    ${s.agency ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.85rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      🏢 לקוח דרך סוכנות <b>${esc(s.agency.name)}</b> · המסמך על שם:
+      <select onchange="_invState.billTo=this.value" style="padding:3px 8px;border-radius:6px;border:1px solid #bfdbfe">
+        <option value="customer" ${s.billTo === 'customer' ? 'selected' : ''}>הלקוח — ${esc(s.name)}</option>
+        <option value="agency" ${s.billTo === 'agency' ? 'selected' : ''}>הסוכנות — ${esc(s.agency.invoice_name || s.agency.name)}</option>
+      </select></div>` : ''}
     ${s.hpMissing ? `<div style="background:#fdecec;border:1px solid #f5b5b5;color:#b91c1c;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.84rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">⚠ ללקוח אין <b>ח.פ / עוסק</b> — מומלץ להשלים לפני ההפקה. <button class="btn btn-sm" style="background:var(--brand)" onclick="invCloseModal(); customerEdit(${s.cid})">✎ השלמת ח.פ</button></div>` : ''}
     ${(s.isPayment && !s.parentUuid) ? ((s.openCharges && s.openCharges.length)
       ? `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.84rem">
@@ -316,6 +325,12 @@ async function invSubmit() {
   if (!items.length) { toast('הוסף לפחות שורה אחת עם תיאור ומחיר', true); return; }
   const cid = s.cid;
   const body = { customer_id: cid, doc_kind: s.kind, items, vat_included: !!s.vatInc };
+  // חשבונית על שם הסוכנות (פיצ'ר #7) — דריסת שם/ח.פ במסמך בלבד; החוב נשאר על הלקוח
+  if (s.agency && s.billTo === 'agency') {
+    body.bill_to_name = s.agency.invoice_name || s.agency.name;
+    if (s.agency.business_id) body.bill_to_crn = s.agency.business_id;
+    body.comment = ((body.comment ? body.comment + ' · ' : '') + 'עבור ' + s.name);
+  }
   if (s.docDate) body.doc_date = s.docDate; // תאריך המסמך (YYYY-MM-DD)
   if (s.isPayment && s.date) body.pay_date = s.date; // תאריך התשלום לספר החוב (YYYY-MM-DD)
   if (s.isPayment) {
