@@ -296,3 +296,26 @@ async function issueSendClip(issueId, customerId) {
     window.openFlatplan = wrapped;
   }
 })();
+
+/* ===== מיילים לפי קטגוריה (מרכז קהילתי) — נוסף ע"י Claude ===== */
+const EC_EMAIL_KEY = { regular: 'emanuel_center_email_regular', social: 'emanuel_center_email_social' };
+function ecEmailOf(cat){ return (((cache.settings||{})[EC_EMAIL_KEY[cat]]) || '').trim(); }
+async function ecSetEmail(cat, val){
+  const k = EC_EMAIL_KEY[cat]; const v = (val||'').trim();
+  await db.from('settings').upsert({ key: k, value: v }, { onConflict: 'key' });
+  if (cache.settings) cache.settings[k] = v;
+}
+const EC_EMAIL_FIELDS = [
+  { type:'section', label:'מיילים לפי קטגוריה' },
+  { name:'email_regular', label:'מייל קטגוריה כללית (רגיל)' },
+  { name:'email_social',  label:'מייל קטגוריה חברתית כלכלית' },
+];
+function ecEmailsModal(cid){
+  const rec = { email_regular: ecEmailOf('regular'), email_social: ecEmailOf('social') };
+  openForm('מיילים לפי קטגוריה — מרכז קהילתי', EC_EMAIL_FIELDS, rec, async (r)=>{
+    await ecSetEmail('regular', r.email_regular);
+    await ecSetEmail('social',  r.email_social);
+    toast('נשמר ✔');
+    if (typeof openCustomerCard==='function') openCustomerCard(cid);
+  });
+}

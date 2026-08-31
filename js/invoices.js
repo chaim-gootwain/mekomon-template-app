@@ -193,8 +193,6 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
     agency: _agency, billTo: (_agency && _agency.invoice_target === 'agency') ? 'agency' : 'customer',
     orderRef: opts.orderRef || '',
     lines: _lines,
-    adIds: (Array.isArray(opts.adIds) && opts.adIds.length) ? opts.adIds.slice() : null,
-    srcLabel2: opts.label || null,
     vatInc: (opts.vatInc != null ? opts.vatInc : (isPayment ? true : false)), method: 'cash', date: '',
     docDate: today(),
     openCharges: [],
@@ -240,7 +238,6 @@ function invRenderModal() {
     </div>` : '';
   document.getElementById('invOv').innerHTML = `<div class="inv-box">
     <h3>הנפקת ${DOC_KIND_HE[s.kind]} — ${esc(s.name)}</h3>
-    ${s.srcLabel2 ? `<div class="muted" style="font-size:.8rem;margin:-4px 0 10px">🔗 ${esc(s.srcLabel2)}${s.adIds ? ' · ' + s.adIds.length + ' מודעות ישויכו לחשבונית' : ''}</div>` : ''}
     ${s.agency ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.85rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       🏢 לקוח דרך סוכנות <b>${esc(s.agency.name)}</b> · המסמך על שם:
       <select onchange="_invState.billTo=this.value" style="padding:3px 8px;border-radius:6px;border:1px solid #bfdbfe">
@@ -363,8 +360,6 @@ async function invSubmit() {
   const _issueIds = new Set(); if (s.issueId) _issueIds.add(s.issueId);
   s.lines.forEach(ln => { const m = (_invIssues || []).find(i => _issueLineText(i) === (ln.details || '')); if (m) _issueIds.add(m.id); });
   if (_issueIds.size) { try { const { data: _mAds } = await db.from('ads').select('id').eq('customer_id', cid).in('issue_id', [..._issueIds]).not('status', 'in', '("cancelled","rejected")'); if (_mAds) body.ad_ids = _mAds.map(a => a.id); } catch (e) { } }
-  // שיוך מפורש של מודעות לחשבונית (הפקה מחוזה / ממודעה בודדת) — גובר על נגזרת הגיליון
-  if (s.adIds && s.adIds.length) body.ad_ids = s.adIds;
   // רושמים על החשבונית לאיזה גיליון(ות) היא שייכת — נשמר בהערת המסמך ובתיאור החיוב
   if (_issueIds.size && !body.comment) {
     const _nums = [..._issueIds].map(iid => { const _i = (_invIssues || []).find(x => x.id === iid); return _i ? _i.issue_number : null; }).filter(Boolean).sort((a, b) => a - b);
@@ -475,72 +470,4 @@ async function invIssueReceiptDirect(cid) {
   }
   const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
   await invOpenModal(c, 'invoice_receipt', true);
-}
-
-/* ============================================================
-   הפקת חשבונית ממודעות (שיוך ישיר) — פיצ'ר "סנכרון בין השדות"
-   ------------------------------------------------------------
-   בונה שורות מתוך שורות מודעה (ads) ומעביר ad_ids מפורשים ל-invOpenModal,
-   כדי שאפשר להפיק חשבונית ישירות ממודעה בודדת או מחבילת מודעות של חוזה.
-   בורר סוג-מסמך (חשבון עסקה / חשבונית מס / מס-קבלה) — הפקה רק אחרי אישור.
-   ============================================================ */
-function _invAdLine(a) {
-  const _iss = ((typeof cache !== 'undefined' && cache.issues) || []).find(i => i.id === a.issue_id);
-  const _issTxt = _iss ? ' — גיליון ' + _iss.issue_number : '';
-  const _type = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || '';
-  const details = (a.title && String(a.title).trim()) ? String(a.title).trim() + _issTxt
-    : ((_type || 'מודעת פרסום') + _issTxt);
-  const price = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
-  return { details, amount: 1, price };
-}
-
-let _invPick = null; // {cust, lines, adIds, label}
-function invPickDocKind(cust, lines, adIds, label) {
-  _invPick = { cust, lines, adIds, label: label || null };
-  document.getElementById('invPickOv')?.remove();
-  const ov = document.createElement('div');
-  ov.id = 'invPickOv';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:99999';
-  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  const total = lines.reduce((s, l) => s + (Number(l.amount) || 1) * (Number(l.price) || 0), 0);
-  const close = "document.getElementById('invPickOv').remove();";
-  const open = (kind, pay, vatInc) => `${close} invOpenModal(_invPick.cust, '${kind}', ${pay}, {lines:_invPick.lines, adIds:_invPick.adIds, label:_invPick.label${vatInc != null ? ', vatInc:' + vatInc : ''}})`;
-  ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:14px;padding:18px;max-width:460px;width:92%;direction:rtl">
-    <h3 style="margin:0 0 4px">🧾 הפקת חשבונית — ${esc(cust.name)}</h3>
-    <p class="muted" style="font-size:.83rem;margin:0 0 4px">${label ? esc(label) + ' · ' : ''}${lines.length} שורות · ${money(total)} (לפני מע"מ)</p>
-    <div class="muted" style="font-size:.78rem;margin:0 0 14px">אפשר לערוך את השורות במסך הבא לפני ההפקה.</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn" onclick="${open('proforma', false)}">חשבון עסקה</button>
-      <button class="btn" onclick="${open('tax_invoice', false)}">חשבונית מס</button>
-      <button class="btn" onclick="${open('invoice_receipt', true, false)}">חשבונית מס קבלה</button>
-      <button class="btn btn-ghost" onclick="${close}">ביטול</button>
-    </div></div>`;
-  document.body.appendChild(ov);
-}
-
-/* הפקה מרשימת מודעות (עם שיוך ad_ids) */
-async function invIssueFromAds(cust, adRows, label) {
-  if (!cust) { toast('לקוח לא נמצא', true); return; }
-  if (!adRows || !adRows.length) { toast('אין מודעות לחיוב', true); return; }
-  if (typeof checkCustomerStatusGate === 'function') {
-    const _ok = await checkCustomerStatusGate(cust.id, 'הפקת חשבונית'); if (!_ok) return;
-  }
-  const lines = adRows.map(_invAdLine).filter(l => l.price > 0);
-  if (!lines.length) { toast('למודעות שנבחרו אין מחיר', true); return; }
-  invPickDocKind(cust, lines, adRows.map(a => a.id), label);
-}
-
-/* הפקה ממודעה בודדת (מכרטיס הלקוח / מהגיליון) — נושאת את שיוך החוזה שלה */
-async function invIssueFromAd(adId) {
-  const a = (await run(db.from('ads').select('*').eq('id', adId).limit(1)))[0];
-  if (!a) { toast('מודעה לא נמצאה', true); return; }
-  const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === a.customer_id))
-    || ((typeof cache !== 'undefined' && cache.customers) || []).find(x => x.id === a.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', a.customer_id).limit(1)))[0];
-  let label = 'מודעה בודדת';
-  if (a.contract_id) {
-    const _ct = (await run(db.from('contracts').select('id,price_item_id,total_inserts').eq('id', a.contract_id).limit(1)))[0];
-    if (_ct) label = 'משויך לחוזה #' + _ct.id + (typeof nameOf === 'function' ? ' — ' + (nameOf('priceList', _ct.price_item_id) || '') : '');
-  }
-  await invIssueFromAds(cust, [a], label);
 }
