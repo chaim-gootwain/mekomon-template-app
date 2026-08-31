@@ -28,8 +28,7 @@ const canRoute = ['admin', 'sales'].includes(profile.role);
 el.innerHTML = `
 <div class="page-head">
 <h2>מודעות</h2>
-${canRoute ? `<button class="btn" onclick="adAdd()">+ מודעה ידנית</button>
-<button class="btn btn-ghost" onclick="adAddByCustomer()">+ מודעה לפי לקוח</button>` : ''}
+${canRoute ? `<button class="btn" onclick="adAdd()">+ מודעה ידנית</button>` : ''}
 </div>
 <div class="tabs" id="adTabs">
 <button class="active" data-f="inbox" onclick="adsTab(this)">📥 חדשות לניתוב</button>
@@ -105,15 +104,6 @@ if (typeof checkCustomerStatusGate === 'function') { const _okS = await checkCus
 if (rec.price == null && rec.price_item_id) {
 const item = cache.priceList.find(p => p.id === rec.price_item_id);
 rec.price = item ? Number(item.price) : 0;
-// סוג גיליון מיוחד (#21): הצעת המחיר ממחירון מוכפלת באחוז הסוג — גלוי למשתמש
-if (rec.issue_id && typeof issueTypePct === 'function') {
-const _iss = (cache.issues || []).find(i => i.id === rec.issue_id);
-const _pct = _iss ? issueTypePct(_iss.issue_type) : 100;
-if (_pct !== 100 && rec.price > 0) {
-rec.price = Math.round(rec.price * _pct / 100);
-toast(`מחיר לפי גיליון ${(typeof ISSUE_TYPE_HE !== 'undefined' && ISSUE_TYPE_HE[_iss.issue_type]) || 'מיוחד'} — ${_pct}% מהמחירון`);
-}
-}
 }
 rec.price = rec.price || 0;
 if ((!rec.discount || Number(rec.discount) === 0) && typeof custFixedDiscountAmount === 'function') rec.discount = custFixedDiscountAmount(rec.customer_id, rec.price);
@@ -130,15 +120,13 @@ try {
 const _f = document.getElementById('adNewFile');
 const _file = _f && _f.files && _f.files[0];
 if (_file) {
-const _path = `staff/${data.id}/${Date.now()}_${safeKey(_file.name)}`;
+const _path = `staff/${data.id}/${Date.now()}_${_file.name}`;
 const { error: _e } = await db.storage.from('ad-files').upload(_path, _file);
 if (_e) { toast('המודעה נשמרה, אך העלאת הקובץ נכשלה: ' + _e.message, true); }
 else { await run(db.from('ad_files').insert({ ad_id: data.id, storage_path: _path, file_name: _file.name, kind: 'source', uploaded_by: profile.id })); }
 }
 } catch (e) { }
 await addInteraction('ad', data.id, 'המודעה נוצרה ידנית');
-// חבילות (#6): אם ללקוח חבילה פעילה עם יתרה — הצעת שיוך שמורידה מהמונה
-if (!data.contract_id && typeof packageLinkAd === 'function') { try { await packageLinkAd(data.id, rec.customer_id); } catch (e) { } }
 toast('המודעה נוספה');
 openPage('ads');
 });
@@ -265,7 +253,7 @@ async function adFileUpload(adId) {
 const input = document.getElementById('adFileInput');
 const file = input.files[0];
 if (!file) return;
-const path = `staff/${adId}/${Date.now()}_${safeKey(file.name)}`;
+const path = `staff/${adId}/${Date.now()}_${file.name}`;
 const { error } = await db.storage.from('ad-files').upload(path, file);
 if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
 const kind = profile.role === 'graphics' ? 'design' : 'source';
@@ -336,65 +324,3 @@ toast(approve ? 'אושר' : 'נדחה');
 openPage('committee');
 }
 
-
-/* ============================================================
-   מודעה לפי לקוח (פיצ'ר #12) — מסלול שמתחיל מבחירת לקוח
-   ------------------------------------------------------------
-   חלון קטן עם בורר הלקוחות המשותף (כולל "הוסף לקוח חדש"), הצגת
-   הקשר מהיר (יתרה פתוחה + פרסומים אחרונים), והמשך לטופס המודעה
-   המלא כשהלקוח כבר משויך.
-   ============================================================ */
-
-function adAddByCustomer() {
-  document.getElementById('abcOv')?.remove();
-  const ov = document.createElement('div');
-  ov.id = 'abcOv';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,40,.5);display:flex;align-items:flex-start;justify-content:center;z-index:99996;padding:60px 16px;direction:rtl';
-  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:16px;padding:20px;max-width:460px;width:96%">
-    <h3 style="margin:0 0 4px">➕ מודעה לפי לקוח</h3>
-    <p class="muted" style="font-size:.83rem;margin:0 0 10px">הקלד שם או טלפון — אפשר גם להוסיף לקוח חדש מכאן.</p>
-    ${custPickerHtml({ base: 'abcCust', onpick: adAddByCustomerPicked })}
-    <div id="abcInfo" style="margin-top:10px"></div>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button id="abcGo" class="btn" disabled onclick="adAddByCustomerGo()">המשך לטופס המודעה ←</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('abcOv').remove()">ביטול</button>
-    </div></div>`;
-  document.body.appendChild(ov);
-  setTimeout(() => document.getElementById('abcCust__q')?.focus(), 60);
-}
-
-async function adAddByCustomerPicked(customerId) {
-  const go = document.getElementById('abcGo'); if (go) go.disabled = !customerId;
-  const box = document.getElementById('abcInfo'); if (!box || !customerId) return;
-  box.innerHTML = '<span class="muted" style="font-size:.8rem">טוען פרטים...</span>';
-  try {
-    const c = (cache.customers || []).find(x => x.id === Number(customerId)) || {};
-    let balTxt = '';
-    if (typeof customerOpenBalance === 'function') {
-      const bal = await customerOpenBalance(Number(customerId));
-      balTxt = bal.total > 0 ? `<span style="color:var(--danger)">יתרה פתוחה: <b>${money(bal.total)}</b></span>` : '<span style="color:var(--ok)">אין חוב פתוח ✓</span>';
-    }
-    const { data: recent } = await db.from('ads').select('id,title,issue_id,status')
-      .eq('customer_id', Number(customerId)).order('created_at', { ascending: false }).limit(3);
-    let pkgTxt = '';
-    if (typeof packagesWithRemaining === 'function') {
-      const pkgs = await packagesWithRemaining(Number(customerId));
-      if (pkgs.length) pkgTxt = `<div style="margin-top:6px;color:#0369a1">📦 ${pkgs.map(p => `${esc(nameOf('priceList', p.ct.price_item_id) || 'חבילה')}: נותרו <b>${p.left}</b> מתוך ${p.total}`).join(' · ')}</div>`;
-    }
-    box.innerHTML = `<div style="border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:10px;font-size:.85rem;background:#fbfdff">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px">
-        <span>סוכן: <b>${esc(nameOf('agents', c.agent_id) || '—')}</b></span>${balTxt}
-      </div>
-      ${pkgTxt}
-      ${(recent || []).length ? `<div class="muted" style="margin-top:6px">פרסומים אחרונים: ${(recent || []).map(a => esc(a.title || 'מודעה')).join(' · ')}</div>` : '<div class="muted" style="margin-top:6px">אין פרסומים קודמים</div>'}
-    </div>`;
-  } catch (e) { box.innerHTML = ''; }
-}
-
-function adAddByCustomerGo() {
-  const cid = Number(document.getElementById('abcCust')?.value);
-  if (!cid) { toast('בחר לקוח קודם', true); return; }
-  document.getElementById('abcOv')?.remove();
-  adAdd({ customer_id: cid });
-}

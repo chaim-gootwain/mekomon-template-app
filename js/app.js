@@ -77,9 +77,6 @@ setTimeout(async () => {
   try { if (typeof pvCheckPending === 'function' && await pvCheckPending()) return; } catch (e) { }
   try { if (typeof weeklyReviewCheckPending === 'function' && await weeklyReviewCheckPending()) return; } catch (e) { }
   try { if (typeof adStatusCheckPending === 'function') await adStatusCheckPending(); } catch (e) { }
-  try { if (typeof weeklySummaryAutoCheck === 'function') await weeklySummaryAutoCheck(); } catch (e) { }
-  try { if (typeof standingOrdersAutoCheck === 'function') await standingOrdersAutoCheck(); } catch (e) { }
-  try { if (typeof icoCostsAutoCheck === 'function') await icoCostsAutoCheck(); } catch (e) { }
 }, 1200);
 }
 
@@ -122,7 +119,7 @@ if (error) { errEl.textContent = errMap[error.message] || error.message; return;
 const { data } = await db.auth.getSession();
 session = data.session;
 if (session) await afterLogin();
-else errEl.textContent = 'נשלח מייל אימות — אשר אותו והתחב׫';
+else errEl.textContent = 'נשלח מייל אימות — אשר אותו והתחבר';
 }
 
 async function logout() { await db.auth.signOut(); location.reload(); }

@@ -41,15 +41,6 @@ return cn || t || 'מודעה';
 }
 
 /* באנר מוכנוּת + ספירה לדדליין המודעות */
-/* קטגוריה נפתחת בסרגל הפלטפלן — בסגנון כרטיס הלקוח; לא מוצגת אם אין בה פעולות */
-function _fpToolbarMenu(id, label, btns, badge) {
-const html = btns.filter(Boolean).join('');
-return html ? `<div class="cc-mwrap">
-<button class="fp-cat" onclick="ccMenu(event,'${id}')">${label}${badge ? ` <span class="fp-badge">${badge}</span>` : ''}<span class="fp-caret">▾</span></button>
-<div id="${id}" class="cc-menu hidden">${html}</div>
-</div>` : '';
-}
-
 function _fpDeadlineBanner() {
 const dl = _fpIssue.ads_deadline; if (!dl) return '';
 const ms = new Date(dl).getTime() - Date.now();
@@ -124,29 +115,24 @@ el.innerHTML = `
 <h2>גיליונות</h2>
 <div class="actions">
 ${canEdit ? `<button class="btn btn-ghost" onclick="issuesGenerate()">⚡ יצירת גיליונות קדימה</button>` : ''}
-${canEdit ? `<button class="btn btn-ghost" onclick="recAdsManage()">🔁 מודעות קבועות</button>` : ''}
 ${['admin', 'sales'].includes(profile.role) ? `<button class="btn btn-ghost" onclick="contractAdsGenerate()">📄 יצירת מודעות מחוזים</button>` : ''}
 ${['admin', 'sales'].includes(profile.role) ? `<button class="btn btn-ghost" onclick="icoApplyAll()">💸 עלויות לכל הגיליונות</button>` : ''}
 ${['admin', 'sales'].includes(profile.role) ? `<button class="btn btn-ghost" onclick="pdfImportOpen(294)">📥 ייבוא 294 מ-PDF</button>` : ''}
 </div>
 </div>
-${typeof hebHolidayBanner === 'function' ? hebHolidayBanner(_issues) : ''}
-${typeof issueRemindersBanner === 'function' ? issueRemindersBanner() : ''}
-<div id="recAdsBanner"></div>
 <div class="card" id="issuesTable"></div>
 <div id="issuesTrends"></div>`;
 renderTable(document.getElementById('issuesTable'), _issues, [
-{ h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>${typeof issueTypeBadge === 'function' ? issueTypeBadge(r.issue_type) : ''}` },
-{ h: 'חלוקה (מוצ"ש)', f: r => (typeof hebIssueDateCell === 'function' ? hebIssueDateCell(r.publish_date) : heDate(r.publish_date)) },
+{ h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>` },
+{ h: 'חלוקה (מוצ"ש)', f: r => heDate(r.publish_date) },
 { h: 'דפוס', f: r => heDate(r.print_date) },
-{ h: 'דדליין מודעות', f: r => heDateTime(r.ads_deadline) + (typeof hebDeadlineWarn === 'function' ? hebDeadlineWarn(r.ads_deadline) : '') },
+{ h: 'דדליין מודעות', f: r => heDateTime(r.ads_deadline) },
 { h: 'עמודים', f: r => r.pages_count },
 { h: 'סטטוס', f: r => pill('issue', r.status) + (((r.publish_date || '') < _t && !['closed', 'published'].includes(r.status)) ? ' <span title="עבר תאריך החלוקה והגיליון לא נסגר" style="color:#b91c1c">⚠ דורש טיפול</span>' : '') },
 { h: 'רווח', f: r => { if (!_canFin) return ''; const _rv = _revByIssue[r.id] || 0, _ct = _costByIssue[r.id] || 0; if (!_rv && !_ct) return '<span class="muted">—</span>'; const _p = _rv - _ct; return `<b style="color:${_p >= 0 ? 'var(--ok)' : 'var(--danger)'}" title="הכנסות ${money(_rv)} − עלויות ${money(_ct)} (נטו)">${money(_p)}</b>`; } },
 { h: '', f: r => `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openIssueEntry(${r.id})">＋ הזנה</button> <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFlatplan(${r.id})">פלטפלן</button>${['admin','sales'].includes(profile.role) ? ` <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openIssueCosts(${r.id})">💸 עלויות</button>` : ''}${['admin','sales'].includes(profile.role) && typeof invoicesOn === 'function' && invoicesOn() ? ` <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();issueBillingOpen(${r.id})">🧾 חיוב</button>` : ''}` },
 ], { onRow: r => openFlatplan(r.id), empty: 'אין גיליונות — לחץ "יצירת גיליונות קדימה"' });
 _issuesTrends();
-recAdsAfterRender();
 }
 };
 
@@ -233,33 +219,21 @@ const adPct = _fpIssue.pages_count ? Math.round(soldArea / _fpIssue.pages_count 
 _fpWarnings = warnings;
 _fpChecklistIncomplete = _fpChecklist.filter(c => !c.done).length;
 
-if (typeof _ccEnsureCss === 'function') _ccEnsureCss();
-const _fpDealsN = _fpAds.filter(a => a.deal_stage === 'in_progress').length;
 el.innerHTML = `
 <div class="page-head">
 <h2>פלטפלן — גיליון ${_fpIssue.issue_number} ${pill('issue', _fpIssue.status)}</h2>
-<div class="actions cc-toolbar fp-toolbar">
-${canEdit ? `<button class="cc-tbtn cc-primary" data-tip="הזנת מודעות" aria-label="הזנת מודעות" onclick="openIssueEntry(${_fpIssue.id})">${typeof _ccIco === 'function' ? _ccIco('plus') : '＋'}</button>
-<span class="cc-tsep"></span>` : ''}
-${_fpToolbarMenu('fpMenuEntry', 'מודעות ושיבוץ', [
-  canEdit ? `<button class="btn" onclick="ccMenuClose();openIssueEntry(${_fpIssue.id})">＋ הזנת מודעות</button>` : '',
-  canEdit && _fpDealsN ? `<button class="btn" onclick="ccMenuClose();dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpDealsN})</button>` : '',
-  canEdit ? `<button class="btn" onclick="ccMenuClose();fpPrevAdsList()">📋 מגיליון קודם</button>` : '',
-  canEdit ? `<button class="btn" onclick="ccMenuClose();fpPlaceLikePrev()">↩ כמו קודם</button>` : '',
-  canEdit ? `<button class="btn" onclick="ccMenuClose();fpAutoArrange()">🧩 סידור אוטומטי</button>` : ''
-], canEdit && _fpDealsN ? _fpDealsN : 0)}
-${_fpToolbarMenu('fpMenuPrint', 'הפקה ודפוס', [
-  `<button class="btn" onclick="ccMenuClose();fpPrint()">🖨 הדפסה</button>`,
-  `<button class="btn" onclick="ccMenuClose();fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>`,
-  canEdit ? `<button class="btn" onclick="ccMenuClose();openPrintVerify(${_fpIssue.id})">🔍 אמת מול מודפס</button>` : ''
-])}
-${_fpToolbarMenu('fpMenuMoney', 'כספים', [
-  ['admin','sales'].includes(profile.role) ? `<button class="btn" onclick="ccMenuClose();openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : ''
-])}
-${_fpToolbarMenu('fpMenuManage', 'ניהול', [
-  canEdit ? `<button class="btn" onclick="ccMenuClose();issueStatusChange()">🔄 שינוי סטטוס</button>` : ''
-])}
-<button class="fp-cat" onclick="openPage('issues')">→ לרשימה</button>
+<div class="actions">
+<button class="btn btn-ghost btn-sm" onclick="openPage('issues')">→ לרשימה</button>
+${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpPlaceLikePrev()">↩ כמו קודם</button>` : ''}
+${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpAutoArrange()">🧩 סידור אוטומטי</button>` : ''}
+<button class="btn btn-sm btn-ghost" onclick="fpPrint()">🖨 הדפסה</button>
+<button class="btn btn-sm btn-ghost" onclick="fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>
+${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="openPrintVerify(${_fpIssue.id})">🖨️ אמת מול מודפס</button>` : ''}
+${canEdit ? `<button class="btn btn-sm" onclick="openIssueEntry(${_fpIssue.id})">＋ הזנת מודעות</button>` : ''}
+${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpPrevAdsList()">📋 מגיליון קודם</button>` : ''}
+${canEdit && _fpAds.filter(a => a.deal_stage === 'in_progress').length ? `<button class="btn btn-sm btn-ghost" onclick="dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpAds.filter(a => a.deal_stage === 'in_progress').length})</button>` : ''}
+${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="issueStatusChange()">שינוי סטטוס</button>` : ''}
+${['admin','sales'].includes(profile.role) ? `<button class="btn btn-sm btn-ghost" onclick="openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : ''}
 </div>
 </div>
 
@@ -579,7 +553,7 @@ rows += `<tr><td style="font-weight:700;white-space:nowrap">עמוד ${p}</td><t
 const html = `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>פלטפלן גיליון ${_fpIssue.issue_number}</title>
 <style>body{font-family:Arial,Heebo,sans-serif;padding:22px;color:#111}h2{margin:0 0 4px}.sub{color:#555;font-size:13px;margin-bottom:10px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #cbd5e1;padding:6px 9px;font-size:13px;text-align:right;vertical-align:top}th{background:#f1f5f9}</style></head>
 <body><h2>פלטפלן — גיליון ${_fpIssue.issue_number}</h2>
-<div class="sub">חלוקה: ${heDate(_fpIssue.publish_date)} · ${_fpIssue.pages_count} עמודים${typeof issueTypeBadge === 'function' ? issueTypeBadge(_fpIssue.issue_type) : ''}</div>
+<div class="sub">חלוקה: ${heDate(_fpIssue.publish_date)} · ${_fpIssue.pages_count} עמודים</div>
 <table><thead><tr><th style="width:70px">עמוד</th><th style="width:55px">מילוי</th><th>תוכן</th></tr></thead><tbody>${rows}</tbody></table>
 <scr` + `ipt>window.onload=function(){setTimeout(function(){window.print()},250)}</scr` + `ipt></body></html>`;
 const w = window.open('', '_blank');
@@ -688,8 +662,6 @@ function issueStatusChange() {
 openForm('סטטוס גיליון ' + _fpIssue.issue_number, [
 { name: 'status', label: 'סטטוס', type: 'select', required: true,
 options: Object.entries(STATUS.issue).map(([v, t]) => ({ v, t: t[0] })) },
-{ name: 'issue_type', label: 'סוג גיליון', type: 'select', default: 'regular',
-options: [{ v: 'regular', t: 'רגיל' }, { v: 'vacation', t: 'נופש' }, { v: 'extra', t: 'עלון נוסף' }] },
 { name: 'pages_count', label: 'מספר עמודים', type: 'number', required: true },
 { name: 'print_qty', label: 'כמות הדפסה', type: 'number' },
 { name: 'notes', label: 'הערות', type: 'textarea' },
@@ -747,23 +719,6 @@ ${published.map(i => `<option value="${i.id}">גיליון ${i.issue_number}</op
 <p class="muted" style="margin-bottom:12px;font-size:.85rem">
 לגיליון קיים: בחר גיליון ולחץ "העלאת PDF". לגיליונות היסטוריים שלפני המערכת: "העלאת גיליון ישן" —
 נותנים מספר ותאריך, והגיליון נכנס לארכיון.</p>
-${isAdmin ? (() => {
-const on = String((cache.settings || {}).public_archive_enabled || '0') === '1';
-const url = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '') + '/portal/archive.html';
-return `<div class="card card-pad" style="margin-bottom:14px;border-right:4px solid ${on ? 'var(--ok)' : 'var(--line)'}">
-<b>🌍 ארכיון ציבורי</b>
-<p class="muted" style="font-size:.82rem">דף פתוח לקהל עם גיליונות שפורסמו (רק כאלה שיש להם PDF). כבוי — הדף והקבצים חסומים לגמרי.</p>
-<label style="display:flex;gap:8px;align-items:center;margin-top:6px;cursor:pointer">
-<input type="checkbox" ${on ? 'checked' : ''} onchange="archivePublicToggle(this.checked)" style="width:18px;height:18px">
-הארכיון הציבורי פעיל
-</label>
-${on ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
-<input readonly value="${esc(url)}" dir="ltr" style="font-size:.78rem;flex:1;min-width:220px" onclick="this.select()">
-<button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>toast('הקישור הועתק'))">העתקה</button>
-<a class="btn btn-sm btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">פתיחה</a>
-</div>` : ''}
-</div>`;
-})() : ''}
 <div class="card" id="archTable"></div>`;
 renderTable(document.getElementById('archTable'), withPdf, [
 { h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>` },
@@ -832,531 +787,3 @@ const { data, error } = await db.storage.from('issues-archive').createSignedUrl(
 if (error) { toast('שגיאה: ' + error.message, true); return; }
 window.open(data.signedUrl, '_blank');
 }
-
-/* ============================================================
-   לוח שנה עברי בתכנון גיליונות (פיצ'ר #18)
-   ------------------------------------------------------------
-   נשען על לוח השנה העברי המובנה בדפדפן (Intl, ca-hebrew) — בלי
-   שום ספרייה חיצונית. מזהה חגים ומועדים לפי התאריך העברי, מסמן
-   גיליונות סמוכים לחג ומתריע על דדליין שנופל על חג/ערב חג.
-   ============================================================ */
-
-const _HEB_HE = new Intl.DateTimeFormat('he-u-ca-hebrew', { day: 'numeric', month: 'long' });
-const _HEB_EN = new Intl.DateTimeFormat('en-u-ca-hebrew', { day: 'numeric', month: 'long' });
-
-function hebDateStr(d) {
-  try { return _HEB_HE.format(d instanceof Date ? d : new Date(d + 'T12:00:00')); } catch (e) { return ''; }
-}
-function _hebParts(d) {
-  try {
-    const parts = _HEB_EN.formatToParts(d instanceof Date ? d : new Date(d + 'T12:00:00'));
-    const get = t => (parts.find(p => p.type === t) || {}).value || '';
-    return { day: Number(get('day')), month: get('month') };
-  } catch (e) { return null; }
-}
-
-/* חגים ומועדים לפי תאריך עברי. 'Adar' תופס גם אדר ב' בשנה מעוברת. */
-function hebHolidayOn(d) {
-  const h = _hebParts(d); if (!h) return null;
-  const m = h.month, day = h.day;
-  const inM = (name, from, to) => m === name && day >= from && day <= (to || from);
-  if (inM('Elul', 29)) return 'ערב ראש השנה';
-  if (inM('Tishri', 1, 2)) return 'ראש השנה';
-  if (inM('Tishri', 9)) return 'ערב יום כיפור';
-  if (inM('Tishri', 10)) return 'יום כיפור';
-  if (inM('Tishri', 14)) return 'ערב סוכות';
-  if (inM('Tishri', 15, 21)) return day === 21 ? 'הושענא רבה' : 'סוכות';
-  if (inM('Tishri', 22)) return 'שמחת תורה';
-  if (inM('Kislev', 25, 30) || inM('Tevet', 1, 2)) return 'חנוכה';
-  if (inM('Shevat', 15)) return 'ט"ו בשבט';
-  if ((m === 'Adar' || m === 'Adar II') && day === 13) return 'תענית אסתר';
-  if ((m === 'Adar' || m === 'Adar II') && day === 14) return 'פורים';
-  if ((m === 'Adar' || m === 'Adar II') && day === 15) return 'שושן פורים';
-  if (inM('Nisan', 14)) return 'ערב פסח';
-  if (inM('Nisan', 15, 21)) return day === 21 ? 'שביעי של פסח' : 'פסח';
-  if (inM('Iyar', 18)) return 'ל"ג בעומר';
-  if (inM('Sivan', 5)) return 'ערב שבועות';
-  if (inM('Sivan', 6)) return 'שבועות';
-  if (inM('Av', 9)) return 'תשעה באב';
-  if (inM('Av', 15)) return 'ט"ו באב';
-  return null;
-}
-
-/* החג הקרוב בטווח ±days סביב תאריך (לסימון "גיליון סמוך לחג") */
-function hebHolidayNear(dateStr, days) {
-  if (!dateStr) return null;
-  const base = new Date(dateStr + 'T12:00:00');
-  if (isNaN(base)) return null;
-  const span = days == null ? 3 : days;
-  for (let off = 0; off <= span; off++) {
-    for (const sign of (off === 0 ? [0] : [-1, 1])) {
-      const d = new Date(base); d.setDate(d.getDate() + off * (sign || 1));
-      const name = hebHolidayOn(d);
-      if (name) return { name, offset: off * (sign || 1) };
-    }
-  }
-  return null;
-}
-
-/* תא תאריך עם התאריך העברי + תגית חג */
-function hebIssueDateCell(dateStr) {
-  if (!dateStr) return '—';
-  const hol = hebHolidayNear(dateStr, 3);
-  return heDate(dateStr) +
-    `<div style="font-size:.72rem;color:var(--muted,#6b7280)">${esc(hebDateStr(dateStr))}</div>` +
-    (hol ? `<span class="pill gold" style="font-size:.68rem" title="${hol.offset === 0 ? 'ביום החלוקה' : Math.abs(hol.offset) + ' ימים ' + (hol.offset > 0 ? 'אחרי' : 'לפני')}">🕎 ${esc(hol.name)}</span>` : '');
-}
-
-/* אזהרת דדליין שנופל על חג/ערב חג — הצעה להקדים */
-function hebDeadlineWarn(deadline) {
-  if (!deadline) return '';
-  const dOnly = String(deadline).slice(0, 10);
-  const hol = hebHolidayOn(dOnly);
-  if (!hol) return '';
-  return ` <span style="color:#b45309;font-weight:700" title="הדדליין נופל על ${esc(hol)} — שקול להקדים">⚠ ${esc(hol)}</span>`;
-}
-
-/* באנר גיליונות-חג קרובים — לראש עמוד הגיליונות */
-function hebHolidayBanner(issues) {
-  try {
-    const T = today();
-    const soon = (issues || []).filter(i => (i.publish_date || '') >= T && !['closed', 'published'].includes(i.status))
-      .map(i => ({ i, hol: hebHolidayNear(i.publish_date, 3) }))
-      .filter(x => x.hol).slice(0, 4);
-    if (!soon.length) return '';
-    return `<div class="card card-pad" style="border-right:4px solid #b45309;margin-bottom:14px">
-      <b style="color:#b45309">🕎 גיליונות חג קרובים:</b>
-      <span style="font-size:.9rem"> ${soon.map(x => `גיליון ${x.i.issue_number} — ${esc(x.hol.name)}${hebHolidayOn(String(x.i.ads_deadline || '').slice(0, 10)) ? ' (הדדליין על החג! ⚠)' : ''}`).join(' · ')}</span>
-      <span class="muted" style="font-size:.8rem"> — שקול להקדים דדליינים ולתגבר מכירות.</span>
-    </div>`;
-  } catch (e) { return ''; }
-}
-
-/* מתג הארכיון הציבורי (פיצ'ר #20) — נאכף גם ב-DB (RPC + מדיניות storage) */
-async function archivePublicToggle(on) {
-  await run(db.from('settings').upsert({ key: 'public_archive_enabled', value: on ? '1' : '0' }));
-  cache.settings.public_archive_enabled = on ? '1' : '0';
-  toast(on ? '🌍 הארכיון הציבורי הופעל' : 'הארכיון הציבורי כובה — הדף והקבצים חסומים');
-  openPage('archive');
-}
-
-/* ============================================================
-   סוגי גיליון מיוחדים (פיצ'ר #21)
-   ------------------------------------------------------------
-   רגיל / נופש / עלון נוסף. משפיע על: תצוגה בתכנון (תגית), סימון
-   בשורת החיוב, והצעת המחיר ממחירון בהכנסת מודעה (מכפיל אחוז
-   פר סוג, ברירת מחדל 100% = ללא שינוי). שום מחיר קיים לא משתנה.
-   ============================================================ */
-
-const ISSUE_TYPE_HE = { regular: 'רגיל', vacation: 'נופש', extra: 'עלון נוסף' };
-
-function issueTypeBadge(t) {
-  if (!t || t === 'regular') return '';
-  return ` <span class="pill ${t === 'vacation' ? 'gold' : 'blue'}" style="font-size:.7rem">${ISSUE_TYPE_HE[t] || t}</span>`;
-}
-
-/* מכפיל התמחור של סוג הגיליון (אחוז; 100 = ללא שינוי) */
-function issueTypePct(t) {
-  if (!t || t === 'regular') return 100;
-  const v = Number((cache.settings || {})['issue_type_pct_' + t]);
-  return (Number.isFinite(v) && v > 0) ? v : 100;
-}
-
-/* כרטיס הגדרות — מכפילי המחיר לסוגי הגיליון (מנהל) */
-function issueTypesCard() {
-  const s = cache.settings || {};
-  const val = k => { const v = Number(s[k]); return (Number.isFinite(v) && v > 0) ? v : 100; };
-  return `
-<div class="card card-pad">
-<b>סוגי גיליון מיוחדים 🗞️</b>
-<p class="muted" style="font-size:.82rem">סוג הגיליון נקבע בפלטפלן (כפתור הסטטוס). המכפיל משפיע רק על הצעת המחיר ממחירון בהכנסת מודעה חדשה לגיליון מהסוג — 100% = ללא שינוי. מחירים קיימים לא משתנים.</p>
-<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
-<span class="field" style="margin:0">גיליון נופש — % מהמחירון:
-<input id="setItpVac" type="number" min="1" value="${val('issue_type_pct_vacation')}" dir="ltr" style="width:80px"></span>
-<span class="field" style="margin:0">עלון נוסף — % מהמחירון:
-<input id="setItpExt" type="number" min="1" value="${val('issue_type_pct_extra')}" dir="ltr" style="width:80px"></span>
-<button class="btn btn-sm" onclick="issueTypesSave()">שמירה</button>
-</div>
-</div>`;
-}
-
-async function issueTypesSave() {
-  const vac = Number(document.getElementById('setItpVac')?.value);
-  const ext = Number(document.getElementById('setItpExt')?.value);
-  if (!(vac > 0) || !(ext > 0)) { toast('אחוז לא תקין', true); return; }
-  await run(db.from('settings').upsert({ key: 'issue_type_pct_vacation', value: String(Math.round(vac)) }));
-  await run(db.from('settings').upsert({ key: 'issue_type_pct_extra', value: String(Math.round(ext)) }));
-  cache.settings.issue_type_pct_vacation = String(Math.round(vac));
-  cache.settings.issue_type_pct_extra = String(Math.round(ext));
-  toast('מכפילי סוגי הגיליון נשמרו');
-}
-
-/* ============================================================
-   תזכורת "סגירת גיליון" למפרסמים קבועים (פיצ'ר #17)
-   ------------------------------------------------------------
-   כשהמתג settings.issue_reminders_enabled דלוק והדדליין של הגיליון
-   הקרוב בתוך יומיים — באנר בעמוד הגיליונות שפותח סבב תזכורות:
-   רשימת המפרסמים הקבועים עם הודעת וואטסאפ מוכנה ("מפרסמים השבוע?").
-   שליחה בלחיצה פר לקוח (wa.me) — לא שליחה אוטומטית עיוורת. מי
-   שנשלח מסומן ✓ (נשמר פר גיליון) ונרשם ביומן הלקוח.
-   ============================================================ */
-
-function _irOn() { return String((cache.settings || {}).issue_reminders_enabled || '0') === '1'; }
-function _irSentKey(issueId) { return 'issue_rem_sent_' + issueId; }
-function _irSent(issueId) { try { return JSON.parse((cache.settings || {})[_irSentKey(issueId)] || '[]'); } catch (e) { return []; } }
-
-/* הגיליון הקרוב שדדליין המודעות שלו בתוך יומיים */
-function _irUpcomingIssue() {
-  const now = Date.now(), max = now + 2 * 86400000;
-  return (_issues || []).filter(i => {
-    if (!i.ads_deadline || ['closed', 'published'].includes(i.status)) return false;
-    const t = new Date(i.ads_deadline).getTime();
-    return !isNaN(t) && t > now && t <= max;
-  }).sort((a, b) => String(a.ads_deadline).localeCompare(String(b.ads_deadline)))[0] || null;
-}
-
-function issueRemindersBanner() {
-  if (!_irOn() || !['admin', 'sales'].includes(profile.role)) return '';
-  const iss = _irUpcomingIssue();
-  if (!iss) return '';
-  const regs = (cache.customers || []).filter(c => c.regular_advertiser);
-  if (!regs.length) return '';
-  const sent = _irSent(iss.id).length;
-  return `<div class="card card-pad" style="border-right:4px solid var(--brand,#333);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-    <span>📣 <b>גיליון ${iss.issue_number} נסגר ${heDateTime(iss.ads_deadline)}</b> — ${regs.length} מפרסמים קבועים${sent ? ` · נשלחו ${sent}` : ''}</span>
-    <button class="btn btn-sm" onclick="issueRemindersOpen(${iss.id})">💬 סבב תזכורות "מפרסמים השבוע?"</button>
-  </div>`;
-}
-
-async function issueRemindersOpen(issueId) {
-  const iss = (_issues || []).find(i => i.id === issueId) || (cache.issues || []).find(i => i.id === issueId);
-  if (!iss) { toast('גיליון לא נמצא', true); return; }
-  const regs = (cache.customers || []).filter(c => c.regular_advertiser)
-    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
-  if (!regs.length) { toast('אין לקוחות המסומנים "מפרסם קבוע" — מסמנים בטופס הלקוח', true); return; }
-  const sent = new Set(_irSent(issueId));
-  const msgFor = c => `שלום ${c.name || ''}, כאן @@PAPER_NAME@@ 😊\n` +
-    `גיליון ${iss.issue_number} נסגר ${heDateTime(iss.ads_deadline)} — מפרסמים השבוע?\n` +
-    `נשמח לשריין לך מקום. לתיאום: @@PAPER_PHONE@@`;
-  const rows = regs.map(c => {
-    const raw = String(c.whatsapp || c.phone || '').replace(/\D/g, '');
-    let intl = raw; if (intl.startsWith('0')) intl = '972' + intl.slice(1); else if (intl && !intl.startsWith('972')) intl = '972' + intl;
-    const done = sent.has(c.id);
-    return `<tr id="irRow${c.id}" style="${done ? 'opacity:.55' : ''}">
-      <td><b>${esc(c.name)}</b></td>
-      <td dir="ltr">${esc(c.phone || c.whatsapp || '—')}</td>
-      <td>${done ? '<span class="pill green">נשלח ✓</span>' : (intl
-        ? `<button class="btn btn-sm" onclick="issueReminderSend(${issueId}, ${c.id}, '${intl}')">💬 שלח תזכורת</button>`
-        : '<span class="muted">אין טלפון</span>')}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('viewModal').innerHTML = `
-    <h3>📣 תזכורות סגירה — גיליון ${iss.issue_number}</h3>
-    <p class="muted" style="font-size:.85rem">דדליין: ${heDateTime(iss.ads_deadline)} · כל לחיצה פותחת וואטסאפ עם ההודעה מוכנה — אתה רק שולח. נרשם ביומן הלקוח.</p>
-    <div class="table-wrap" style="margin-top:8px"><table class="data">
-      <thead><tr><th>מפרסם קבוע</th><th>טלפון</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="m-actions" style="margin-top:12px">
-      <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
-    </div>`;
-  document.getElementById('viewBack').classList.add('open');
-  window._irCtx = { issueId, msgFor: Object.fromEntries(regs.map(c => [c.id, msgFor(c)])) };
-}
-
-async function issueReminderSend(issueId, customerId, intl) {
-  const ctx = window._irCtx || {};
-  const msg = (ctx.msgFor || {})[customerId] || '';
-  window.open('https://wa.me/' + intl + '?text=' + encodeURIComponent(msg), '_blank', 'noopener');
-  const key = _irSentKey(issueId);
-  const arr = _irSent(issueId);
-  if (!arr.includes(customerId)) arr.push(customerId);
-  try {
-    await db.from('settings').upsert({ key, value: JSON.stringify(arr) });
-    cache.settings[key] = JSON.stringify(arr);
-  } catch (e) { }
-  try { await addInteraction('customer', customerId, '📣 נשלחה תזכורת סגירת גיליון (וואטסאפ)'); } catch (e) { }
-  const row = document.getElementById('irRow' + customerId);
-  if (row) { row.style.opacity = '.55'; row.lastElementChild.innerHTML = '<span class="pill green">נשלח ✓</span>'; }
-}
-
-/* כרטיס הגדרות — מתג התזכורות */
-function issueRemindersCard() {
-  const on = _irOn();
-  return `
-<div class="card card-pad">
-<b>תזכורות סגירת גיליון 📣</b>
-<p class="muted" style="font-size:.82rem">יומיים לפני דדליין המודעות מופיע בעמוד הגיליונות סבב תזכורות למפרסמים הקבועים — הודעת "מפרסמים השבוע?" מוכנה לשליחה בוואטסאפ, לחיצה פר לקוח. מסמנים "מפרסם קבוע" בטופס הלקוח.</p>
-<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
-<input type="checkbox" ${on ? 'checked' : ''} onchange="issueRemindersToggle(this.checked)" style="width:18px;height:18px">
-תזכורות סגירה פעילות במופע הזה
-</label>
-</div>`;
-}
-
-async function issueRemindersToggle(on) {
-  await run(db.from('settings').upsert({ key: 'issue_reminders_enabled', value: on ? '1' : '0' }));
-  cache.settings.issue_reminders_enabled = on ? '1' : '0';
-  toast(on ? 'תזכורות הסגירה הופעלו' : 'תזכורות הסגירה כובו');
-}
-
-
-/* ============================================================
-   מודעות מערכת קבועות (🔁)
-   ------------------------------------------------------------
-   רשימה בטבלת recurring_ads: מודעות מערכת (תורנויות, זמנים, טורים
-   קבועים) שנכנסות אוטומטית לכל גיליון פתוח, פעם אחת לכל גיליון.
-   - סטטית (static):   אותו קובץ בכל גיליון — נכנסת מאושרת (או
-                        משובצת, אם הוגדר עמוד קבוע) עם הקובץ השמור.
-   - מתעדכנת (updating): צריך קובץ חדש כל גיליון — נכנסת כ"ממתינה"
-                        ומופיעה בבאנר תזכורת עם העלאה ישירה; העלאת
-                        קובץ מאשרת אותה לשיבוץ.
-   ההזרעה רצה בכניסה לעמוד הגיליונות (אידמפוטנטית — לפי ads.recurring_id),
-   כך שגם גיליונות שנוצרו ב"יצירת גיליונות קדימה" מקבלים אותן מיד.
-   ביטול מודעה שנוצרה בגיליון מסוים לא יוצר אותה מחדש.
-   אין שום פעולה כספית — מחיר 0, is_system.
-   ============================================================ */
-
-let _recAds = null, _recAdsOk = true;
-
-async function recAdsLoad(force) {
-  if (_recAds && !force) return _recAds;
-  const { data, error } = await db.from('recurring_ads').select('*').order('sort').order('id');
-  if (error) { _recAds = []; _recAdsOk = false; }        // המיגרציה טרם רצה — הפיצ'ר רדום בשקט
-  else { _recAds = data || []; _recAdsOk = true; }
-  return _recAds;
-}
-
-/* הגיליונות ה"פתוחים" לצורך הזרעה: לא סגור/פורסם ותאריך החלוקה קדימה */
-function _recOpenIssues() {
-  const t = today();
-  return (_issues || []).filter(i => !['closed', 'published'].includes(i.status) && (i.publish_date || '') >= t);
-}
-
-/* ==================== הזרעה אידמפוטנטית ==================== */
-
-async function recAdsSweep() {
-  if (!['admin', 'editor'].includes(profile.role)) return 0;
-  const list = (await recAdsLoad(true)).filter(r => r.active);
-  if (!list.length) return 0;
-  const open = _recOpenIssues();
-  if (!open.length) return 0;
-  let existing = [];
-  try {
-    const r = await db.from('ads').select('id,issue_id,recurring_id')
-      .in('issue_id', open.map(i => i.id)).not('recurring_id', 'is', null);
-    existing = r.data || [];
-  } catch (e) { return 0; }
-  const have = new Set(existing.map(a => a.recurring_id + '|' + a.issue_id));
-  let n = 0;
-  for (const r of list) {
-    for (const iss of open) {
-      if (have.has(r.id + '|' + iss.id)) continue;
-      const pg = (r.page_number && r.page_number <= iss.pages_count) ? r.page_number : null;
-      const rec = {
-        title: r.title, issue_id: iss.id, recurring_id: r.id,
-        price_item_id: r.price_item_id || null, page_number: pg,
-        status: r.mode === 'updating' ? 'received' : (pg ? 'placed' : 'approved'),
-        is_system: true, price: 0, discount: 0,
-        source: 'manual', created_by: profile.id,
-      };
-      if (r.notes) rec.notes = r.notes;
-      try {
-        let ins = await db.from('ads').insert(rec).select('id').single();
-        if (ins.error) {                                  // נפילה בטוחה אם עמודה אופציונלית חסרה במופע
-          const r2 = { ...rec }; delete r2.notes;
-          ins = await db.from('ads').insert(r2).select('id').single();
-          if (ins.error) throw ins.error;
-        }
-        if (r.mode === 'static' && r.storage_path) {
-          try {
-            await db.from('ad_files').insert({
-              ad_id: ins.data.id, storage_path: r.storage_path,
-              file_name: r.file_name || 'קובץ', kind: 'design', uploaded_by: profile.id,
-            });
-          } catch (e) { }
-        }
-        n++;
-      } catch (e) { }
-    }
-  }
-  return n;
-}
-
-/* רץ אחרי ציור עמוד הגיליונות: הזרעה + באנר תזכורת */
-async function recAdsAfterRender() {
-  try {
-    const n = await recAdsSweep();
-    if (n) toast('🔁 נוספו ' + n + ' מודעות קבועות לגיליונות הפתוחים');
-    await recAdsBanner();
-  } catch (e) { }
-}
-
-/* ==================== באנר "ממתינות לקובץ" ==================== */
-
-async function recAdsBanner() {
-  const box = document.getElementById('recAdsBanner');
-  if (!box || !['admin', 'editor'].includes(profile.role) || !_recAdsOk) return;
-  const list = (_recAds || []).filter(r => r.active && r.mode === 'updating');
-  if (!list.length) { box.innerHTML = ''; return; }
-  const up = _recOpenIssues().sort((a, b) => String(a.publish_date || '').localeCompare(String(b.publish_date || '')));
-  const iss = up[0];
-  if (!iss) { box.innerHTML = ''; return; }
-  let ads = [];
-  try {
-    const r = await db.from('ads').select('id,recurring_id,status').eq('issue_id', iss.id).not('recurring_id', 'is', null);
-    ads = r.data || [];
-  } catch (e) { return; }
-  const pend = ads.filter(a => a.status === 'received' && list.some(r => r.id === a.recurring_id));
-  if (!pend.length) { box.innerHTML = ''; return; }
-  const items = pend.map(a => {
-    const r = list.find(x => x.id === a.recurring_id);
-    return `<span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #fcd34d;border-radius:8px;padding:4px 8px;margin:2px">
-<b>${esc(r.title)}</b>
-<input type="file" id="recUp${a.id}" class="hidden" accept="image/*,application/pdf" onchange="recAdQuickUpload(${a.id})">
-<button class="btn btn-sm" onclick="document.getElementById('recUp${a.id}').click()">⬆ העלאת קובץ</button>
-${typeof openAdCard === 'function' ? `<button class="btn btn-sm btn-ghost" onclick="openAdCard(${a.id})">כרטיס</button>` : ''}
-</span>`;
-  }).join(' ');
-  box.innerHTML = `<div class="card card-pad" style="border-right:4px solid var(--warn);margin-bottom:14px">
-<b>🔁 מודעות קבועות ממתינות לקובץ — גיליון ${iss.issue_number}</b>
-<p class="muted" style="font-size:.78rem;margin:2px 0 6px">מודעות מתעדכנות צריכות קובץ חדש לכל גיליון. העלאת קובץ מאשרת את המודעה לשיבוץ.</p>
-<div>${items}</div></div>`;
-}
-
-/* העלאה ישירה מהבאנר: קובץ ← ad_files ← אישור לשיבוץ */
-window.recAdQuickUpload = async function (adId) {
-  const input = document.getElementById('recUp' + adId);
-  const file = input && input.files && input.files[0];
-  if (!file) return;
-  toast('מעלה קובץ...');
-  const path = `staff/${adId}/${Date.now()}_${safeKey(file.name)}`;
-  const { error } = await db.storage.from('ad-files').upload(path, file);
-  if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
-  await run(db.from('ad_files').insert({ ad_id: adId, storage_path: path, file_name: file.name, kind: 'design', uploaded_by: profile.id }));
-  const rp = await db.rpc('route_ad', { p_ad_id: adId, p_action: 'approve', p_note: 'הועלה קובץ — מודעה קבועה מתעדכנת' });
-  if (rp.error) { try { await db.from('ads').update({ status: 'approved' }).eq('id', adId); } catch (e) { } }
-  toast('✓ הקובץ הועלה והמודעה אושרה לשיבוץ');
-  openPage('issues');
-};
-
-/* ==================== מסך הניהול ==================== */
-
-async function recAdsManage() {
-  if (!['admin', 'editor'].includes(profile.role)) return;
-  const list = await recAdsLoad(true);
-  if (!_recAdsOk) {
-    document.getElementById('viewModal').innerHTML = `
-<h3>🔁 מודעות קבועות</h3>
-<p>הפיצ'ר עדיין לא הופעל במופע הזה — יש להריץ את המיגרציה
-<code>2026-08-31_recurring_system_ads.sql</code> ב-SQL Editor של Supabase.</p>
-<div class="m-actions"><button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button></div>`;
-    document.getElementById('viewBack').classList.add('open');
-    return;
-  }
-  const rows = list.map(r => `<tr style="${r.active ? '' : 'opacity:.5'}">
-<td><b>${esc(r.title)}</b>${r.notes ? `<div class="muted" style="font-size:.78rem">${esc(r.notes)}</div>` : ''}</td>
-<td>${r.mode === 'updating' ? '🔄 מתעדכנת' : '📌 סטטית'}</td>
-<td>${esc(nameOf('priceList', r.price_item_id)) || '—'}</td>
-<td>${r.page_number || '—'}</td>
-<td>${r.storage_path && typeof adFileOpen === 'function'
-      ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${esc(r.storage_path)}')">📎 ${esc((r.file_name || 'קובץ').length > 18 ? (r.file_name || 'קובץ').slice(0, 18) + '…' : (r.file_name || 'קובץ'))}</button>`
-      : (r.mode === 'static' ? '<span style="color:var(--warn)">חסר קובץ</span>' : '<span class="muted">כל גיליון מחדש</span>')}</td>
-<td style="white-space:nowrap">
-<button class="btn btn-sm btn-ghost" onclick="recAdEdit(${r.id})">עריכה</button>
-<button class="btn btn-sm btn-ghost" onclick="recAdToggle(${r.id}, ${r.active ? 'false' : 'true'})">${r.active ? 'השבתה' : 'הפעלה'}</button>
-</td></tr>`).join('');
-  document.getElementById('viewModal').innerHTML = `
-<h3>🔁 מודעות קבועות</h3>
-<p class="muted" style="font-size:.83rem">מודעות מערכת שנכנסות אוטומטית לכל גיליון פתוח (ללא חיוב).
-<b>סטטית</b> — אותו קובץ בכל גיליון · <b>מתעדכנת</b> — קובץ חדש כל גיליון, עם תזכורת בעמוד הגיליונות.
-ביטול מודעה בגיליון מסוים (בכרטיס המודעה) מסיר אותה רק מאותו גיליון.</p>
-${list.length ? `<div class="table-wrap" style="max-height:55vh;overflow:auto"><table class="data">
-<thead><tr><th>מודעה</th><th>סוג</th><th>גודל</th><th>עמוד</th><th>קובץ</th><th></th></tr></thead>
-<tbody>${rows}</tbody></table></div>` : '<p class="muted">אין עדיין מודעות קבועות — הוסיפו את הראשונה 👇</p>'}
-<div class="m-actions" style="margin-top:12px">
-<button class="btn btn-sm" onclick="recAdAdd()">＋ מודעה קבועה</button>
-<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open'); openPage('issues')">סגירה</button>
-</div>`;
-  document.getElementById('viewBack').classList.add('open');
-}
-
-function _recAdFields() {
-  return [
-    { name: 'title', label: 'שם המודעה (למשל: תורנויות בתי מרקחת / זמני השבת)', required: true },
-    {
-      name: 'mode', label: 'סוג', type: 'select', required: true, options: [
-        { v: 'static', t: '📌 סטטית — אותו קובץ בכל גיליון' },
-        { v: 'updating', t: '🔄 מתעדכנת — קובץ חדש כל גיליון + תזכורת' },
-      ]
-    },
-    { name: 'price_item_id', label: 'גודל (מהמחירון — לחישוב שטח בפלטפלן)', type: 'select', options: 'priceList' },
-    { name: 'page_number', label: 'עמוד קבוע (ריק = שיבוץ ידני בפלטפלן)', type: 'number' },
-    { name: 'notes', label: 'הערות', type: 'textarea', rows: 2 },
-    { type: 'html', html: '<label>קובץ המודעה (תמונה / PDF) — לסוג סטטית</label><input type="file" id="recAdFile" accept="image/*,application/pdf" style="width:100%">' },
-  ];
-}
-
-/* העלאת הקובץ של רשומה קבועה ל-Storage ושמירת ההפניה */
-async function _recAdSaveFile(recId) {
-  const inp = document.getElementById('recAdFile');
-  const file = inp && inp.files && inp.files[0];
-  if (!file) return null;
-  const path = `recurring/${recId}/${Date.now()}_${safeKey(file.name)}`;
-  const { error } = await db.storage.from('ad-files').upload(path, file);
-  if (error) { toast('הרשומה נשמרה, אך העלאת הקובץ נכשלה: ' + error.message, true); return null; }
-  await run(db.from('recurring_ads').update({ storage_path: path, file_name: file.name }).eq('id', recId));
-  return { storage_path: path, file_name: file.name };
-}
-
-/* החלפת קובץ ← עדכון גם במודעות שכבר נזרעו לגיליונות הפתוחים */
-async function _recAdPropagateFile(recId, storage_path, file_name) {
-  try {
-    const openIds = _recOpenIssues().map(i => i.id);
-    if (!openIds.length) return;
-    const r = await db.from('ads').select('id').eq('recurring_id', recId).in('issue_id', openIds)
-      .not('status', 'in', '("cancelled","rejected")');
-    const adIds = (r.data || []).map(a => a.id);
-    if (!adIds.length) return;
-    await db.from('ad_files').update({ storage_path, file_name }).in('ad_id', adIds).eq('kind', 'design');
-  } catch (e) { }
-}
-
-function recAdAdd() {
-  document.getElementById('viewBack').classList.remove('open');
-  openForm('מודעה קבועה חדשה', _recAdFields(), { mode: 'static' }, async (rec) => {
-    if (rec.page_number != null) rec.page_number = Number(rec.page_number) || null;
-    const ins = await run(db.from('recurring_ads').insert(rec).select('id').single());
-    await _recAdSaveFile(ins.id);
-    const n = await recAdsSweep();
-    toast('✓ המודעה הקבועה נוספה' + (n ? ' ונזרעה ל-' + n + ' גיליונות' : ''));
-    recAdsManage();
-  });
-}
-
-function recAdEdit(id) {
-  const r = (_recAds || []).find(x => x.id === id);
-  if (!r) return;
-  document.getElementById('viewBack').classList.remove('open');
-  openForm('עריכת מודעה קבועה — ' + r.title, _recAdFields(), r, async (rec) => {
-    if (rec.page_number != null) rec.page_number = Number(rec.page_number) || null;
-    await run(db.from('recurring_ads').update(rec).eq('id', id));
-    const f = await _recAdSaveFile(id);
-    if (f && rec.mode === 'static') await _recAdPropagateFile(id, f.storage_path, f.file_name);
-    toast('✓ נשמר' + (f ? ' — הקובץ עודכן גם בגיליונות הפתוחים' : ''));
-    recAdsManage();
-  });
-}
-
-window.recAdToggle = async function (id, on) {
-  await run(db.from('recurring_ads').update({ active: on }).eq('id', id));
-  if (!on && confirm('להסיר גם את המודעות שכבר נוצרו ממנה בגיליונות הפתוחים?\n(היסטוריה בגיליונות שיצאו לא נמחקת)')) {
-    try {
-      const openIds = _recOpenIssues().map(i => i.id);
-      if (openIds.length) {
-        await db.from('ads').update({ status: 'cancelled' }).eq('recurring_id', id).in('issue_id', openIds)
-          .not('status', 'in', '("published","cancelled")');
-      }
-    } catch (e) { }
-  }
-  toast(on ? 'המודעה הקבועה הופעלה' : 'המודעה הקבועה הושבתה');
-  recAdsManage();
-};

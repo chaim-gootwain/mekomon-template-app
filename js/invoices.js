@@ -34,10 +34,10 @@ function invEnsureStyles() {
     background:rgba(17,20,40,.55);backdrop-filter:blur(2px);padding:16px;overflow:auto}
   .inv-box{background:#fff;border-radius:16px;max-width:640px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:92vh;overflow:auto}
   .inv-box h3{margin:0 0 12px;color:@@COLOR_BRAND@@}
-  .inv-line{display:grid;grid-template-columns:1fr 60px 84px 62px 30px;gap:6px;align-items:center;margin-bottom:6px}
+  .inv-line{display:grid;grid-template-columns:1fr 70px 90px 30px;gap:6px;align-items:center;margin-bottom:6px}
   .inv-line input{padding:6px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;width:100%}
   .inv-line .rm{cursor:pointer;color:#c0392b;font-weight:900;text-align:center}
-  .inv-lh{display:grid;grid-template-columns:1fr 60px 84px 62px 30px;gap:6px;font-size:.75rem;color:#8890a6;margin-bottom:4px}
+  .inv-lh{display:grid;grid-template-columns:1fr 70px 90px 30px;gap:6px;font-size:.75rem;color:#8890a6;margin-bottom:4px}
   .inv-total{font-weight:800;color:#1c2438;margin:10px 0}
   `;
   document.head.appendChild(s);
@@ -184,17 +184,11 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
   const _lines = (opts.lines && opts.lines.length)
     ? opts.lines.map(l => ({ details: l.details, amount: (l.amount != null ? l.amount : 1), price: (l.price != null ? l.price : '') }))
     : [_line];
-  // סוכנות (פיצ'ר #7): ברירת המחדל של "על שם מי" נקבעת בהגדרות הסוכנות
-  const _agency = (c.agency_id && (cache.agencies || []).find(a => a.id === c.agency_id)) || null;
   _invState = {
     cid: c.id, name: c.name, kind, isPayment, issueId: (opts.issueId != null ? opts.issueId : issueId),
     parentUuid: opts.parentUuid || null, srcNumber: opts.srcNumber || null,
     hpMissing: !(c.business_id && String(c.business_id).trim()),
-    agency: _agency, billTo: (_agency && _agency.invoice_target === 'agency') ? 'agency' : 'customer',
-    orderRef: opts.orderRef || '',
     lines: _lines,
-    adIds: (Array.isArray(opts.adIds) && opts.adIds.length) ? opts.adIds.slice() : null,
-    srcLabel2: opts.label || null,
     vatInc: (opts.vatInc != null ? opts.vatInc : (isPayment ? true : false)), method: 'cash', date: '',
     docDate: today(),
     openCharges: [],
@@ -228,7 +222,6 @@ function invRenderModal() {
       <input value="${esc(ln.details)}" oninput="invLineSet(${i},'details',this.value)" placeholder="תיאור">
       <input type="number" value="${ln.amount}" oninput="invLineSet(${i},'amount',this.value)">
       <input type="number" value="${ln.price}" oninput="invLineSet(${i},'price',this.value)" placeholder="מחיר">
-      <input type="number" value="${ln.disc || ''}" min="0" max="100" oninput="invLineSet(${i},'disc',this.value)" placeholder="% הנחה" title="אחוז הנחה לשורה — יופיע בתיאור הפריט">
       <span class="rm" onclick="invRmLine(${i})" title="הסר">✕</span>
     </div>`).join('');
   let total = 0; s.lines.forEach(l => total += (Number(l.amount) || 0) * (Number(l.price) || 0));
@@ -240,13 +233,6 @@ function invRenderModal() {
     </div>` : '';
   document.getElementById('invOv').innerHTML = `<div class="inv-box">
     <h3>הנפקת ${DOC_KIND_HE[s.kind]} — ${esc(s.name)}</h3>
-    ${s.srcLabel2 ? `<div class="muted" style="font-size:.8rem;margin:-4px 0 10px">🔗 ${esc(s.srcLabel2)}${s.adIds ? ' · ' + s.adIds.length + ' מודעות ישויכו לחשבונית' : ''}</div>` : ''}
-    ${s.agency ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.85rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      🏢 לקוח דרך סוכנות <b>${esc(s.agency.name)}</b> · המסמך על שם:
-      <select onchange="_invState.billTo=this.value" style="padding:3px 8px;border-radius:6px;border:1px solid #bfdbfe">
-        <option value="customer" ${s.billTo === 'customer' ? 'selected' : ''}>הלקוח — ${esc(s.name)}</option>
-        <option value="agency" ${s.billTo === 'agency' ? 'selected' : ''}>הסוכנות — ${esc(s.agency.invoice_name || s.agency.name)}</option>
-      </select></div>` : ''}
     ${s.hpMissing ? `<div style="background:#fdecec;border:1px solid #f5b5b5;color:#b91c1c;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.84rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">⚠ ללקוח אין <b>ח.פ / עוסק</b> — מומלץ להשלים לפני ההפקה. <button class="btn btn-sm" style="background:var(--brand)" onclick="invCloseModal(); customerEdit(${s.cid})">✎ השלמת ח.פ</button></div>` : ''}
     ${(s.isPayment && !s.parentUuid) ? ((s.openCharges && s.openCharges.length)
       ? `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:8px 11px;margin:0 0 10px;font-size:.84rem">
@@ -266,11 +252,9 @@ function invRenderModal() {
       </select></div>` : '')}
     <div class="field"><label>תאריך המסמך</label>
       <input type="date" value="${s.docDate || ''}" onchange="_invState.docDate=this.value"></div>
-    <div class="field"><label>מס' הזמנה של הלקוח (יודפס על המסמך)</label>
-      <input value="${esc(s.orderRef || '')}" dir="ltr" oninput="_invState.orderRef=this.value" placeholder="למשל PO-1234"></div>
     <div class="field"><label>גיליון (לשורה האוטומטית)</label>
       <select onchange="invSetIssue(this.value)">${issOpts}</select></div>
-    <div class="inv-lh"><span>תיאור</span><span>כמות</span><span>מחיר</span><span>% הנחה</span><span></span></div>
+    <div class="inv-lh"><span>תיאור</span><span>כמות</span><span>מחיר</span><span></span></div>
     <div id="invLinesBox">${lines}</div>
     <div class="m-actions" style="flex-wrap:wrap;margin-top:6px">
       <button class="btn btn-sm btn-ghost" onclick="invAddLine()">+ הוסף שורה</button>
@@ -288,13 +272,8 @@ function invRenderModal() {
 }
 function invLineSet(i, k, v) { if (_invState && _invState.lines[i]) { _invState.lines[i][k] = v; invUpdateTotal(); } }
 /* פירוט מלא: בסיס / מע"מ / סה"כ — משתנה חי לפי "כולל מע"מ" (תצוגה מקדימה) */
-/* מחיר נטו לשורה אחרי הנחת אחוז (פיצ'ר #5) */
-function _invLineNet(l) {
-  const disc = Math.min(100, Math.max(0, Number(l.disc) || 0));
-  return Math.round((Number(l.amount) || 0) * (Number(l.price) || 0) * (1 - disc / 100) * 100) / 100;
-}
 function _invTotals() {
-  const s = _invState; let net = 0; (s ? s.lines : []).forEach(l => net += _invLineNet(l));
+  const s = _invState; let net = 0; (s ? s.lines : []).forEach(l => net += (Number(l.amount) || 0) * (Number(l.price) || 0));
   const rate = 0.18; let base, vat, total;
   if (s && s.vatInc) { total = net; base = Math.round(net / (1 + rate) * 100) / 100; vat = Math.round((total - base) * 100) / 100; }
   else { base = net; vat = Math.round(net * rate * 100) / 100; total = Math.round((net + vat) * 100) / 100; }
@@ -311,7 +290,7 @@ function invUpdateTotal() {
   const el = document.getElementById('invTotal');
   if (el) el.innerHTML = _invTotalsHtml();
 }
-function invAddLine() { _invState.lines.push({ details: '', amount: 1, price: '', disc: 0 }); invRenderModal(); }
+function invAddLine() { _invState.lines.push({ details: '', amount: 1, price: '' }); invRenderModal(); }
 function invRmLine(i) { _invState.lines.splice(i, 1); if (!_invState.lines.length) _invState.lines.push({ details: '', amount: 1, price: '' }); invRenderModal(); }
 function invSetKind(k) { if (_invState) { _invState.kind = k; invRenderModal(); } }
 function invSetIssue(id) {
@@ -333,22 +312,11 @@ function invMonthSummary() {
 async function invSubmit() {
   const s = _invState; if (!s) return;
   const items = s.lines.filter(l => (l.details || '').trim() && Number(l.price) > 0)
-    .map(l => {
-      const disc = Math.min(100, Math.max(0, Number(l.disc) || 0));
-      const unit = disc ? Math.round(Number(l.price) * (1 - disc / 100) * 100) / 100 : (Number(l.price) || 0);
-      return { details: l.details + (disc ? ` (כולל הנחה ${disc}%)` : ''), amount: Number(l.amount) || 1, price: unit };
-    });
+    .map(l => ({ details: l.details, amount: Number(l.amount) || 1, price: Number(l.price) || 0 }));
   if (!items.length) { toast('הוסף לפחות שורה אחת עם תיאור ומחיר', true); return; }
   const cid = s.cid;
   const body = { customer_id: cid, doc_kind: s.kind, items, vat_included: !!s.vatInc };
-  // חשבונית על שם הסוכנות (פיצ'ר #7) — דריסת שם/ח.פ במסמך בלבד; החוב נשאר על הלקוח
-  if (s.agency && s.billTo === 'agency') {
-    body.bill_to_name = s.agency.invoice_name || s.agency.name;
-    if (s.agency.business_id) body.bill_to_crn = s.agency.business_id;
-    body.comment = ((body.comment ? body.comment + ' · ' : '') + 'עבור ' + s.name);
-  }
   if (s.docDate) body.doc_date = s.docDate; // תאריך המסמך (YYYY-MM-DD)
-  if ((s.orderRef || '').trim()) body.comment = 'הזמנה מס\' ' + s.orderRef.trim(); // מס' הזמנת הלקוח — מודפס בהערת המסמך
   if (s.isPayment && s.date) body.pay_date = s.date; // תאריך התשלום לספר החוב (YYYY-MM-DD)
   if (s.isPayment) {
     // סכום הקבלה חייב להיות ברוטו (כולל מע"מ) כדי להתאים לסכום החשבונית:
@@ -363,8 +331,6 @@ async function invSubmit() {
   const _issueIds = new Set(); if (s.issueId) _issueIds.add(s.issueId);
   s.lines.forEach(ln => { const m = (_invIssues || []).find(i => _issueLineText(i) === (ln.details || '')); if (m) _issueIds.add(m.id); });
   if (_issueIds.size) { try { const { data: _mAds } = await db.from('ads').select('id').eq('customer_id', cid).in('issue_id', [..._issueIds]).not('status', 'in', '("cancelled","rejected")'); if (_mAds) body.ad_ids = _mAds.map(a => a.id); } catch (e) { } }
-  // שיוך מפורש של מודעות לחשבונית (הפקה מחוזה / ממודעה בודדת) — גובר על נגזרת הגיליון
-  if (s.adIds && s.adIds.length) body.ad_ids = s.adIds;
   // רושמים על החשבונית לאיזה גיליון(ות) היא שייכת — נשמר בהערת המסמך ובתיאור החיוב
   if (_issueIds.size && !body.comment) {
     const _nums = [..._issueIds].map(iid => { const _i = (_invIssues || []).find(x => x.id === iid); return _i ? _i.issue_number : null; }).filter(Boolean).sort((a, b) => a - b);
@@ -475,72 +441,4 @@ async function invIssueReceiptDirect(cid) {
   }
   const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
   await invOpenModal(c, 'invoice_receipt', true);
-}
-
-/* ============================================================
-   הפקת חשבונית ממודעות (שיוך ישיר) — פיצ'ר "סנכרון בין השדות"
-   ------------------------------------------------------------
-   בונה שורות מתוך שורות מודעה (ads) ומעביר ad_ids מפורשים ל-invOpenModal,
-   כדי שאפשר להפיק חשבונית ישירות ממודעה בודדת או מחבילת מודעות של חוזה.
-   בורר סוג-מסמך (חשבון עסקה / חשבונית מס / מס-קבלה) — הפקה רק אחרי אישור.
-   ============================================================ */
-function _invAdLine(a) {
-  const _iss = ((typeof cache !== 'undefined' && cache.issues) || []).find(i => i.id === a.issue_id);
-  const _issTxt = _iss ? ' — גיליון ' + _iss.issue_number : '';
-  const _type = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || '';
-  const details = (a.title && String(a.title).trim()) ? String(a.title).trim() + _issTxt
-    : ((_type || 'מודעת פרסום') + _issTxt);
-  const price = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
-  return { details, amount: 1, price };
-}
-
-let _invPick = null; // {cust, lines, adIds, label}
-function invPickDocKind(cust, lines, adIds, label) {
-  _invPick = { cust, lines, adIds, label: label || null };
-  document.getElementById('invPickOv')?.remove();
-  const ov = document.createElement('div');
-  ov.id = 'invPickOv';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:99999';
-  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  const total = lines.reduce((s, l) => s + (Number(l.amount) || 1) * (Number(l.price) || 0), 0);
-  const close = "document.getElementById('invPickOv').remove();";
-  const open = (kind, pay, vatInc) => `${close} invOpenModal(_invPick.cust, '${kind}', ${pay}, {lines:_invPick.lines, adIds:_invPick.adIds, label:_invPick.label${vatInc != null ? ', vatInc:' + vatInc : ''}})`;
-  ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:14px;padding:18px;max-width:460px;width:92%;direction:rtl">
-    <h3 style="margin:0 0 4px">🧾 הפקת חשבונית — ${esc(cust.name)}</h3>
-    <p class="muted" style="font-size:.83rem;margin:0 0 4px">${label ? esc(label) + ' · ' : ''}${lines.length} שורות · ${money(total)} (לפני מע"מ)</p>
-    <div class="muted" style="font-size:.78rem;margin:0 0 14px">אפשר לערוך את השורות במסך הבא לפני ההפקה.</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn" onclick="${open('proforma', false)}">חשבון עסקה</button>
-      <button class="btn" onclick="${open('tax_invoice', false)}">חשבונית מס</button>
-      <button class="btn" onclick="${open('invoice_receipt', true, false)}">חשבונית מס קבלה</button>
-      <button class="btn btn-ghost" onclick="${close}">ביטול</button>
-    </div></div>`;
-  document.body.appendChild(ov);
-}
-
-/* הפקה מרשימת מודעות (עם שיוך ad_ids) */
-async function invIssueFromAds(cust, adRows, label) {
-  if (!cust) { toast('לקוח לא נמצא', true); return; }
-  if (!adRows || !adRows.length) { toast('אין מודעות לחיוב', true); return; }
-  if (typeof checkCustomerStatusGate === 'function') {
-    const _ok = await checkCustomerStatusGate(cust.id, 'הפקת חשבונית'); if (!_ok) return;
-  }
-  const lines = adRows.map(_invAdLine).filter(l => l.price > 0);
-  if (!lines.length) { toast('למודעות שנבחרו אין מחיר', true); return; }
-  invPickDocKind(cust, lines, adRows.map(a => a.id), label);
-}
-
-/* הפקה ממודעה בודדת (מכרטיס הלקוח / מהגיליון) — נושאת את שיוך החוזה שלה */
-async function invIssueFromAd(adId) {
-  const a = (await run(db.from('ads').select('*').eq('id', adId).limit(1)))[0];
-  if (!a) { toast('מודעה לא נמצאה', true); return; }
-  const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === a.customer_id))
-    || ((typeof cache !== 'undefined' && cache.customers) || []).find(x => x.id === a.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', a.customer_id).limit(1)))[0];
-  let label = 'מודעה בודדת';
-  if (a.contract_id) {
-    const _ct = (await run(db.from('contracts').select('id,price_item_id,total_inserts').eq('id', a.contract_id).limit(1)))[0];
-    if (_ct) label = 'משויך לחוזה #' + _ct.id + (typeof nameOf === 'function' ? ' — ' + (nameOf('priceList', _ct.price_item_id) || '') : '');
-  }
-  await invIssueFromAds(cust, [a], label);
 }

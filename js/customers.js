@@ -13,9 +13,6 @@ let _customers = [];
 let _custDebt = {};
 
 const CUSTOMER_STATUS = { active: ['פעיל', 'green'], frozen: ['מוקפא', 'amber'], blacklist: ['רשימה שחורה', 'red'] };
-// סטטוס CRM (פיצ'ר #13) — ממד נפרד מהסטטוס התפעולי שלמעלה:
-// איפה הלקוח במחזור החיים, לא האם מותר לעבוד איתו.
-const CRM_STATUS = { prospect: ['מתעניין', 'amber'], active: ['פעיל', 'green'], past: ['לקוח בעבר', ''] };
 
 /* ---- שיפורים: הנחה קבועה · שער סטטוס · מפת חוב · מיפוי תנאי תשלום בייבוא ---- */
 function _custFind(id) { return (cache.customers || []).find(x => x.id === id) || (_customers || []).find(x => x.id === id) || null; }
@@ -79,12 +76,6 @@ ${profile.role === 'admin' ? `<button class="btn btn-ghost" onclick="customerMer
 <option value="">כל הסוכנים</option>
 ${cache.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
 </select>
-<select id="custCrmFilter" onchange="customersDraw()">
-<option value="">כל סטטוסי ה-CRM</option>
-<option value="prospect">מתעניינים</option>
-<option value="active">פעילים</option>
-<option value="past">לקוחות בעבר</option>
-</select>
 <select id="custStatusFilter" onchange="customersDraw()">
 <option value="">כל הסטטוסים</option>
 <option value="active">פעילים</option>
@@ -109,12 +100,10 @@ function _customersFiltered() {
 const term = (document.getElementById('custSearch')?.value || '').trim();
 const agent = document.getElementById('custAgentFilter')?.value || '';
 const status = document.getElementById('custStatusFilter')?.value || '';
-const crm = document.getElementById('custCrmFilter')?.value || '';
 const tag = document.getElementById('custTagFilter')?.value || '';
 return _customers.filter(c =>
 (!agent || c.agent_id === Number(agent)) &&
 (!status || c.status === status) &&
-(!crm || (c.crm_status || 'active') === crm) &&
 (!tag || (c.tags || []).includes(tag)) &&
 (!term || [c.name, c.phone, c.whatsapp, c.contact_person, c.field, c.email, c.business_id, c.city, c.invoice_name].some(v => (v || '').includes(term))));
 }
@@ -146,7 +135,6 @@ renderTable(document.getElementById('custTable'), rows, [
 { h: 'תנאי תשלום', f: r => PAY_TERMS[r.payment_terms] || '' },
 { h: 'יתרת חוב', f: r => { const d = _custDebt[r.id]; if (!d || !(d.debt > 0)) return '<span class="muted">—</span>'; return `<b style="color:${d.overdue ? '#b91c1c' : '#334155'}">${money(d.debt)}${d.overdue ? ' ⏰' : ''}</b>`; } },
 { h: 'סטטוס', f: r => { const s = CUSTOMER_STATUS[r.status]; return `<span class="pill ${s[1]}">${s[0]}</span>`; } },
-{ h: 'CRM', f: r => { const s = CRM_STATUS[r.crm_status || 'active']; return s ? `<span class="pill ${s[1]}">${s[0]}</span>` : ''; } },
 ], { onRow: r => openCustomerCard(r.id), empty: 'אין לקוחות תואמים' });
 if (typeof custBulkBarUpdate === 'function') custBulkBarUpdate();
 }
@@ -154,10 +142,6 @@ if (typeof custBulkBarUpdate === 'function') custBulkBarUpdate();
 const CUSTOMER_FIELDS = [
 { type: 'section', label: 'זיהוי' },
 { name: 'name', label: 'שם לקוח', required: true },
-{ name: 'crm_status', label: 'סטטוס CRM', type: 'select', default: 'active',
-  options: [{ v: 'prospect', t: 'מתעניין' }, { v: 'active', t: 'פעיל' }, { v: 'past', t: 'לקוח בעבר' }] },
-{ name: 'agency_id', label: 'סוכנות פרסום (אם מגיע דרך סוכנות)', type: 'select', options: 'agencies' },
-{ name: 'regular_advertiser', label: 'מפרסם קבוע (נכלל בתזכורות סגירת גיליון)', type: 'checkbox' },
 { name: 'invoice_name', label: 'שם לחשבונית' },
 { type: 'html', html: '<button type="button" class="btn btn-sm btn-ghost" onclick="custInvoiceCopy()">⬅ זהה לשם הלקוח</button>' },
 { name: 'business_id', label: 'ח.פ / עוסק', dir: 'ltr' },
@@ -296,7 +280,7 @@ const portalUrl = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '')
 
 const modal = document.getElementById('viewModal');
 modal.innerHTML = `
-<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span>${(c.crm_status && c.crm_status !== 'active' && CRM_STATUS[c.crm_status]) ? ` <span class="pill ${CRM_STATUS[c.crm_status][1]}">${CRM_STATUS[c.crm_status][0]}</span>` : ''}${(() => { const ag = c.agency_id && (cache.agencies || []).find(a => a.id === c.agency_id); return ag ? ` <span class="pill blue" title="לקוח דרך סוכנות">🏢 ${esc(ag.name)}</span>` : ''; })()}</h3>
+<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span></h3>
 ${c.status !== 'active' && c.status_reason ? `<p style="color:var(--danger);font-size:.85rem;margin-top:-10px">סיבה: ${esc(c.status_reason)}</p>` : ''}
 ${(canWrite && !(c.business_id && String(c.business_id).trim())) ? `<div style="background:#fdecec;border:1px solid #f5b5b5;color:#b91c1c;border-radius:9px;padding:8px 12px;margin:6px 0;font-size:.86rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">⚠ חסר <b>ח.פ / עוסק</b> — יש להשלים לפני הפקת חשבונית. <button class="btn btn-sm" style="background:var(--brand)" onclick="customerEdit(${id})">✎ השלמת ח.פ</button></div>` : ''}
 ${canWrite ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px">
@@ -339,7 +323,6 @@ ${canMoney ? `
 ${nextIssue ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:${bookedNext ? '#f0fdf4' : '#fffbeb'};border:1px solid ${bookedNext ? '#bbf7d0' : '#fde68a'};color:${bookedNext ? '#15803d' : '#92400e'}">${bookedNext ? '✓ מוזמן לגיליון הקרוב' : '⚠ טרם הזמין לגיליון הקרוב'} — גיליון ${nextIssue.issue_number}${nextIssue.publish_date ? ' (' + heDate(nextIssue.publish_date) + ')' : ''}</div>` : ''}
 ${churnRisk ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">⚠ <b>בסיכון נטישה</b> — לא פרסם ${churnGapCount} גיליונות ברצף</div>` : ''}
 ${overLimit ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">⛔ <b>חריגה ממסגרת אשראי</b> — חוב ${money(debt)} מתוך מסגרת ${money(creditLimit)}</div>` : ''}
-${(() => { const b = (payments || []).filter(p => p.bounced); if (!b.length) return ''; const last = b[0]; return `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">↩️ <b>צ'ק שחזר</b> — ${b.length === 1 ? money(last.amount) : b.length + ' תשלומים בסך ' + money(b.reduce((s, p) => s + Number(p.amount || 0), 0))}${last.bounced_date ? ' · אחרון: ' + heDate(last.bounced_date) : ''}${last.bounced_reason ? ' · ' + esc(last.bounced_reason) : ''}</div>`; })()}
 ` : ''}
 ${canWrite ? `<div class="cc-toolbar">
 <button class="cc-tbtn cc-primary" data-tip="מודעה לגיליון" aria-label="מודעה לגיליון" onclick="adAdd({customer_id:${id}})">${_ccIco('plus')}</button>
@@ -353,7 +336,6 @@ ${canWrite ? `<div class="cc-toolbar">
 <button class="btn" onclick="ccMenuClose();dealNew(${id})">💼 עסקה חדשה</button>
 <div class="cc-msep"></div>
 <button id="csBtn" class="btn" onclick="ccMenuClose();customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
-${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<button class="btn" onclick="ccMenuClose();debtReminderSend(${id})">💬 שלח תזכורת חוב</button>` : ''}
 </div>
 </div>
 <div class="cc-mwrap">
@@ -364,7 +346,6 @@ ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href=
 ${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" onclick="ccMenuClose();ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>
 <button class="btn" onclick="ccMenuClose();customerAddNote(${id})">＋ הוסף הערה</button>
-${typeof auditShow === 'function' ? `<button class="btn" onclick="ccMenuClose();auditShow('customers', ${id}, '${esc(c.name).replace(/'/g, '&#39;')}')">🕘 היסטוריית שינויים</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerStatusChange(${id})">🔄 שינוי סטטוס</button>
 <button class="btn" onclick="custPortalShow()">🔗 קישור פורטל</button>
 ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-danger-ghost" onclick="ccMenuClose();customerDelete(${id})">🗑 מחיקת לקוח</button>` : ''}
@@ -395,11 +376,10 @@ ${custAdsGroupedHtml(ads, id)}
 </div>
 ${canMoney ? `
 <div id="ccContracts" class="cc-tab hidden">
-${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th><th></th></tr></thead><tbody>
-${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}${ct.is_standing_order ? ' <span class="pill amber" title="הוראת קבע חודשית">🔁 הו"ק</span>' : ''}</td>
+${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th></tr></thead><tbody>
+${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}</td>
 <td id="ctUsed${ct.id}">—</td><td>${money(ct.total_price)}</td>
-<td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td>
-<td>${(typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role) && typeof contractInvoice === 'function') ? `<button class="btn btn-sm" onclick="event.stopPropagation(); contractInvoice(${ct.id})" title="הפק חשבונית על החבילה">🧾 הפק</button>` : ''}</td></tr>`).join('')}
+<td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td></tr>`).join('')}
 </tbody></table></div>` : '<p class="muted">אין חוזים</p>'}
 ${contracts.filter(ct => Array.isArray(ct.payment_plan) && ct.payment_plan.length).map(ct => `<div style="margin-top:14px"><b>לוח תשלומים — ${esc(nameOf('priceList', ct.price_item_id))}</b>${(typeof dealPlanHtml==='function'?dealPlanHtml(ct):'')}</div>`).join('')}
 </div>
@@ -560,135 +540,54 @@ async function customerDelete(id) {
 עמודות מזוהות אוטומטית לפי הכותרת בשורה הראשונה:
 שם (חובה) · טלפון · אימייל · איש קשר · כתובת · תחום · ח.פ · הערות
 כפילות לפי טלפון או שם — מדולגת ומדווחת בסוף */
-/* ==================== ייבוא לקוחות מאקסל (פיצ'ר #14) ====================
-   פרסור → זיהוי עמודות אוטומטי → מסך אישור (תצוגה מקדימה + כפילויות +
-   עמודות לא מזוהות שנשמרות כהערות שוליים) → הכנסה במנות. */
-
-const _CI_FIELD_NAMES = {
-  name: ['שם העסק', 'שם עסק', 'שם הלקוח', 'שם לקוח', 'עסק', 'שם'],
-  phone: ['טלפון', 'נייד', 'פלאפון', 'סלולרי', 'phone'],
-  email: ['אימייל', 'מייל', 'דוא', 'email'],
-  contact_person: ['איש קשר', 'איש', 'קשר'],
-  address: ['כתובת'],
-  city: ['יישוב', 'ישוב', 'עיר'],
-  whatsapp: ['וואטסאפ', 'ווטסאפ', 'whatsapp', 'טלפון נוסף', 'נייד נוסף'],
-  field: ['תחום', 'ענף', 'קטגוריה'],
-  business_id: ['ח.פ', 'חפ', 'עוסק', 'ע.מ'],
-  payment_terms: ['תנאי תשלום', 'תשלום', 'שוטף'],
-  notes: ['הערות', 'הערה'],
-  agent: ['סוכן'],
-};
-function _ciIsKnownKey(key) {
-  const k = String(key || '').trim();
-  return Object.values(_CI_FIELD_NAMES).some(list => list.some(n => k === n || k.includes(n)));
-}
-
-let _ciData = null; // {toInsert, skipped, extraCols}
-
 async function customersImport() {
-  const input = document.getElementById('custImportFile');
-  const file = input.files[0];
-  if (!file) return;
-  input.value = '';
-  let rows;
-  try { rows = await readSpreadsheet(file); }
-  catch (e) { toast('לא הצלחתי לקרוא את הקובץ: ' + e.message, true); return; }
-  if (!rows.length) { toast('הקובץ ריק או שאין שורת כותרות', true); return; }
+const input = document.getElementById('custImportFile');
+const file = input.files[0];
+if (!file) return;
+input.value = '';
+let rows;
+try { rows = await readSpreadsheet(file); }
+catch (e) { toast('לא הצלחתי לקרוא את הקובץ: ' + e.message, true); return; }
+if (!rows.length) { toast('הקובץ ריק או שאין שורת כותרות', true); return; }
 
-  const existing = await run(db.from('customers').select('name, phone'));
-  const knownPhones = new Set(existing.map(c => c.phone).filter(Boolean));
-  const knownNames = new Set(existing.map(c => c.name.trim()));
+const existing = await run(db.from('customers').select('name, phone'));
+const knownPhones = new Set(existing.map(c => c.phone).filter(Boolean));
+const knownNames = new Set(existing.map(c => c.name.trim()));
 
-  const F = _CI_FIELD_NAMES;
-  const toInsert = [], skipped = [];
-  const extraCols = new Set();
-  for (const row of rows) {
-    const name = pickField(row, F.name);
-    if (!name) { skipped.push('(שורה בלי שם)'); continue; }
-    const phone = pickField(row, F.phone);
-    if ((phone && knownPhones.has(phone)) || knownNames.has(name)) { skipped.push(name); continue; }
-    // הערות שוליים: כל עמודה שלא זוהתה נאספת ל"הערות" — שום מידע לא הולך לאיבוד
-    const extras = [];
-    Object.keys(row).forEach(k => {
-      const v = String(row[k] ?? '').trim();
-      if (v && !_ciIsKnownKey(k)) { extras.push(k.trim() + ': ' + v); extraCols.add(k.trim()); }
-    });
-    const baseNotes = pickField(row, F.notes);
-    toInsert.push({
-      name, phone,
-      email: pickField(row, F.email),
-      contact_person: pickField(row, F.contact_person),
-      address: pickField(row, F.address),
-      city: pickField(row, F.city),
-      whatsapp: pickField(row, F.whatsapp),
-      field: pickField(row, F.field),
-      business_id: pickField(row, F.business_id),
-      payment_terms: _importTerms(pickField(row, F.payment_terms)),
-      notes: baseNotes,
-      _extras: extras.join(' · '),
-      agent_id: matchAgent(row, null), // עמודת "סוכן" בקובץ
-    });
-    if (phone) knownPhones.add(phone);
-    knownNames.add(name);
-  }
-
-  if (!toInsert.length) { toast('אין שורות חדשות לייבוא (הכל כפול או ריק)', true); return; }
-  _ciData = { toInsert, skipped, extraCols: [...extraCols] };
-  _ciReview();
+const toInsert = [], skipped = [];
+for (const row of rows) {
+const name = pickField(row, ['שם העסק', 'שם עסק', 'שם הלקוח', 'שם לקוח', 'עסק', 'שם']);
+if (!name) { skipped.push('(שורה בלי שם)'); continue; }
+const phone = pickField(row, ['טלפון', 'נייד', 'פלאפון', 'סלולרי', 'phone']);
+if ((phone && knownPhones.has(phone)) || knownNames.has(name)) { skipped.push(name); continue; }
+toInsert.push({
+name, phone,
+email: pickField(row, ['אימייל', 'מייל', 'דוא', 'email']),
+contact_person: pickField(row, ['איש קשר', 'איש', 'קשר']),
+address: pickField(row, ['כתובת']),
+city: pickField(row, ['יישוב', 'ישוב', 'עיר']),
+whatsapp: pickField(row, ['וואטסאפ', 'ווטסאפ', 'whatsapp', 'טלפון נוסף', 'נייד נוסף']),
+field: pickField(row, ['תחום', 'ענף', 'קטגוריה']),
+business_id: pickField(row, ['ח.פ', 'חפ', 'עוסק', 'ע.מ']),
+payment_terms: _importTerms(pickField(row, ['תנאי תשלום', 'תשלום', 'שוטף'])),
+notes: pickField(row, ['הערות', 'הערה']),
+agent_id: matchAgent(row, null), // עמודת "סוכן" בקובץ
+});
+if (phone) knownPhones.add(phone);
+knownNames.add(name);
 }
 
-/* מסך האישור — תצוגה מקדימה לפני ההכנסה */
-function _ciReview() {
-  const d = _ciData; if (!d) return;
-  const prev = d.toInsert.slice(0, 8);
-  document.getElementById('ciOv')?.remove();
-  const ov = document.createElement('div');
-  ov.id = 'ciOv';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,40,.55);display:flex;align-items:center;justify-content:center;z-index:99997;padding:16px;direction:rtl';
-  ov.innerHTML = `<div style="background:var(--card,#fff);border-radius:16px;padding:20px;max-width:720px;width:96%;max-height:88vh;overflow:auto">
-    <h3 style="margin:0 0 4px">⬆ אישור ייבוא לקוחות</h3>
-    <div class="stats" style="margin:10px 0">
-      ${stat(d.toInsert.length, 'לקוחות חדשים לייבוא')}
-      ${stat(d.skipped.length, 'דולגו (כפולים / בלי שם)', d.skipped.length ? 'red' : '')}
-      ${stat(d.extraCols.length, 'עמודות לא מזוהות')}
-    </div>
-    ${d.extraCols.length ? `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;background:#fff7e6;border:1px solid #ffe0a3;border-radius:10px;padding:9px 12px;font-size:.88rem">
-      <input type="checkbox" id="ciExtras" checked style="width:17px;height:17px">
-      לצרף להערות הלקוח את העמודות שלא זוהו: <b>${d.extraCols.map(esc).join(', ')}</b>
-    </label>` : ''}
-    <div class="table-wrap" style="margin-top:10px"><table class="data">
-      <thead><tr><th>שם</th><th>טלפון</th><th>יישוב</th><th>סוכן</th><th>הערות (כולל שוליים)</th></tr></thead>
-      <tbody>${prev.map(r => `<tr><td><b>${esc(r.name)}</b></td><td dir="ltr">${esc(r.phone || '—')}</td>
-        <td>${esc(r.city || '—')}</td><td>${esc(nameOf('agents', r.agent_id) || '—')}</td>
-        <td style="font-size:.8rem">${esc([r.notes, r._extras].filter(Boolean).join(' · ') || '—')}</td></tr>`).join('')}
-      ${d.toInsert.length > prev.length ? `<tr><td colspan="5" class="muted">ועוד ${d.toInsert.length - prev.length} שורות...</td></tr>` : ''}</tbody>
-    </table></div>
-    ${d.skipped.length ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:.82rem">מי דולג (${d.skipped.length})</summary>
-      <p class="muted" style="font-size:.8rem">${d.skipped.slice(0, 40).map(esc).join(', ')}${d.skipped.length > 40 ? '...' : ''}</p></details>` : ''}
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button class="btn" onclick="customersImportCommit()">✓ ייבא ${d.toInsert.length} לקוחות</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('ciOv').remove(); _ciData=null">ביטול</button>
-    </div></div>`;
-  document.body.appendChild(ov);
-}
+if (!toInsert.length) { toast('אין שורות חדשות לייבוא (הכל כפול או ריק)', true); return; }
+if (!confirm(`נמצאו ${toInsert.length} לקוחות חדשים לייבוא` +
+(skipped.length ? `\n(${skipped.length} דולגו — כפולים או בלי שם)` : '') + '\n\nלהמשיך?')) return;
 
-async function customersImportCommit() {
-  const d = _ciData; if (!d) return;
-  const withExtras = !d.extraCols.length || document.getElementById('ciExtras')?.checked;
-  const rows = d.toInsert.map(r => {
-    const { _extras, ...rec } = r;
-    rec.notes = [rec.notes, withExtras ? _extras : ''].filter(Boolean).join(' · ') || null;
-    return rec;
-  });
-  document.getElementById('ciOv')?.remove();
-  toast('מייבא...');
-  // הכנסה במנות של 50 — יציב גם לקבצים גדולים
-  for (let i = 0; i < rows.length; i += 50)
-    await run(db.from('customers').insert(rows.slice(i, i + 50)));
-  await refreshCache();
-  toast(`✓ יובאו ${rows.length} לקוחות` + (d.skipped.length ? ` · דולגו ${d.skipped.length}` : ''));
-  _ciData = null;
-  openPage('customers');
+// הכנסה במנות של 50 — יציב גם לקבצים גדולים
+for (let i = 0; i < toInsert.length; i += 50)
+await run(db.from('customers').insert(toInsert.slice(i, i + 50)));
+
+await refreshCache();
+toast(`✓ יובאו ${toInsert.length} לקוחות` + (skipped.length ? ` · דולגו ${skipped.length}` : ''));
+openPage('customers');
 }
 
 async function portalTokenReset(id) {
@@ -795,69 +694,4 @@ function _custLedgerHtml(charges, payments) {
     </tr>`;
   }).join('');
   return `<div class="table-wrap"><table class="data"><thead><tr><th>תאריך</th><th>תיאור</th><th>חיוב</th><th>תשלום</th><th>יתרה</th></tr></thead><tbody>${body}</tbody></table></div>`;
-}
-
-/* ============================================================
-   סוכנויות פרסום (פיצ'ר #7) — ניהול + כרטיס הגדרות
-   ------------------------------------------------------------
-   ישות סוכנות: אחוז עמלה להחזר + על שם מי מונפקת החשבונית.
-   חישוב העמלה הוא בדוח בלבד — שום תשלום לא מבוצע אוטומטית.
-   ============================================================ */
-
-const AGENCY_FIELDS = [
-  { name: 'name', label: 'שם הסוכנות', required: true },
-  { name: 'invoice_name', label: 'שם לחשבונית (ריק = שם הסוכנות)' },
-  { name: 'business_id', label: 'ח.פ / עוסק', dir: 'ltr' },
-  { name: 'contact_person', label: 'איש קשר' },
-  { name: 'phone', label: 'טלפון', dir: 'ltr' },
-  { name: 'email', label: 'מייל', dir: 'ltr' },
-  { name: 'commission_pct', label: '% עמלה להחזר לסוכנות', type: 'number', default: 0 },
-  { name: 'invoice_target', label: 'חשבונית כברירת מחדל על שם', type: 'select', default: 'customer',
-    options: [{ v: 'customer', t: 'הלקוח' }, { v: 'agency', t: 'הסוכנות' }] },
-  { name: 'notes', label: 'הערות', type: 'textarea', rows: 2 },
-];
-
-function agenciesCard() {
-  const list = cache.agencies || [];
-  const rows = list.map(a => {
-    const n = (cache.customers || []).filter(c => c.agency_id === a.id).length;
-    return `<tr>
-      <td><b>${esc(a.name)}</b></td><td>${Number(a.commission_pct) || 0}%</td>
-      <td>${a.invoice_target === 'agency' ? 'הסוכנות' : 'הלקוח'}</td><td>${n}</td>
-      <td><button class="btn btn-sm btn-ghost" onclick="agencyEdit(${a.id})">✎</button></td>
-    </tr>`;
-  }).join('');
-  return `
-<div class="card card-pad">
-<b>סוכנויות פרסום 🏢</b>
-<p class="muted" style="font-size:.82rem">סוכנות = אחוז עמלה להחזר + על שם מי מונפקת החשבונית. משייכים לקוח לסוכנות בטופס הלקוח. חישוב העמלות — בדוח "עמלות סוכנויות" (תצוגה בלבד, בלי תשלום אוטומטי).</p>
-${list.length ? `<div class="table-wrap" style="margin-top:8px"><table class="data">
-<thead><tr><th>סוכנות</th><th>עמלה</th><th>חשבונית ע"ש</th><th>לקוחות</th><th></th></tr></thead>
-<tbody>${rows}</tbody></table></div>` : '<p class="muted" style="font-size:.82rem">אין סוכנויות עדיין.</p>'}
-<div style="display:flex;gap:8px;margin-top:10px">
-<button class="btn btn-sm" onclick="agencyAdd()">＋ סוכנות חדשה</button>
-</div>
-</div>`;
-}
-
-function agencyAdd() {
-  openForm('סוכנות חדשה', AGENCY_FIELDS, {}, async (rec) => {
-    rec.commission_pct = Math.min(100, Math.max(0, Number(rec.commission_pct) || 0));
-    const { error } = await db.from('agencies').insert(rec);
-    if (error) { toast(/relation|exist/i.test(error.message) ? 'טבלת הסוכנויות חסרה — יש להריץ את מיגרציית agencies' : 'שגיאה: ' + error.message, true); return; }
-    await refreshCache();
-    toast('הסוכנות נוספה');
-    openPage('admin');
-  });
-}
-
-function agencyEdit(id) {
-  const a = (cache.agencies || []).find(x => x.id === id); if (!a) return;
-  openForm('עריכת סוכנות — ' + a.name, AGENCY_FIELDS, a, async (rec) => {
-    rec.commission_pct = Math.min(100, Math.max(0, Number(rec.commission_pct) || 0));
-    await run(db.from('agencies').update(rec).eq('id', id));
-    await refreshCache();
-    toast('נשמר');
-    openPage('admin');
-  });
 }

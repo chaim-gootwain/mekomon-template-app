@@ -50,36 +50,17 @@ function dealNew(customerId) {
       <b>סה"כ העסקה</b><b id="dlTotal" style="font-size:1.3rem;color:#0369a1">₪0</b>
     </div>
 
-    <div class="grid2">
     <div class="field"><label>תשלום</label>
       <select id="dlPayMode" onchange="dealRecalc()">
         <option value="full">תשלום מלא מראש</option>
         <option value="plan">פריסה לתשלומים</option>
       </select></div>
-    <div class="field"><label>מועד החיוב (חבילה)</label>
-      <select id="dlBillMode">
-        <option value="upfront">מראש — בתחילת החבילה</option>
-        <option value="on_completion">בסיום — כשהחבילה נוצלה</option>
-      </select></div>
-    </div>
     <div id="dlPlanCfg" class="grid3 hidden">
       <div class="field"><label>מספר תשלומים</label><input type="number" id="dlN" min="2" value="3" oninput="dealRecalc()"></div>
       <div class="field"><label>תאריך ראשון</label><input type="date" id="dlFirst" value="${today()}" onchange="dealRecalc()"></div>
       <div class="field"><label>תדירות</label><select id="dlFreq" onchange="dealRecalc()"><option value="monthly">חודשי</option><option value="biweekly">כל שבועיים</option><option value="weekly">שבועי</option></select></div>
     </div>
     <div id="dlPlanPreview" style="margin-bottom:12px"></div>
-
-    <div style="border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:10px;margin-bottom:12px;background:#fbfdff">
-      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700">
-        <input type="checkbox" id="dlStanding" onchange="dealStandingToggle()" style="width:17px;height:17px">
-        🔁 הוראת קבע חודשית
-      </label>
-      <div id="dlStandingCfg" class="hidden" style="margin-top:8px">
-        <div class="field" style="margin:0;max-width:220px"><label style="font-size:.8rem">סכום חודשי (לפני מע"מ)</label>
-        <input type="number" id="dlStandingAmt" min="1" dir="ltr"></div>
-        <p class="muted" style="font-size:.76rem;margin-top:4px">המערכת תיצור רשומת חיוב חודשית אוטומטית. הפקת מסמך וגבייה בפועל — ידניות כרגיל.</p>
-      </div>
-    </div>
 
     <div class="field"><label>תדירות / שיריון</label>
       <select id="dlCadence" onchange="dealCadenceToggle()">
@@ -152,16 +133,6 @@ function dealCadenceToggle() {
   const cad = document.getElementById('dlCadence').value;
   document.getElementById('dlIssuesBox').classList.toggle('hidden', cad !== 'selected');
 }
-function dealStandingToggle() {
-  const on = document.getElementById('dlStanding')?.checked;
-  document.getElementById('dlStandingCfg')?.classList.toggle('hidden', !on);
-  const amt = document.getElementById('dlStandingAmt');
-  // ברירת מחדל לסכום החודשי: תשלום אחד מהפריסה, או סה"כ העסקה
-  if (on && amt && !amt.value && _dealState) {
-    const p = (_dealState.plan || [])[0];
-    amt.value = p ? Number(p.amount) : (_dealState.total || '');
-  }
-}
 function _dealCollectDates() {
   return [...document.querySelectorAll('.dlIssChk:checked')].map(c => c.value).filter(Boolean).sort();
 }
@@ -178,19 +149,14 @@ async function dealSave() {
   const selDates = cadence === 'selected' ? _dealCollectDates() : [];
   if (cadence === 'selected' && !selDates.length) { toast('בחר לפחות גיליון אחד ששוריין', true); return; }
   const totalInserts = cadence === 'selected' ? selDates.length : qty;
-  const standing = !!document.getElementById('dlStanding')?.checked;
-  const standingAmt = Number(document.getElementById('dlStandingAmt')?.value) || 0;
-  if (standing && !(standingAmt > 0)) { toast('הזן סכום חודשי להוראת הקבע', true); return; }
   const payload = {
-    is_standing_order: standing,
-    standing_order_amount: standing ? standingAmt : null,
     customer_id: _dealState.customerId,
     price_item_id: item ? Number(item) : null,
     total_inserts: totalInserts,
     cadence: cadence,
     selected_dates: selDates,
     total_price: _dealState.total,
-    billing_mode: (document.getElementById('dlBillMode')?.value === 'on_completion') ? 'on_completion' : 'upfront',
+    billing_mode: 'upfront',
     start_date: today(),
     active: true,
     agent_id: _dealState.cust ? _dealState.cust.agent_id : null,
@@ -204,16 +170,11 @@ async function dealSave() {
   openCustomerCard(_dealState.customerId);
 }
 
-/* שמירה בטוחה: אם עמודות חדשות עדיין לא קיימות ב-DB — נשמר בלי לשבור */
+/* שמירה בטוחה: אם payment_plan עדיין לא קיים ב-DB — נשמר בלי לשבור */
 async function saveContractSafe(payload) {
   let res = await db.from('contracts').insert(payload);
-  if (res.error && /standing_order/i.test(res.error.message || '')) {
-    const { is_standing_order, standing_order_amount, ...rest } = payload;
-    if (is_standing_order) { toast('עמודות הוראת הקבע חסרות — יש להריץ את המיגרציה standing_orders', true); }
-    res = await db.from('contracts').insert(rest);
-  }
   if (res.error && /payment_plan|cadence|selected_dates|column/i.test(res.error.message || '')) {
-    const { payment_plan, cadence, selected_dates, is_standing_order, standing_order_amount, ...safe } = payload;
+    const { payment_plan, cadence, selected_dates, ...safe } = payload;
     res = await db.from('contracts').insert(safe);
   }
   return res;
@@ -303,193 +264,4 @@ async function dealPayInvoice(contractId, seq) {
   if (typeof invOpenModal === 'function') {
     await invOpenModal(cust, 'invoice_receipt', true, { lines: [{ details: 'תשלום עבור חבילת פרסום — ' + (nameOf('priceList', ct.price_item_id) || '') + ' (תשלום #' + seq + ')', amount: 1, price: amt }], vatInc: false });
   } else { toast('מודל החשבונית לא זמין', true); }
-}
-
-/* ============================================================
-   הוראות קבע (פיצ'ר #2) — יצירת חיוב חודשי + התראת כשל תשלום
-   ------------------------------------------------------------
-   יוצר רשומות חיוב (charges) בלבד — שום הפקת מסמך, גבייה או
-   חיוב כספי בפועל. חיוב הו"ק של החודש הקודם שלא שולם עד מועד
-   הפירעון → אירוע payment_failed למנוע ההתראות (#23).
-   ============================================================ */
-
-function _soMark(contractId) { return '[הו"ק חוזה ' + contractId + ']'; }
-function _soAutoOn() { return String((cache.settings || {}).standing_orders_auto || '0') === '1'; }
-function _soPrevYm(ym) {
-  const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, m - 2, 1);
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-}
-
-/* יצירת חיובי הוראות קבע לחודש (ברירת מחדל: החודש הנוכחי) */
-async function standingOrdersRun(ym, silent) {
-  ym = ym || new Date().toISOString().slice(0, 7);
-  let contracts = [];
-  try {
-    contracts = await run(db.from('contracts').select('*').eq('is_standing_order', true).eq('active', true));
-  } catch (e) {
-    if (!silent) toast('עמודות הוראת הקבע חסרות — יש להריץ את המיגרציה standing_orders', true);
-    return null;
-  }
-  const out = { created: 0, skipped: 0, alerts: 0, missing_amount: 0 };
-  const [y, m] = ym.split('-').map(Number);
-  const lastDay = String(new Date(y, m, 0).getDate()).padStart(2, '0');
-
-  // חיובי הו"ק שכבר קיימים לחודש — מניעת כפילות
-  let existing = [];
-  try {
-    existing = await run(db.from('charges').select('id,description')
-      .gte('issued_date', ym + '-01').lte('issued_date', ym + '-' + lastDay)
-      .ilike('description', '%[הו"ק חוזה %'));
-  } catch (e) { }
-
-  for (const ct of contracts) {
-    if (existing.some(ch => (ch.description || '').includes(_soMark(ct.id)))) { out.skipped++; continue; }
-    const amt = Number(ct.standing_order_amount) || 0;
-    if (!(amt > 0)) { out.missing_amount++; continue; }
-    const pkg = (typeof nameOf === 'function' ? nameOf('priceList', ct.price_item_id) : '') || 'חוזה';
-    try {
-      await run(db.from('charges').insert({
-        customer_id: ct.customer_id,
-        amount: amt,
-        description: 'הוראת קבע חודשית — ' + pkg + ' — ' + ym + ' ' + _soMark(ct.id),
-        issued_date: ym + '-01',
-        due_date: ym + '-' + lastDay,
-        status: 'pending',
-        agent_id: ct.agent_id || null,
-        notes: 'נוצר אוטומטית ממנוע הוראות הקבע — טרם הופק מסמך'
-      }));
-      out.created++;
-    } catch (e) { console.error('standing-orders insert', e); }
-  }
-
-  // כשל תשלום: חיובי הו"ק של החודש הקודם שמועד הפירעון שלהם עבר ולא שולמו
-  try {
-    const prev = _soPrevYm(ym);
-    const [py, pm] = prev.split('-').map(Number);
-    const prevLast = String(new Date(py, pm, 0).getDate()).padStart(2, '0');
-    const prevCharges = await run(db.from('charges').select('id,customer_id,amount,status,due_date,description')
-      .gte('issued_date', prev + '-01').lte('issued_date', prev + '-' + prevLast)
-      .ilike('description', '%[הו"ק חוזה %')
-      .in('status', ['pending', 'invoiced', 'partial', 'overdue']));
-    const dueList = (prevCharges || []).filter(c => c.due_date && c.due_date < today());
-    if (dueList.length) {
-      const paidBy = {};
-      try {
-        const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', dueList.map(c => c.id)));
-        pays.forEach(p => paidBy[p.charge_id] = (paidBy[p.charge_id] || 0) + Number(p.amount || 0));
-      } catch (e) { }
-      for (const ch of dueList) {
-        const bal = Number(ch.amount || 0) - (paidBy[ch.id] || 0);
-        if (bal <= 0.005) continue;
-        if (typeof alertsPublishEvent === 'function') {
-          await alertsPublishEvent('payment_failed', {
-            customer_id: ch.customer_id,
-            customer_name: (typeof nameOf === 'function' ? nameOf('customers', ch.customer_id) : '') || ('לקוח #' + ch.customer_id),
-            amount: Math.round(bal * 100) / 100,
-            charge_id: ch.id
-          }, 'standing_orders');
-          out.alerts++;
-        }
-      }
-    }
-  } catch (e) { console.error('standing-orders failures', e); }
-
-  try {
-    await db.from('settings').upsert({ key: 'standing_orders_last', value: ym });
-    cache.settings.standing_orders_last = ym;
-  } catch (e) { }
-  if (!silent) toast(`הוראות קבע ${ym}: נוצרו ${out.created} חיובים` +
-    (out.skipped ? ` · ${out.skipped} כבר קיימים` : '') +
-    (out.missing_amount ? ` · ${out.missing_amount} בלי סכום חודשי!` : '') +
-    (out.alerts ? ` · ${out.alerts} דיווחי כשל תשלום` : ''));
-  return out;
-}
-
-/* ריצה אוטומטית פעם בחודש בכניסת מנהל — רק כשהמתג דלוק */
-async function standingOrdersAutoCheck() {
-  try {
-    if (typeof profile === 'undefined' || profile.role !== 'admin') return;
-    if (!_soAutoOn()) return;
-    const ym = new Date().toISOString().slice(0, 7);
-    if ((cache.settings || {}).standing_orders_last === ym) return;
-    const r = await standingOrdersRun(ym, true);
-    if (r && (r.created || r.alerts)) toast(`🔁 הוראות קבע: נוצרו ${r.created} חיובים לחודש${r.alerts ? ' · ' + r.alerts + ' דיווחי כשל' : ''}`);
-  } catch (e) { }
-}
-
-/* כרטיס ההגדרות */
-function standingOrdersCard() {
-  const s = cache.settings || {};
-  return `
-<div class="card card-pad">
-<b>הוראות קבע לחוזים 🔁</b>
-<p class="muted" style="font-size:.82rem">חוזה שסומן "הוראת קבע" מקבל רשומת חיוב חודשית אוטומטית (בגבייה). יצירת רשומה בלבד — הפקת מסמך וגבייה בפועל נשארות ידניות. חיוב שלא שולם עד מועד הפירעון מדווח למנוע ההתראות ככשל תשלום.</p>
-<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
-<input type="checkbox" id="setSoAuto" ${_soAutoOn() ? 'checked' : ''} onchange="standingOrdersToggleAuto(this.checked)" style="width:18px;height:18px">
-יצירה אוטומטית פעם בחודש (בכניסה הראשונה של מנהל)
-</label>
-<p class="muted" style="font-size:.78rem;margin-top:4px">${s.standing_orders_last ? 'רץ לאחרונה: ' + esc(s.standing_orders_last) + '.' : 'טרם רץ.'}</p>
-<div style="display:flex;gap:8px;margin-top:10px">
-<button class="btn btn-sm" onclick="standingOrdersRun()">🔁 צור חיובי החודש עכשיו</button>
-</div>
-</div>`;
-}
-
-async function standingOrdersToggleAuto(on) {
-  await run(db.from('settings').upsert({ key: 'standing_orders_auto', value: on ? '1' : '0' }));
-  cache.settings.standing_orders_auto = on ? '1' : '0';
-  toast(on ? 'יצירה אוטומטית הופעלה — תרוץ פעם בחודש' : 'יצירה אוטומטית כובתה (הכפתור הידני עדיין עובד)');
-}
-
-/* ============================================================
-   מעקב חבילות (פיצ'ר #6) — שיוך מודעה לחבילה פעילה
-   ------------------------------------------------------------
-   החבילות הן החוזים הקיימים (total_inserts / ניצול לפי ads.contract_id).
-   כאן: איתור חבילה פעילה עם יתרה, ושיוך מודעה ידנית אליה כדי
-   שהמונה "X מתוך Y" ירד גם על מודעות שלא נוצרו אוטומטית.
-   ============================================================ */
-
-/* חבילות פעילות עם יתרת ניצול ללקוח: [{ct, used, total, left}] */
-async function packagesWithRemaining(customerId) {
-  let contracts = [];
-  try {
-    contracts = await run(db.from('contracts').select('*').eq('customer_id', customerId).eq('active', true));
-  } catch (e) { return []; }
-  if (!contracts.length) return [];
-  const out = [];
-  for (const ct of contracts) {
-    const total = Number(ct.total_inserts) || 0;
-    if (!total) continue;
-    let count = 0;
-    try {
-      const r = await db.from('ads').select('id', { count: 'exact', head: true })
-        .eq('contract_id', ct.id).not('status', 'in', '("cancelled","rejected")');
-      count = r.count || 0;
-    } catch (e) { }
-    const used = count + (Number(ct.used_offset) || 0);
-    if (used < total) out.push({ ct, used, total, left: total - used });
-  }
-  return out;
-}
-
-/* שיוך מודעה חדשה לחבילה פעילה (נקרא אחרי שמירת מודעה ידנית).
-   חבילה אחת → שיוך אוטומטי; כמה → בחירה; אין → לא קורה כלום. */
-async function packageLinkAd(adId, customerId) {
-  try {
-    const pkgs = await packagesWithRemaining(customerId);
-    if (!pkgs.length) return;
-    let chosen = pkgs[0];
-    if (pkgs.length > 1) {
-      const menu = pkgs.map((p, i) => `${i + 1}. ${nameOf('priceList', p.ct.price_item_id) || 'חבילה'} — נותרו ${p.left} מתוך ${p.total}`).join('\n');
-      const raw = prompt(`ללקוח כמה חבילות פעילות — לאיזו לשייך את המודעה?\n${menu}\n\n(מספר, או ביטול לבלי שיוך)`, '1');
-      if (raw === null) return;
-      chosen = pkgs[Math.min(pkgs.length, Math.max(1, Number(raw) || 1)) - 1];
-    } else {
-      if (!confirm(`ללקוח חבילה פעילה: ${nameOf('priceList', chosen.ct.price_item_id) || 'חבילה'} — נותרו ${chosen.left} מתוך ${chosen.total}.\nלשייך את המודעה לחבילה? (המונה יירד)`)) return;
-    }
-    await run(db.from('ads').update({ contract_id: chosen.ct.id }).eq('id', adId));
-    await addInteraction('ad', adId, `שויך לחבילה (${nameOf('priceList', chosen.ct.price_item_id) || ''}) — נותרו ${chosen.left - 1} מתוך ${chosen.total}`);
-    toast(`✓ שויך לחבילה — נותרו ${chosen.left - 1} מתוך ${chosen.total}` + (chosen.left - 1 === 0 ? ' · החבילה נוצלה! 🎉' : ''));
-  } catch (e) { console.error('package link', e); }
 }

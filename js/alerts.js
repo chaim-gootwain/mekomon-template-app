@@ -12,12 +12,7 @@
 
 'use strict';
 
-const ALERTS_EVENT_NAMES = {
-  debt_over_threshold: 'חוב שחצה סף',
-  issue_deadline: 'דדליין מודעות לגיליון',
-  payment_failed: 'תשלום שנכשל',
-  check_bounced: "צ'ק שחזר"
-};
+const ALERTS_EVENT_NAMES = { debt_over_threshold: 'חוב שחצה סף' };
 const ALERTS_CHANNEL_NAMES = { inapp: 'מערכת', email: 'מייל', whatsapp: 'וואטסאפ' };
 const ALERTS_SEV_ICONS = { info: 'ℹ️', warning: '⚠️', critical: '🚨' };
 
@@ -25,25 +20,6 @@ let _alertsList = [];
 let _alertsRules = [];
 
 function alertsOn() { return String((cache.settings || {}).alerts_enabled || '0') === '1'; }
-
-/* ==================== פרסום אירוע — נקודת הכניסה למודולים ==================== */
-
-// כל מודול במערכת מדווח אירוע למנוע בקריאה אחת, למשל:
-//   alertsPublishEvent('check_bounced', { customer_id, customer_name, amount });
-// המנוע (alerts-engine) יהפוך אותו להתראה לפי הכללים. כישלון — שקט,
-// כדי שדיווח התראה לעולם לא יפיל את הפעולה העסקית שקראה לו.
-async function alertsPublishEvent(eventType, payload, source) {
-  if (!alertsOn()) return null;
-  try {
-    const { data, error } = await db.rpc('alerts_publish_event', {
-      p_event_type: eventType,
-      p_payload: payload || {},
-      p_source: source || 'app'
-    });
-    if (error) throw error;
-    return data;
-  } catch (e) { return null; }
-}
 
 /* ==================== פעמון ומגירה ==================== */
 
@@ -92,9 +68,8 @@ function alertsRenderDrop() {
       ${unread ? '<button class="btn btn-sm btn-ghost" onclick="alertsMarkAllRead()">סמן הכל כנקרא</button>' : ''}
     </div>` + (items.length ? items.map(a => {
     const payload = (a.alert_events && a.alert_events.payload) || {};
-    const cid = payload.customer_id, iid = payload.issue_id;
-    const openClick = cid ? `onclick="alertsCloseDrop();openCustomerCard(${Number(cid)})" style="cursor:pointer"` :
-      iid ? `onclick="alertsCloseDrop();openFlatplan(${Number(iid)})" style="cursor:pointer"` : '';
+    const cid = payload.customer_id;
+    const openClick = cid ? `onclick="alertsCloseDrop();openCustomerCard(${Number(cid)})" style="cursor:pointer"` : '';
     return `<div class="notif-item" style="${a.status === 'new' ? '' : 'opacity:.65'}">
       <div class="notif-row" ${openClick}>
         <span class="notif-ico">${ALERTS_SEV_ICONS[a.severity] || 'ℹ️'}</span>
@@ -178,18 +153,14 @@ function alertsSettingsCard() {
 <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px">
 <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
 <input type="checkbox" id="setAlertsEmail" ${String(s.alerts_email_enabled || '0') === '1' ? 'checked' : ''} onchange="alertsToggleChannel('email',this.checked)" style="width:18px;height:18px">
-ערוץ מייל
+ערוץ מייל <span class="pill">בהכנה — אין ספק מוגדר</span>
 </label>
-<span class="field" style="margin:0;display:flex;gap:6px;align-items:center">נמען:
-<input id="setAlertsEmailTo" type="email" value="${esc(s.alerts_email_to || '')}" dir="ltr" placeholder="name@example.com" style="width:200px">
-<button class="btn btn-sm" onclick="alertsSaveEmailTo()">שמירה</button>
-</span>
 <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
 <input type="checkbox" id="setAlertsWa" ${String(s.alerts_whatsapp_enabled || '0') === '1' ? 'checked' : ''} onchange="alertsToggleChannel('whatsapp',this.checked)" style="width:18px;height:18px">
 ערוץ וואטסאפ <span class="pill">בהכנה — אין ספק מוגדר</span>
 </label>
 </div>
-<p class="muted" style="font-size:.78rem;margin-top:4px">ערוץ המייל שולח דרך send-email (Gmail) — דורש מתג דלוק + נמען. וואטסאפ לא שולח דבר עד שיוגדר ספק — גם כשהמתג דלוק.</p>
+<p class="muted" style="font-size:.78rem;margin-top:4px">נמענים בשלב זה: מנהל המערכת בלבד. ערוצי מייל/וואטסאפ לא שולחים דבר עד שיוגדר ספק — גם כשהמתג דלוק.</p>
 <div id="alertsRulesBox" style="margin-top:10px"><div class="empty">טוען כללים...</div></div>
 <div style="display:flex;gap:8px;margin-top:10px">
 <button class="btn btn-sm btn-ghost" onclick="alertsRunNow()">▶ הרץ סריקה עכשיו</button>
@@ -205,7 +176,6 @@ async function alertsSettingsMount() {
   if (!_alertsRules.length) { box.innerHTML = '<p class="muted">אין כללים מוגדרים.</p>'; return; }
   box.innerHTML = _alertsRules.map(r => {
     const th = (r.condition && r.condition.threshold != null) ? r.condition.threshold : '';
-    const hb = (r.condition && r.condition.hours_before != null) ? r.condition.hours_before : '';
     const chans = r.channels || [];
     return `<div class="notif-item" style="border:1px solid #eef1f7;border-radius:10px;margin-bottom:8px">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -214,7 +184,6 @@ async function alertsSettingsMount() {
           <b>${esc(ALERTS_EVENT_NAMES[r.event_type] || r.event_type)}</b>
         </label>
         ${th !== '' ? `<span class="field" style="margin:0">סף (₪): <input id="ruleTh_${r.id}" type="number" value="${esc(th)}" dir="ltr" style="width:90px"></span>` : ''}
-        ${hb !== '' ? `<span class="field" style="margin:0">שעות לפני: <input id="ruleHb_${r.id}" type="number" value="${esc(hb)}" dir="ltr" style="width:70px"></span>` : ''}
         <span class="field" style="margin:0">בלימה (שעות): <input id="ruleHrs_${r.id}" type="number" value="${esc(r.throttle_hours)}" dir="ltr" style="width:64px"></span>
         <span style="display:flex;gap:10px">
           ${['inapp', 'email', 'whatsapp'].map(c => `<label style="display:flex;gap:4px;align-items:center;cursor:pointer">
@@ -241,16 +210,7 @@ async function alertsToggleChannel(chan, on) {
   const key = chan === 'email' ? 'alerts_email_enabled' : 'alerts_whatsapp_enabled';
   await run(db.from('settings').upsert({ key, value: on ? '1' : '0' }));
   cache.settings[key] = on ? '1' : '0';
-  if (chan === 'email') toast(on ? 'ערוץ המייל הופעל — ודא שהוגדר נמען' : 'ערוץ המייל כובה');
-  else toast('נשמר. שים לב: וואטסאפ לא ישלח דבר עד שיוגדר ספק.');
-}
-
-async function alertsSaveEmailTo() {
-  const v = String(document.getElementById('setAlertsEmailTo')?.value || '').trim();
-  if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { toast('כתובת מייל לא תקינה', true); return; }
-  await run(db.from('settings').upsert({ key: 'alerts_email_to', value: v }));
-  cache.settings.alerts_email_to = v;
-  toast(v ? 'נמען ההתראות נשמר' : 'הנמען נמחק — ערוץ המייל לא ישלח');
+  toast('נשמר. שים לב: הערוץ לא ישלח דבר עד שיוגדר ספק.');
 }
 
 async function alertsRuleSave(id) {
@@ -261,12 +221,6 @@ async function alertsRuleSave(id) {
     const th = Number(thEl.value);
     if (!Number.isFinite(th) || th <= 0) { toast('סף לא תקין', true); return; }
     patch.condition = Object.assign({}, r.condition, { threshold: th });
-  }
-  const hbEl = document.getElementById('ruleHb_' + id);
-  if (hbEl) {
-    const hb = Number(hbEl.value);
-    if (!Number.isFinite(hb) || hb <= 0) { toast('מספר שעות לא תקין', true); return; }
-    patch.condition = Object.assign({}, patch.condition || r.condition, { hours_before: Math.round(hb) });
   }
   const hrs = Number(document.getElementById('ruleHrs_' + id)?.value);
   patch.throttle_hours = (Number.isFinite(hrs) && hrs > 0) ? Math.round(hrs) : 24;

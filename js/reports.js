@@ -21,10 +21,6 @@ const reports = [
 { id: 'unsold', title: '📭 שטח שלא נמכר', desc: 'עמודים ריקים בכל גיליון — פוטנציאל מכירה', roles: ['admin', 'sales', 'editor'] },
 { id: 'churn', title: '⚠️ לקוחות שהפסיקו', desc: 'מפרסמים שלא חזרו — הזדמנות לחידוש', roles: ['admin', 'sales'] },
 { id: 'customer', title: '🏪 היסטוריית לקוח', desc: 'כל הפרסומים, החיובים והתשלומים', roles: ['admin', 'sales'] },
-{ id: 'ledger', title: '📒 כרטסות לרו"ח', desc: 'ייצוא חודשי לאקסל — כל תנועות הלקוחות עם יתרה רצה', roles: ['admin'] },
-{ id: 'weekly', title: '🗓️ דוח שבועי תפעולי', desc: 'מה נסגר, מה נכנס ומה תקוע — לשבוע שנבחר', roles: ['admin', 'sales'] },
-{ id: 'agencies', title: '🏢 עמלות סוכנויות', desc: 'מחזור חודשי פר סוכנות × אחוז העמלה — תצוגה בלבד', roles: ['admin'] },
-{ id: 'profit', title: '📊 רווחיות', desc: 'פר גיליון / סוכן / לקוח — מי מכניס, מה רווחי, מי שוחק', roles: ['admin'] },
 ].filter(r => r.roles.includes(role));
 
 el.innerHTML = `
@@ -143,58 +139,33 @@ ${Object.entries(bySource).map(([s, n]) => `<tr><td>${esc(s)}</td><td>${n}</td><
 `exportCsv('משפך_מכירות', ['שלב','לידים'], _repData)`);
 }
 
-/* ---------- גיול חובות — פר לקוח, יתרות אמת (פיצ'ר #9) ---------- */
-// יתרה פר חיוב = סכום פחות תשלומים (תשלום חלקי לא נספר כחוב).
-// כל לקוח בשורה: היתרה מפוצלת לחלונות זמן לפי ימי האיחור, ממוין
-// מהחוב הגבוה לנמוך. סוכן מכירות רואה רק את הלקוחות שלו.
-const AGING_BUCKETS = ['שוטף', '1-30 יום', '31-60 יום', '61-90 יום', 'מעל 90 יום'];
-
+/* ---------- גיול חובות ---------- */
 async function report_aging() {
-const charges = await run(db.from('charges').select('id,customer_id,amount,status,due_date').in('status', ['pending', 'invoiced', 'partial', 'overdue']));
-const ids = charges.map(c => c.id);
-const paid = {};
-if (ids.length) {
-try {
-const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', ids));
-pays.forEach(p => paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount || 0));
-} catch (e) { }
-}
-// סוכן רואה רק את הלקוחות שלו (בנוסף ל-RLS בצד השרת)
-const mine = (typeof myAgentId === 'function') ? myAgentId() : null;
-const custAgent = {}; (cache.customers || []).forEach(c => custAgent[c.id] = c.agent_id);
+const charges = await run(db.from('charges').select('*').in('status', ['pending', 'invoiced', 'partial', 'overdue']));
+const buckets = { 'שוטף': [], '1-30 יום': [], '31-60 יום': [], '61-90 יום': [], 'מעל 90 יום': [] };
 const now = new Date();
-const byCust = {};
 charges.forEach(c => {
-if (profile.role === 'sales' && custAgent[c.customer_id] !== mine) return;
-const bal = Number(c.amount || 0) - (paid[c.id] || 0);
-if (bal <= 0.005) return;
-const days = c.due_date ? Math.floor((now - new Date(c.due_date)) / 86400000) : 0;
-const bi = days <= 0 ? 0 : days <= 30 ? 1 : days <= 60 ? 2 : days <= 90 ? 3 : 4;
-const row = byCust[c.customer_id] = byCust[c.customer_id] || { buckets: [0, 0, 0, 0, 0], total: 0, oldest: 0 };
-row.buckets[bi] += bal; row.total += bal;
-if (days > row.oldest) row.oldest = days;
+const due = c.due_date ? new Date(c.due_date) : null;
+const days = due ? Math.floor((now - due) / 86400000) : 0;
+const b = days <= 0 ? 'שוטף' : days <= 30 ? '1-30 יום' : days <= 60 ? '31-60 יום' : days <= 90 ? '61-90 יום' : 'מעל 90 יום';
+buckets[b].push(c);
 });
-const rows = Object.entries(byCust)
-.map(([cid, v]) => ({ cid: Number(cid), name: nameOf('customers', Number(cid)) || ('לקוח #' + cid), ...v }))
-.sort((a, b) => b.total - a.total);
-const colSum = [0, 0, 0, 0, 0]; let grand = 0;
-rows.forEach(r => { r.buckets.forEach((v, i) => colSum[i] += v); grand += r.total; });
-_repData = rows.map(r => [r.name, ...r.buckets.map(v => Math.round(v * 100) / 100), Math.round(r.total * 100) / 100, r.oldest]);
-const fmt = v => v > 0.005 ? money(v) : '—';
-reportShell(`גיול חובות — ${rows.length} לקוחות · ${money(grand) || '₪0'} סה"כ`, `
-<p class="muted" style="font-size:.8rem;margin-bottom:8px">יתרה אמיתית (אחרי תשלומים חלקיים), מפוצלת לפי ימי איחור מתאריך היעד. ממוין מהחוב הגבוה לנמוך.</p>
-<table class="data"><thead><tr><th>לקוח</th>${AGING_BUCKETS.map(b => `<th>${b}</th>`).join('')}<th>סה"כ</th><th>ותק מרבי</th><th></th></tr></thead><tbody>
-${rows.map(r => `<tr>
-<td><b>${esc(r.name)}</b></td>
-${r.buckets.map((v, i) => `<td style="${i >= 3 && v > 0.005 ? 'color:var(--danger);font-weight:600' : ''}">${fmt(v)}</td>`).join('')}
-<td><b>${money(r.total)}</b></td>
-<td>${r.oldest > 0 ? r.oldest + ' ימים' : '—'}</td>
-<td style="white-space:nowrap">${typeof collReminderBtn === 'function' ? collReminderBtn(r.cid, r.total) : ''} <button class="btn btn-sm btn-ghost" onclick="customerStatement(${r.cid})">📄</button></td>
-</tr>`).join('') || `<tr><td colspan="${AGING_BUCKETS.length + 4}">אין חובות פתוחים 🎉</td></tr>`}
-</tbody>
-${rows.length ? `<tfoot><tr style="border-top:2px solid var(--line)"><td><b>סה"כ</b></td>${colSum.map(v => `<td><b>${fmt(v)}</b></td>`).join('')}<td><b>${money(grand)}</b></td><td></td><td></td></tr></tfoot>` : ''}
-</table>`,
-`exportCsv('גיול_חובות', ['לקוח',${AGING_BUCKETS.map(b => `'${b}'`).join(',')},'סה"כ','ותק_מרבי_ימים'], _repData)`);
+_repData = [];
+reportShell('גיול חובות', `
+<table class="data"><thead><tr><th>טווח</th><th>חיובים</th><th>סכום</th></tr></thead><tbody>
+${Object.entries(buckets).map(([b, list]) => {
+const sum = list.reduce((s, c) => s + Number(c.amount), 0);
+_repData.push([b, list.length, sum]);
+return `<tr><td>${b}</td><td>${list.length}</td><td><b>${money(sum) || '—'}</b></td></tr>`;
+}).join('')}
+</tbody></table>
+<br><b style="font-size:.9rem">פירוט מעל 30 יום:</b>
+<table class="data"><thead><tr><th>לקוח</th><th>סכום</th><th>תאריך יעד</th></tr></thead><tbody>
+${[...buckets['31-60 יום'], ...buckets['61-90 יום'], ...buckets['מעל 90 יום']]
+.map(c => `<tr><td>${esc(nameOf('customers', c.customer_id))}</td><td>${money(c.amount)}</td><td>${heDate(c.due_date)}</td></tr>`).join('')
+|| '<tr><td colspan="3">אין 🎉</td></tr>'}
+</tbody></table>`,
+`exportCsv('גיול_חובות', ['טווח','חיובים','סכום'], _repData)`);
 }
 
 /* ---------- דו"ח גיליון ---------- */
@@ -356,313 +327,4 @@ async function report_pnl() {
     </table>
     <p class="muted" style="font-size:.78rem;margin-top:8px">הכנסות = שווי המודעות (נטו) לפי חודש הסגירה לדפוס של הגיליון · הוצאות = עלויות נטו שהוזנו (כולל עלויות הגיליון). מספרים ללא מע"מ.</p>`,
     `exportCsv('רווח_והפסד', ['חודש','הכנסות','הוצאות','רווח'], _repData)`);
-}
-
-/* ---------- כרטסות לרו"ח: ייצוא חודשי של כל התנועות (פיצ'ר #4) ---------- */
-// קריאה בלבד: charges + payments. לכל לקוח — יתרת פתיחה, תנועות התקופה
-// (חובה/זכות) ויתרה רצה. יוצא כקובץ Excel (גיליון RTL) דרך SheetJS הטעון.
-function report_ledger() {
-  const d = new Date(); d.setMonth(d.getMonth() - 1);
-  const defMonth = d.toISOString().slice(0, 7);
-  document.getElementById('reportArea').innerHTML = `
-<div class="card-pad">
-<b>📒 כרטסות לרו"ח — ייצוא חודשי</b>
-<p class="muted" style="font-size:.82rem;margin-top:4px">כל תנועות החיובים והתשלומים של כל הלקוחות בטווח שנבחר, עם יתרת פתיחה ויתרה רצה פר לקוח. קריאה בלבד — שום דבר לא משתנה במערכת.</p>
-<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:end">
-<div class="field" style="margin:0"><label style="font-size:.8rem">חודש</label><input id="ledMonth" type="month" value="${defMonth}"></div>
-<span class="muted" style="font-size:.8rem">או טווח:</span>
-<div class="field" style="margin:0"><label style="font-size:.8rem">מתאריך</label><input id="ledFrom" type="date"></div>
-<div class="field" style="margin:0"><label style="font-size:.8rem">עד תאריך</label><input id="ledTo" type="date"></div>
-<button class="btn btn-sm" onclick="reportLedgerRun()">הצגה</button>
-<button class="btn btn-sm btn-ghost" onclick="reportLedgerExport()">⬇ ייצוא לאקסל</button>
-</div>
-<div id="repTable" class="table-wrap" style="margin-top:14px"><div class="empty">בחר חודש (או טווח) ולחץ הצגה / ייצוא</div></div>
-</div>`;
-}
-
-function _ledRange() {
-  const from = document.getElementById('ledFrom')?.value;
-  const to = document.getElementById('ledTo')?.value;
-  if (from && to) return { from, to };
-  const m = document.getElementById('ledMonth')?.value;
-  if (!m) return null;
-  const [y, mo] = m.split('-').map(Number);
-  const last = new Date(y, mo, 0).getDate();
-  return { from: `${m}-01`, to: `${m}-${String(last).padStart(2, '0')}` };
-}
-
-// אוסף את כל התנועות עד סוף הטווח ומפצל ליתרת פתיחה + תנועות התקופה
-async function _ledGather() {
-  const range = _ledRange();
-  if (!range) { toast('בחר חודש או טווח תאריכים', true); return null; }
-  const [charges, payments] = await Promise.all([
-    run(db.from('charges').select('id,customer_id,amount,status,issued_date,description,invoice_number').lte('issued_date', range.to).limit(20000)),
-    run(db.from('payments').select('id,customer_id,charge_id,amount,method,paid_date,check_due_date').lte('paid_date', range.to).limit(20000)),
-  ]);
-  const dead = c => ['cancelled', 'lost'].includes(c.status);
-  const chargeCust = {}; charges.forEach(c => chargeCust[c.id] = c.customer_id);
-  const byCust = {};
-  const ent = (cid, e) => { (byCust[cid] = byCust[cid] || []).push(e); };
-  charges.forEach(c => {
-    if (dead(c)) return;
-    ent(c.customer_id, { date: c.issued_date || '', kind: 'חיוב', desc: c.description || 'חיוב', ref: c.invoice_number || '', debit: Number(c.amount || 0), credit: 0 });
-  });
-  payments.forEach(p => {
-    const cid = p.customer_id || chargeCust[p.charge_id];
-    if (!cid) return;
-    const method = (typeof PAY_METHODS !== 'undefined' && PAY_METHODS[p.method]) ? PAY_METHODS[p.method] : (p.method || '');
-    ent(cid, { date: p.paid_date || '', kind: 'תשלום', desc: 'תשלום (' + method + ')' + (p.check_due_date ? ' · פירעון ' + heDate(p.check_due_date) : ''), ref: '', debit: 0, credit: Number(p.amount || 0) });
-  });
-
-  const custs = Object.keys(byCust)
-    .map(cid => ({ cid: Number(cid), name: nameOf('customers', Number(cid)) || ('לקוח #' + cid) }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'he'));
-  const out = [];
-  custs.forEach(cu => {
-    const list = byCust[cu.cid].sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.kind === 'חיוב' ? -1 : 1));
-    let opening = 0; const period = [];
-    list.forEach(e => {
-      if (e.date < range.from) opening += e.debit - e.credit;
-      else period.push(e);
-    });
-    if (!period.length && Math.abs(opening) < 0.005) return; // אין פעילות ואין יתרה — לא מייצאים
-    let bal = opening;
-    const rows = period.map(e => { bal += e.debit - e.credit; return { ...e, balance: bal }; });
-    out.push({ ...cu, opening, rows, closing: bal });
-  });
-  return { range, custs: out };
-}
-
-async function reportLedgerRun() {
-  toast('אוסף תנועות...');
-  const data = await _ledGather(); if (!data) return;
-  const totC = data.custs.reduce((s, c) => s + c.rows.reduce((x, r) => x + r.debit, 0), 0);
-  const totP = data.custs.reduce((s, c) => s + c.rows.reduce((x, r) => x + r.credit, 0), 0);
-  document.getElementById('repTable').innerHTML = `
-<div class="stats" style="margin-bottom:10px">
-${stat(data.custs.length, 'לקוחות עם פעילות/יתרה')}
-${stat(money(totC) || '₪0', 'חיובים בתקופה')}
-${stat(money(totP) || '₪0', 'תשלומים בתקופה')}
-</div>
-${data.custs.map(cu => `
-<div style="margin-bottom:14px">
-<b>${esc(cu.name)}</b> <span class="muted" style="font-size:.8rem">יתרת פתיחה: ${money(cu.opening) || '₪0'} · יתרת סגירה: <b style="color:${cu.closing > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(cu.closing) || '₪0'}</b></span>
-${cu.rows.length ? `<table class="data" style="margin-top:4px"><thead><tr><th>תאריך</th><th>סוג</th><th>פירוט</th><th>חשבונית</th><th>חובה</th><th>זכות</th><th>יתרה</th></tr></thead><tbody>
-${cu.rows.map(r => `<tr><td>${heDate(r.date)}</td><td>${r.kind}</td><td>${esc(r.desc)}</td><td>${esc(r.ref || '—')}</td><td>${r.debit ? money(r.debit) : '—'}</td><td>${r.credit ? money(r.credit) : '—'}</td><td><b>${money(r.balance)}</b></td></tr>`).join('')}
-</tbody></table>` : '<div class="muted" style="font-size:.8rem">אין תנועות בתקופה (יתרה קודמת בלבד)</div>'}
-</div>`).join('') || '<div class="empty">אין תנועות ואין יתרות בטווח שנבחר</div>'}`;
-}
-
-async function reportLedgerExport() {
-  toast('מכין קובץ לרו"ח...');
-  const data = await _ledGather(); if (!data) return;
-  if (!data.custs.length) { toast('אין תנועות ואין יתרות בטווח שנבחר', true); return; }
-  const headers = ['לקוח', 'תאריך', 'סוג', 'פירוט', 'מס\' חשבונית', 'חובה', 'זכות', 'יתרה'];
-  const aoa = [headers];
-  data.custs.forEach(cu => {
-    aoa.push([cu.name, data.range.from, 'יתרת פתיחה', '', '', '', '', round2(cu.opening)]);
-    cu.rows.forEach(r => aoa.push([cu.name, r.date, r.kind, r.desc, r.ref || '', r.debit ? round2(r.debit) : '', r.credit ? round2(r.credit) : '', round2(r.balance)]));
-    aoa.push([cu.name, data.range.to, 'יתרת סגירה', '', '', '', '', round2(cu.closing)]);
-  });
-  const fname = `כרטסות_${data.range.from}_${data.range.to}`;
-  try {
-    if (typeof XLSX === 'undefined') throw new Error('no-xlsx');
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 24 }, { wch: 11 }, { wch: 11 }, { wch: 40 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 11 }];
-    const wb = XLSX.utils.book_new();
-    wb.Workbook = { Views: [{ RTL: true }] };
-    XLSX.utils.book_append_sheet(wb, ws, 'כרטסות');
-    XLSX.writeFile(wb, fname + '.xlsx');
-  } catch (e) {
-    // נפילה חזרה ל-CSV אם ספריית האקסל לא נטענה
-    exportCsv(fname, headers, aoa.slice(1));
-  }
-  toast('✓ הקובץ ירד — מוכן לשליחה לרו"ח');
-}
-
-function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
-
-/* ---------- דוח שבועי תפעולי (פיצ'ר #10) ---------- */
-// נשען על weeklySummaryBuild (הסיכום השבועי, #22) עם טווח לבחירה.
-// נסגר/נכנס נמדדים בטווח; "מה תקוע" ו"חובות" הם תמונת-מצב נוכחית.
-function report_weekly() {
-  const to = today();
-  const from = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
-  document.getElementById('reportArea').innerHTML = `
-<div class="card-pad">
-<b>🗓️ דוח שבועי תפעולי</b>
-<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:end">
-<div class="field" style="margin:0"><label style="font-size:.8rem">מתאריך</label><input id="rwFrom" type="date" value="${from}"></div>
-<div class="field" style="margin:0"><label style="font-size:.8rem">עד תאריך</label><input id="rwTo" type="date" value="${to}"></div>
-<button class="btn btn-sm" onclick="reportWeeklyRun()">הצגה</button>
-<button class="btn btn-sm btn-ghost" onclick="reportWeeklyRun(-7)">◀ שבוע אחורה</button>
-</div>
-<div id="repTable" class="table-wrap" style="margin-top:14px"><div class="empty">בחר טווח ולחץ הצגה</div></div>
-</div>`;
-  reportWeeklyRun();
-}
-
-async function reportWeeklyRun(shiftDays) {
-  const fEl = document.getElementById('rwFrom'), tEl = document.getElementById('rwTo');
-  if (shiftDays) {
-    const sh = d => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + shiftDays); return x.toISOString().slice(0, 10); };
-    fEl.value = sh(fEl.value); tEl.value = sh(tEl.value);
-  }
-  const from = fEl.value, to = tEl.value;
-  if (!from || !to || from > to) { toast('טווח תאריכים לא תקין', true); return; }
-  if (typeof weeklySummaryBuild !== 'function') { toast('מודול הסיכום השבועי לא נטען', true); return; }
-  document.getElementById('repTable').innerHTML = '<div class="empty">אוסף נתונים...</div>';
-  const m = await weeklySummaryBuild(from, to);
-  _repData = [
-    ['מודעות שנסגרו', m.closed ? m.closed.count : '', m.closed ? Math.round(m.closed.total) : ''],
-    ['לידים חדשים', m.leads ? m.leads.count : '', ''],
-    ['מודעות תקועות (כעת)', m.stuck ? m.stuck.adsCount : '', m.stuck ? Math.round(m.stuck.adsSum) : ''],
-    ['לידים ממתינים למעקב (כעת)', m.stuck ? m.stuck.leadsDue : '', ''],
-    ['חוב פתוח (כעת)', m.debts ? m.debts.debtors : '', m.debts ? Math.round(m.debts.total) : ''],
-  ];
-  document.getElementById('repTable').innerHTML = `
-<div class="stats" style="margin-bottom:10px">
-${stat(m.closed ? m.closed.count : '—', 'מודעות נסגרו (' + heDate(from) + '–' + heDate(to) + ')')}
-${stat(m.closed ? (money(m.closed.total) || '₪0') : '—', '₪ שנסגרו בטווח')}
-${stat(m.leads ? m.leads.count : '—', 'לידים חדשים בטווח')}
-${stat(m.stuck ? m.stuck.adsCount : '—', 'מודעות תקועות כעת', m.stuck && m.stuck.adsCount ? 'red' : '')}
-</div>
-${m.leads && m.leads.names.length ? `<p style="font-size:.85rem"><b>לידים שנכנסו:</b> ${m.leads.names.map(esc).join(', ')}${m.leads.count > m.leads.names.length ? ' ועוד ' + (m.leads.count - m.leads.names.length) : ''}</p>` : ''}
-${m.stuck ? `<p style="font-size:.85rem"><b>מה תקוע כעת:</b> ${m.stuck.adsCount} מודעות בלי סגירה בסך ${money(m.stuck.adsSum) || '₪0'}${m.stuck.leadsDue ? ' · ' + m.stuck.leadsDue + ' לידים ממתינים למעקב' : ''}</p>` : ''}
-${m.debts ? `<p style="font-size:.85rem"><b>חובות כעת:</b> ${money(m.debts.total) || '₪0'} אצל ${m.debts.debtors} לקוחות${m.debts.tops.length ? ' — הגדולים: ' + m.debts.tops.slice(0, 3).map(t => esc(t.name) + ' (' + money(t.bal) + ')').join(', ') : ''}</p>` : ''}
-<div style="display:flex;gap:8px;margin-top:8px">
-<button class="btn btn-sm btn-ghost" onclick="exportCsv('דוח_שבועי_${from}_${to}', ['מדד','כמות','₪'], _repData)">⬇ אקסל</button>
-</div>`;
-}
-
-/* ---------- עמלות סוכנויות (פיצ'ר #7) — חישוב תצוגה בלבד ---------- */
-// מחזור החיובים החודשי של לקוחות כל סוכנות × אחוז העמלה שלה.
-// שום תשלום עמלה לא מבוצע מכאן — מספרים להצגה ולהתחשבנות ידנית.
-async function report_agencies() {
-  const agencies = cache.agencies || [];
-  if (!agencies.length) {
-    document.getElementById('reportArea').innerHTML = '<div class="card-pad"><p class="empty">אין סוכנויות מוגדרות — מוסיפים בהגדרות → "סוכנויות פרסום 🏢"</p></div>';
-    return;
-  }
-  const ym = new Date().toISOString().slice(0, 7);
-  const d = new Date(); d.setMonth(d.getMonth() - 1);
-  const prevYm = d.toISOString().slice(0, 7);
-  const charges = await run(db.from('charges').select('customer_id,amount,status,issued_date')
-    .gte('issued_date', prevYm + '-01').not('status', 'in', '("cancelled","lost")'));
-  const custAgency = {}; (cache.customers || []).forEach(c => { if (c.agency_id) custAgency[c.id] = c.agency_id; });
-  const sums = {}; // agency_id -> {cur, prev}
-  charges.forEach(c => {
-    const aid = custAgency[c.customer_id]; if (!aid) return;
-    const m = String(c.issued_date || '').slice(0, 7);
-    const s = sums[aid] = sums[aid] || { cur: 0, prev: 0 };
-    if (m === ym) s.cur += Number(c.amount || 0);
-    else if (m === prevYm) s.prev += Number(c.amount || 0);
-  });
-  _repData = agencies.map(a => {
-    const s = sums[a.id] || { cur: 0, prev: 0 };
-    const pct = Number(a.commission_pct) || 0;
-    const n = (cache.customers || []).filter(c => c.agency_id === a.id).length;
-    return [a.name, n, Math.round(s.cur), Math.round(s.cur * pct) / 100, Math.round(s.prev), Math.round(s.prev * pct) / 100, pct];
-  }).sort((x, y) => y[2] - x[2]);
-  reportShell('עמלות סוכנויות — ' + ym + ' (תצוגה בלבד)', `
-<p class="muted" style="font-size:.8rem;margin-bottom:8px">מחזור = חיובים שהופקו ללקוחות הסוכנות בחודש (בלי מבוטלים/אבודים). העמלה מחושבת להצגה — התשלום לסוכנות ידני.</p>
-<table class="data"><thead><tr><th>סוכנות</th><th>לקוחות</th><th>מחזור ${ym}</th><th>עמלה ${ym}</th><th>מחזור ${prevYm}</th><th>עמלה ${prevYm}</th><th>%</th></tr></thead><tbody>
-${_repData.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${r[1]}</td><td>${money(r[2])}</td><td><b>${money(r[3])}</b></td><td>${money(r[4])}</td><td>${money(r[5])}</td><td>${r[6]}%</td></tr>`).join('')}
-</tbody></table>`,
-    `exportCsv('עמלות_סוכנויות', ['סוכנות','לקוחות','מחזור_נוכחי','עמלה_נוכחית','מחזור_קודם','עמלה_קודמת','אחוז'], _repData)`);
-}
-
-/* ---------- דוח רווחיות (פיצ'ר #3) — מנהל בלבד ---------- */
-// הכנסה = שווי מודעות נטו (מחיר−הנחה, בלי מבוטלות/נדחות).
-// הוצאות גיליון = רשומות expenses המתויגות #issue:<id> (נטו מ-#net:).
-// מנהל בלבד — סוכן לא רואה רווחיות כלל-מערכתית (וגם ה-UI מסתיר).
-let _profitDim = 'issue';
-
-async function report_profit() {
-  if (profile.role !== 'admin') { toast('דוח רווחיות זמין למנהל בלבד', true); return; }
-  document.getElementById('reportArea').innerHTML = `
-<div class="card-pad">
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-<b style="font-size:1.05rem">📊 רווחיות</b>
-<span style="display:flex;gap:6px;align-items:center">
-<select id="profitDim" onchange="_profitDim=this.value; reportProfitRun()">
-<option value="issue" ${_profitDim === 'issue' ? 'selected' : ''}>לפי גיליון</option>
-<option value="agent" ${_profitDim === 'agent' ? 'selected' : ''}>לפי סוכן</option>
-<option value="customer" ${_profitDim === 'customer' ? 'selected' : ''}>לפי לקוח</option>
-</select>
-<button class="btn btn-sm btn-ghost" onclick="exportCsv('רווחיות_' + _profitDim, _profitHead, _repData)">⬇ אקסל</button>
-</span>
-</div>
-<div id="repTable" class="table-wrap" style="margin-top:12px"><div class="empty">טוען...</div></div>
-</div>`;
-  reportProfitRun();
-}
-
-let _profitHead = [];
-async function reportProfitRun() {
-  const box = document.getElementById('repTable'); if (!box) return;
-  box.innerHTML = '<div class="empty">מחשב...</div>';
-  const [ads, expenses] = await Promise.all([
-    run(db.from('ads').select('issue_id,customer_id,price,discount,status').not('status', 'in', '("cancelled","rejected")').limit(10000)),
-    run(db.from('expenses').select('amount,notes').ilike('notes', '%#issue:%').limit(5000)),
-  ]);
-  const net = a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
-  const listPrice = a => Number(a.price) || 0;
-  const priced = ads.filter(a => net(a) > 0 || listPrice(a) > 0);
-  const expByIssue = {};
-  expenses.forEach(e => {
-    const m = String(e.notes || '').match(/#issue:(\d+)/); if (!m) return;
-    const nm = String(e.notes || '').match(/#net:([0-9.]+)/);
-    expByIssue[Number(m[1])] = (expByIssue[Number(m[1])] || 0) + (nm ? Number(nm[1]) : Number(e.amount || 0));
-  });
-  const custAgent = {}; (cache.customers || []).forEach(c => custAgent[c.id] = c.agent_id);
-  const R = Math.round;
-  let head, rows, html;
-
-  if (_profitDim === 'issue') {
-    const by = {};
-    priced.forEach(a => { if (!a.issue_id) return; const b = by[a.issue_id] = by[a.issue_id] || { rev: 0, count: 0 }; b.rev += net(a); b.count++; });
-    const items = Object.entries(by).map(([iid, v]) => {
-      const iss = (cache.issues || []).find(i => i.id === Number(iid));
-      const exp = expByIssue[Number(iid)] || 0;
-      return { label: iss ? 'גיליון ' + iss.issue_number : 'גיליון #' + iid, sort: iss ? iss.issue_number : 0, rev: v.rev, exp, profit: v.rev - exp, count: v.count };
-    }).sort((a, b) => b.sort - a.sort);
-    head = ['גיליון', 'מודעות', 'הכנסה נטו', 'הוצאות נטו', 'רווח', 'אחוז רווח'];
-    rows = items.map(it => [it.label, it.count, R(it.rev), R(it.exp), R(it.profit), it.rev ? R(it.profit / it.rev * 100) + '%' : '—']);
-    const tR = items.reduce((s, i) => s + i.rev, 0), tE = items.reduce((s, i) => s + i.exp, 0);
-    html = _profitTable(head, rows, [4, 5], `<tr style="border-top:2px solid var(--line)"><td><b>סה"כ</b></td><td></td><td><b>${money(tR)}</b></td><td><b>${money(tE)}</b></td><td><b style="color:${tR - tE >= 0 ? 'var(--ok)' : 'var(--danger)'}">${money(tR - tE)}</b></td><td>${tR ? R((tR - tE) / tR * 100) + '%' : '—'}</td></tr>`) +
-      '<p class="muted" style="font-size:.78rem;margin-top:8px">הוצאות לפי תיוג עלויות הגיליון (מסך "עלויות גיליון"). גיליון בלי עלויות מוזנות יראה רווח מלא.</p>';
-  } else if (_profitDim === 'agent') {
-    const by = {};
-    priced.forEach(a => { const ag = custAgent[a.customer_id] || 0; const b = by[ag] = by[ag] || { rev: 0, disc: 0, list: 0, count: 0 }; b.rev += net(a); b.disc += Math.max(0, Number(a.discount) || 0); b.list += listPrice(a); b.count++; });
-    const items = Object.entries(by).map(([ag, v]) => ({ label: Number(ag) ? (nameOf('agents', Number(ag)) || 'סוכן #' + ag) : 'ללא סוכן', ...v })).sort((a, b) => b.rev - a.rev);
-    head = ['סוכן', 'מודעות', 'הכנסה נטו', 'הנחות שניתנו', 'אחוז הנחה ממחירון'];
-    rows = items.map(it => [it.label, it.count, R(it.rev), R(it.disc), it.list ? R(it.disc / it.list * 100) + '%' : '—']);
-    html = _profitTable(head, rows, [3]) +
-      '<p class="muted" style="font-size:.78rem;margin-top:8px">הוצאות הגיליון אינן מפוצלות לפי סוכן — עמלות בפועל בדוח העמלות.</p>';
-  } else {
-    const by = {};
-    priced.forEach(a => { const b = by[a.customer_id] = by[a.customer_id] || { rev: 0, disc: 0, list: 0, count: 0 }; b.rev += net(a); b.disc += Math.max(0, Number(a.discount) || 0); b.list += listPrice(a); b.count++; });
-    const items = Object.entries(by).map(([cid, v]) => ({ label: nameOf('customers', Number(cid)) || 'לקוח #' + cid, ...v })).sort((a, b) => b.rev - a.rev).slice(0, 60);
-    head = ['לקוח', 'מודעות', 'הכנסה נטו', 'הנחות (שחיקה)', 'אחוז הנחה ממחירון'];
-    rows = items.map(it => [it.label, it.count, R(it.rev), R(it.disc), it.list ? R(it.disc / it.list * 100) + '%' : '—']);
-    html = _profitTable(head, rows, [3]) +
-      '<p class="muted" style="font-size:.78rem;margin-top:8px">"שחיקה" = כמה הנחה הלקוח מקבל ביחס למחירון. 60 הלקוחות הגדולים.</p>';
-  }
-  _profitHead = head; _repData = rows;
-  box.innerHTML = html;
-}
-
-function _profitTable(head, rows, moneyColsExtra, footRow) {
-  const moneyCols = new Set([2, 3, ...(moneyColsExtra || []).filter(i => i !== 5)]);
-  return `<table class="data"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
-${rows.map(r => `<tr>${r.map((v, i) => {
-    if (i === 0) return `<td><b>${esc(String(v))}</b></td>`;
-    if (moneyCols.has(i) && typeof v === 'number') {
-      const clr = (head[i] === 'רווח') ? `color:${v >= 0 ? 'var(--ok)' : 'var(--danger)'};font-weight:700` : '';
-      return `<td style="${clr}">${money(v)}</td>`;
-    }
-    return `<td>${esc(String(v))}</td>`;
-  }).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" class="empty">אין נתונים</td></tr>`}
-</tbody>${footRow ? `<tfoot>${footRow}</tfoot>` : ''}</table>`;
 }

@@ -24,10 +24,7 @@ function _ibItems(ads, issue) {
     price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)),
   })).filter(it => it.price > 0);
   if (!adLines.length) return [];
-  // סוג גיליון מיוחד (#21) — מסומן בשורת הכותרת של החשבונית
-  const typeTag = (issue.issue_type && issue.issue_type !== 'regular' && typeof ISSUE_TYPE_HE !== 'undefined')
-    ? ' (' + (ISSUE_TYPE_HE[issue.issue_type] || issue.issue_type) + ')' : '';
-  return [{ details: 'גיליון ' + num + typeTag + ' — ' + _ibIssueDate(issue), amount: 1, price: 0 }, ...adLines];
+  return [{ details: 'גיליון ' + num + ' — ' + _ibIssueDate(issue), amount: 1, price: 0 }, ...adLines];
 }
 function _ibDocKind(customerId) {
   const c = (cache.customers || []).find(x => x.id === customerId) || {};
@@ -280,15 +277,13 @@ async function issueSendClip(issueId, customerId) {
       const r = await orig.apply(this, arguments);
       try {
         if (typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role)) {
-          /* עדיפות לתפריט "כספים" בסרגל החדש; נפילה חזרה ל-actions הישן */
-          const menu = document.getElementById('fpMenuMoney');
-          const target = menu || document.querySelector('.page-head .actions');
-          if (target && !document.getElementById('ibBtn')) {
+          const actions = document.querySelector('.page-head .actions');
+          if (actions && !document.getElementById('ibBtn')) {
             const b = document.createElement('button');
-            b.id = 'ibBtn'; b.className = menu ? 'btn' : 'btn btn-sm';
+            b.id = 'ibBtn'; b.className = 'btn btn-sm';
             b.textContent = '🧾 חיוב הגיליון';
-            b.addEventListener('click', () => { if (typeof ccMenuClose === 'function') ccMenuClose(); issueBillingOpen(issueId); });
-            target.insertBefore(b, target.firstChild);
+            b.addEventListener('click', () => issueBillingOpen(issueId));
+            actions.insertBefore(b, actions.firstChild);
           }
         }
       } catch (e) { console.error('issue-billing', e); }
