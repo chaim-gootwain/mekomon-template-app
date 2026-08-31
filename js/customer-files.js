@@ -57,7 +57,7 @@ async function custFileUpload(customerId) {
   const kind = (document.getElementById('cfKind') || {}).value || 'other';
   input.value = '';
   toast('מעלה מסמך...');
-  const path = `customer/${customerId}/${Date.now()}_${file.name}`;
+  const path = `customer/${customerId}/${Date.now()}_${safeKey(file.name)}`;
   const up = await db.storage.from('ad-files').upload(path, file);
   if (up.error) { toast('שגיאה בהעלאה: ' + up.error.message, true); return; }
   const ins = await db.from('customer_files').insert({ customer_id: customerId, storage_path: path, file_name: file.name, kind, uploaded_by: (typeof profile !== 'undefined' ? profile.id : null) });
