@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # בונה את app.bundle.js מכל קובצי js/ לפי סדר הטעינה, ומעדכן cache-busting.
 set -e
-ORDER="api app notifications alerts leads lead-delete lead-deal ai customers customer-picker deals customer-tags customer-contacts customer-merge invoices invoice-charge agents sales ads graphics-proof issues issue-entry issue-expenses pdf-import subscriptions classified import-complete issue-billing monthly-billing approve-import articles billing collections finance finance-hub invoice-reconcile customer-statement ad-proof ad-status weekly-review customer-comm customer-files customer-tasks attendance reports admin invoice-chat"
+ORDER="api app notifications alerts leads lead-delete lead-deal ai customers customer-picker deals customer-tags customer-contacts customer-merge invoices invoice-charge agents sales ads graphics-proof issues issue-entry issue-expenses pdf-import subscriptions classified import-complete issue-billing monthly-billing approve-import articles billing collections finance finance-hub invoice-reconcile customer-statement ad-proof print-verify ad-status weekly-review customer-comm customer-files customer-tasks attendance reports admin invoice-chat"
 > app.bundle.js
 for name in $ORDER; do
   echo "/* ===== js/$name.js ===== */" >> app.bundle.js
