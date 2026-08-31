@@ -280,13 +280,15 @@ async function issueSendClip(issueId, customerId) {
       const r = await orig.apply(this, arguments);
       try {
         if (typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role)) {
-          const actions = document.querySelector('.page-head .actions');
-          if (actions && !document.getElementById('ibBtn')) {
+          /* עדיפות לתפריט "כספים" בסרגל החדש; נפילה חזרה ל-actions הישן */
+          const menu = document.getElementById('fpMenuMoney');
+          const target = menu || document.querySelector('.page-head .actions');
+          if (target && !document.getElementById('ibBtn')) {
             const b = document.createElement('button');
-            b.id = 'ibBtn'; b.className = 'btn btn-sm';
+            b.id = 'ibBtn'; b.className = menu ? 'btn' : 'btn btn-sm';
             b.textContent = '🧾 חיוב הגיליון';
-            b.addEventListener('click', () => issueBillingOpen(issueId));
-            actions.insertBefore(b, actions.firstChild);
+            b.addEventListener('click', () => { if (typeof ccMenuClose === 'function') ccMenuClose(); issueBillingOpen(issueId); });
+            target.insertBefore(b, target.firstChild);
           }
         }
       } catch (e) { console.error('issue-billing', e); }
