@@ -1,3 +1,15 @@
+function suggVal(v){
+  if(v==null) return '';
+  if(Array.isArray(v)) return v.map(suggVal).filter(function(x){return x;}).join(' · ');
+  if(typeof v==='object'){
+    var keys=['text','objection','title','name','point','description','desc','value','label','question','q','answer','a','item','content','reason'];
+    for(var i=0;i<keys.length;i++){var k=keys[i]; if(typeof v[k]==='string'&&v[k].trim()) return v[k].trim();}
+    var parts=Object.keys(v).map(function(k){return v[k];}).filter(function(x){return (typeof x==='string'||typeof x==='number')&&String(x).trim();});
+    return parts.length?parts.map(String).join(' \u2013 '):'';
+  }
+  return String(v);
+}
+
 /* ============================================================
 ai.js — תובנות AI (קליטת ניתוח שיחות מ-Voicenter / Analytic Center)
 ------------------------------------------------------------
@@ -69,9 +81,9 @@ function aiPanelHtml(list) {
       .map(([k, lbl]) => `<div class="ai-cell"><div class="lbl">${lbl}</div><div class="val">${esc(String(a[k]))}</div></div>`)
       .join('');
     const sugg = (a.suggestions || []).map((s, i) => {
-      if (s.status === 'approved') return `<div class="row"><span class="ai-done">✓ ${esc(s.label)} → ${esc(String(s.to))} (אושר)</span></div>`;
+      if (s.status === 'approved') return `<div class="row"><span class="ai-done">✓ ${esc(s.label)} → ${esc(suggVal(s.to))} (אושר)</span></div>`;
       if (s.status === 'rejected') return `<div class="row" style="opacity:.55"><span>✗ ${esc(s.label)} (נדחה)</span></div>`;
-      return `<div class="row"><b>המערכת מציעה:</b> ${esc(s.label)} → <b>${esc(String(s.to))}</b>
+      return `<div class="row"><b>המערכת מציעה:</b> ${esc(s.label)} → <b>${esc(suggVal(s.to))}</b>
         <span style="margin-inline-start:auto;display:flex;gap:6px">
           <button class="btn btn-sm" onclick="aiApprove(${a.id},${i})">אשר</button>
           <button class="btn btn-sm btn-ghost" onclick="aiEdit(${a.id},${i})">ערוך</button>
