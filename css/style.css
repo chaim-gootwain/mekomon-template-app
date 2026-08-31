@@ -123,6 +123,27 @@ border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.12); max-height: 380px;
 .page-head h2 { font-size: 1.3rem; color: var(--brand-dark); }
 .page-head .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
+/* ---------- סרגל הפלטפלן — קטגוריות נפתחות בסגנון כרטיס הלקוח ---------- */
+.fp-toolbar { align-items: center; gap: 8px; }
+.fp-cat {
+display: inline-flex; align-items: center; gap: 7px;
+height: 36px; padding: 0 13px; border-radius: 10px;
+border: 1px solid var(--line); background: var(--card); color: var(--brand-dark);
+font-size: .82rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+transition: background .15s, border-color .15s;
+}
+.fp-cat:hover { background: #eef0fb; border-color: #dfe3f5; }
+.fp-caret { font-size: .58rem; color: var(--muted); }
+.fp-badge {
+min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px;
+background: #fef3c7; color: #92400e; font-size: .68rem; font-weight: 700;
+display: inline-grid; place-items: center;
+}
+@media (max-width: 700px) {
+.fp-toolbar .cc-mwrap { flex: 1 1 45%; }
+.fp-toolbar .cc-mwrap .fp-cat, .fp-toolbar > .fp-cat { width: 100%; justify-content: center; }
+}
+
 .table-wrap { overflow-x: auto; }
 table.data { width: 100%; border-collapse: collapse; font-size: .92rem; }
 table.data th {
