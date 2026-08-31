@@ -3,13 +3,24 @@ api.js — תשתית משותפת לכל המערכת
 ------------------------------------------------------------
 מה יש כאן:
 1. חיבור ל-Supabase (הגדרה חד-פעמית)
-2. משתני מצב גלובליים: session, profile, cache
+2. משתניh מצב גלובליים: session, profile, cache
 3. פונקציות עזר: תרגומים, תאריכים, כסף, HTML בטוח
 4. רכיבים משותפים: toast, מודאל טפסים, טבלת נתונים
 כל מודול (leads.js, ads.js...) משתמש רק במה שמוגדר כאן.
 ============================================================ */
 
 'use strict';
+
+/* שם קובץ בטוח למפתח אחסון של Supabase Storage — מסיר עברית, רווחים, סוגריים וכל תו לא-ASCII שגורם ל-"Invalid key". השם המקורי נשמר בנפרד בעמודת file_name לתצוגה. */
+function safeKey(name) {
+  const s = String(name || 'file');
+  const dot = s.lastIndexOf('.');
+  const ext = dot > 0 ? s.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+  let base = (dot > 0 ? s.slice(0, dot) : s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^[._-]+|[._-]+$/g, '');
+  if (!base) base = 'file';
+    if (base.length > 80) base = base.slice(0, 80).replace(/[._-]+$/, '');
+      return ext ? `${base}.${ext}` : base;
+}
 
 /* ---------- 1. חיבור ל-Supabase ---------- */
 /* פרטי החיבור מוטמעים — הצוות לא צריך להזין כלום.
