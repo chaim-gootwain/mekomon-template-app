@@ -130,7 +130,7 @@ try {
 const _f = document.getElementById('adNewFile');
 const _file = _f && _f.files && _f.files[0];
 if (_file) {
-const _path = `staff/${data.id}/${Date.now()}_${_file.name}`;
+const _path = `staff/${data.id}/${Date.now()}_${safeKey(_file.name)}`;
 const { error: _e } = await db.storage.from('ad-files').upload(_path, _file);
 if (_e) { toast('המודעה נשמרה, אך העלאת הקובץ נכשלה: ' + _e.message, true); }
 else { await run(db.from('ad_files').insert({ ad_id: data.id, storage_path: _path, file_name: _file.name, kind: 'source', uploaded_by: profile.id })); }
@@ -265,7 +265,7 @@ async function adFileUpload(adId) {
 const input = document.getElementById('adFileInput');
 const file = input.files[0];
 if (!file) return;
-const path = `staff/${adId}/${Date.now()}_${file.name}`;
+const path = `staff/${adId}/${Date.now()}_${safeKey(file.name)}`;
 const { error } = await db.storage.from('ad-files').upload(path, file);
 if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
 const kind = profile.role === 'graphics' ? 'design' : 'source';
