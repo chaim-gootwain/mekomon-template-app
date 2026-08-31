@@ -1207,7 +1207,7 @@ window.recAdQuickUpload = async function (adId) {
   const file = input && input.files && input.files[0];
   if (!file) return;
   toast('מעלה קובץ...');
-  const path = `staff/${adId}/${Date.now()}_${file.name}`;
+  const path = `staff/${adId}/${Date.now()}_${safeKey(file.name)}`;
   const { error } = await db.storage.from('ad-files').upload(path, file);
   if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
   await run(db.from('ad_files').insert({ ad_id: adId, storage_path: path, file_name: file.name, kind: 'design', uploaded_by: profile.id }));
@@ -1279,7 +1279,7 @@ async function _recAdSaveFile(recId) {
   const inp = document.getElementById('recAdFile');
   const file = inp && inp.files && inp.files[0];
   if (!file) return null;
-  const path = `recurring/${recId}/${Date.now()}_${file.name}`;
+  const path = `recurring/${recId}/${Date.now()}_${safeKey(file.name)}`;
   const { error } = await db.storage.from('ad-files').upload(path, file);
   if (error) { toast('הרשומה נשמרה, אך העלאת הקובץ נכשלה: ' + error.message, true); return null; }
   await run(db.from('recurring_ads').update({ storage_path: path, file_name: file.name }).eq('id', recId));
