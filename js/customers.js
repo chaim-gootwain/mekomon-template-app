@@ -441,9 +441,22 @@ document.querySelectorAll('.cc-tab').forEach(t => t.classList.toggle('hidden', t
 /* נירמול טלפון לפורמט בינ"ל לוואטסאפ */
 function _ccIntl(p) { let s = String(p || '').replace(/\D/g, ''); if (s.startsWith('0')) s = '972' + s.slice(1); else if (!s.startsWith('972')) s = '972' + s; return s; }
 
-/* היסטוריית מודעות מקובצת לפי גיליון + הדגשת הגיליון הקרוב */
+/* גודל מודעה כמילה (במקום שבר): "1/4" → "רבע עמוד". שם טקסטואלי נשמר כמו שהוא */
+function _ccSizeLabel(name) {
+  const s = String(name == null ? '' : name).trim();
+  if (!s) return '';
+  const M = { '1/1': 'עמוד שלם', '1': 'עמוד שלם', '1/2': 'חצי עמוד', '1/3': 'שליש עמוד', '1/4': 'רבע עמוד', '1/6': 'שישית עמוד', '1/8': 'שמינית עמוד', '1/16': 'אחד חלקי 16 עמוד' };
+  const key = s.replace(/\s+/g, '');
+  if (M[key]) return M[key];
+  const f = key.match(/(\d+\/\d+)/);
+  if (f && M[f[1]]) return M[f[1]];
+  return s;
+}
+
+/* מודעות הלקוח — קוביה מצומצמת בצד, סגורה כברירת מחדל, מקובצת לפי גיליון */
 function custAdsGroupedHtml(ads, custId) {
-  if (!ads.length) return '<p class="muted">אין מודעות</p>';
+  const hd = (extra) => `<div class="cc-ab-hd" onclick="ccAdsBoxToggle()"><span class="cc-ab-ic">📢</span><span class="cc-ab-ttl">מודעות</span>${extra}<span class="cc-ab-chev">▾</span></div>`;
+  if (!ads.length) return `<div class="cc-adsbox" id="ccAdsBox">${hd('')}<div class="cc-ab-sum">אין מודעות</div></div>`;
   const nextIssue = (cache.issues || []).filter(i => (i.publish_date || '') >= today()).sort((a, b) => String(a.publish_date || '').localeCompare(String(b.publish_date || '')))[0];
   const nextId = nextIssue ? nextIssue.id : null;
   const groups = {};
@@ -452,23 +465,61 @@ function custAdsGroupedHtml(ads, custId) {
     const i1 = (cache.issues || []).find(i => i.id === k1) || {}, i2 = (cache.issues || []).find(i => i.id === k2) || {};
     return String(i2.publish_date || '').localeCompare(String(i1.publish_date || ''));
   });
-  return keys.map(k => {
+  const liveAll = ads.filter(a => !['cancelled', 'rejected'].includes(a.status));
+  const total = liveAll.reduce((s, a) => s + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)), 0);
+  const canEdit = (typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role) && typeof DEAL_STAGES !== 'undefined');
+  const canInv = (typeof invoicesOn === 'function' && invoicesOn() && typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role) && typeof invIssueFromAd === 'function');
+  const RECENT = 4;
+  const body = keys.map((k, gi) => {
     const list = groups[k];
     const iss = (cache.issues || []).find(i => i.id === k);
-    const live = list.filter(a => !['cancelled', 'rejected'].includes(a.status));
-    const sub = live.reduce((s, a) => s + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)), 0);
     const isNext = k === nextId;
-    const title = k === 0 ? 'ללא גיליון' : ('גיליון ' + (iss ? iss.issue_number : k) + (iss && iss.publish_date ? ' — ' + heDate(iss.publish_date) : ''));
-    return `<div style="border:1px solid ${isNext ? '#16a34a' : 'var(--line,#e5e7eb)'};border-radius:10px;padding:8px 10px;margin-bottom:8px;${isNext ? 'background:#f0fdf4' : ''}">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-        <b>${esc(title)} ${isNext ? '<span class="pill green">הגיליון הקרוב</span>' : ''}</b>
-        <span style="display:flex;gap:6px;align-items:center;white-space:nowrap"><b>${money(sub)}</b>${k && typeof adProofOpen === 'function' ? `<button class="btn btn-sm btn-ghost" title="הוכחת פרסום" onclick="adProofOpen(${k}, ${custId})">🖼️ הוכחה</button>` : ''}</span>
-      </div>
-      <table class="data" style="margin-top:6px"><tbody>
-      ${list.map(a => `<tr><td>${esc(a.title)}</td><td>${esc(nameOf('priceList', a.price_item_id)) || '—'}</td><td>${a.page_number ? ("עמ' " + a.page_number) : '—'}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)} ${(typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role)) && typeof DEAL_STAGES !== 'undefined' ? `<select onchange="adStatusSet(${a.id}, this.value).then(function(){ openCustomerCard(${custId}); })" style="font-size:.72rem;padding:2px 4px;border-radius:6px;border:1px solid var(--line,#d1d5db)"><option value="">— סטטוס —</option>${Object.entries(DEAL_STAGES).map(([v, t]) => `<option value="${v}" ${a.deal_stage === v ? 'selected' : ''}>${t[0]}</option>`).join('')}</select>` : (a.deal_stage && typeof dealStageLabel === 'function' ? '<span class="pill" style="font-size:.7rem">' + dealStageLabel(a.deal_stage) + '</span>' : '')}</td><td>${(!['cancelled', 'rejected'].includes(a.status) && typeof invoicesOn === 'function' && invoicesOn() && typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role) && typeof invIssueFromAd === 'function') ? (['invoiced', 'paid'].includes(a.deal_stage) ? '<span class="pill" title="חשבונית כבר הופקה" style="font-size:.68rem">🧾 חויב</span>' : `<button class="btn btn-sm btn-ghost" title="הפק חשבונית למודעה זו" onclick="event.stopPropagation(); invIssueFromAd(${a.id})">🧾</button>`) : ''}</td></tr>`).join('')}
-      </tbody></table>
-    </div>`;
+    const hid = gi >= RECENT ? ' cc-ad-hid hidden' : '';
+    const title = k === 0 ? 'ללא גיליון' : ('גיליון ' + (iss ? iss.issue_number : k) + (iss && iss.publish_date ? ' · ' + heDate(iss.publish_date) : ''));
+    const gz = (k && typeof adProofOpen === 'function') ? `<button class="cc-ab-gz" title="הוכחת פרסום" onclick="event.stopPropagation();adProofOpen(${k}, ${custId})">🖼️ גזיר</button>` : '';
+    const head = `<div class="cc-ab-gh${isNext ? ' next' : ''}"><span class="cc-ab-gt">${isNext ? '<span class="cc-ab-dot"></span>' : ''}${esc(title)}${isNext ? ' <span class="pill green">הקרוב</span>' : ''}</span>${gz}</div>`;
+    const rows = list.map(a => {
+      const off = ['cancelled', 'rejected'].includes(a.status) ? ' cc-ab-off' : '';
+      const size = _ccSizeLabel(nameOf('priceList', a.price_item_id));
+      const label = (a.page_number ? 'עמ׳ ' + a.page_number : '') + (a.page_number && size ? ' · ' : '') + size;
+      const stat = canEdit
+        ? `<span class="cc-ab-stat" title="שינוי סטטוס" onclick="ccStatToggle(this)">${pill('ad', a.status)}<select class="cc-stat-sel hidden" onclick="event.stopPropagation()" onchange="adStatusSet(${a.id}, this.value).then(function(){ openCustomerCard(${custId}); })"><option value="">— סטטוס —</option>${Object.entries(DEAL_STAGES).map(([v, t]) => `<option value="${v}" ${a.deal_stage === v ? 'selected' : ''}>${t[0]}</option>`).join('')}</select></span>`
+        : pill('ad', a.status);
+      const inv = (!['cancelled', 'rejected'].includes(a.status) && canInv)
+        ? (['invoiced', 'paid'].includes(a.deal_stage) ? '<span class="cc-ab-inv" title="חשבונית כבר הופקה">🧾</span>' : `<button class="cc-ab-invbtn" title="הפק חשבונית למודעה זו" onclick="event.stopPropagation(); invIssueFromAd(${a.id})">🧾</button>`)
+        : '';
+      return `<div class="cc-ab-ad${off}">${stat}<span class="cc-ab-nm">${esc(label) || esc(a.title) || '—'}</span><span class="cc-ab-pr">${money(a.price - a.discount)}</span>${inv}</div>`;
+    }).join('');
+    return `<div class="cc-ab-grp${hid}">${head}${rows}</div>`;
   }).join('');
+  const moreCount = keys.length - RECENT;
+  return `<div class="cc-adsbox" id="ccAdsBox">
+    ${hd(`<span class="cc-ab-cnt">${liveAll.length}</span>`)}
+    <div class="cc-ab-sum">${keys.length} גיליונות · סה"כ <b>${money(total)}</b></div>
+    <div class="cc-ab-body">
+      ${body}
+      ${moreCount > 0 ? `<button class="cc-ab-more" onclick="ccAdsToggleMore(this)">▾ הצג עוד ${moreCount} גיליונות</button>` : ''}
+    </div>
+  </div>`;
+}
+
+/* קוביית המודעות: פתיחה/סגירה, בורר סטטוס נסתר, והצג/הסתר גיליונות ישנים */
+function ccAdsBoxToggle() {
+  const b = document.getElementById('ccAdsBox');
+  if (b) b.classList.toggle('open');
+}
+function ccStatToggle(el) {
+  const sel = el.querySelector('.cc-stat-sel') || (el.parentElement && el.parentElement.querySelector('.cc-stat-sel'));
+  if (!sel) return;
+  sel.classList.toggle('hidden');
+  if (!sel.classList.contains('hidden') && sel.focus) sel.focus();
+}
+function ccAdsToggleMore(btn) {
+  const grps = document.querySelectorAll('.cc-ad-hid');
+  if (!grps.length) return;
+  const show = grps[0].classList.contains('hidden');
+  grps.forEach(g => g.classList.toggle('hidden', !show));
+  btn.textContent = show ? '▴ הצג פחות' : '▾ הצג עוד גיליונות';
 }
 
 function customerAddNote(id) {
@@ -690,6 +741,35 @@ st.textContent = `
 .cc-menu .btn:hover{background:#eef0fb!important}
 .cc-menu .btn-danger-ghost{color:#dc2626!important}
 .cc-menu .cc-msep{height:1px;background:var(--line,#eef0f5);margin:5px 4px}
+.cc-adsbox{width:min(320px,100%);border:1px solid var(--line,#e6e8ef);border-radius:12px;background:#fbfcfe;overflow:hidden}
+.cc-ab-hd{display:flex;align-items:center;gap:8px;padding:11px 13px;cursor:pointer;user-select:none;background:#fff}
+.cc-ab-hd:hover{background:#f7f9ff}
+.cc-ab-ic{font-size:15px}
+.cc-ab-ttl{font-weight:700;font-size:14px}
+.cc-ab-cnt{margin-inline-start:auto;font-size:12px;color:var(--brand);font-weight:700;background:#eef0fb;border-radius:20px;padding:2px 9px}
+.cc-ab-chev{color:#7a8194;font-size:11px;transition:transform .15s;margin-inline-start:6px}
+.cc-adsbox.open .cc-ab-chev{transform:rotate(180deg)}
+.cc-ab-sum{padding:0 13px 11px;font-size:12px;color:#7a8194}
+.cc-ab-body{display:none;border-top:1px solid var(--line,#e6e8ef);padding:6px 0 4px}
+.cc-adsbox.open .cc-ab-body{display:block}
+.cc-ab-grp{padding:3px 0}
+.cc-ab-grp+.cc-ab-grp{border-top:1px solid #f0f2f8}
+.cc-ab-gh{display:flex;align-items:center;gap:7px;padding:7px 13px 4px;font-size:12px;color:#5a6172;font-weight:700}
+.cc-ab-gh.next .cc-ab-gt{color:var(--brand)}
+.cc-ab-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand);margin-inline-end:5px}
+.cc-ab-gz{margin-inline-start:auto;font-size:11px;font-weight:700;color:var(--brand);background:#eef0fb;border:0;border-radius:7px;padding:3px 8px;cursor:pointer;white-space:nowrap}
+.cc-ab-gz:hover{background:#e2e6fb}
+.cc-ab-ad{display:flex;align-items:center;gap:8px;padding:5px 13px;font-size:13px}
+.cc-ab-ad.cc-ab-off{opacity:.5;text-decoration:line-through}
+.cc-ab-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cc-ab-pr{color:#6b7280;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cc-ab-stat{display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+.cc-ab-stat .cc-stat-sel{font-size:.72rem;max-width:120px}
+.cc-ab-invbtn{border:1px solid var(--line,#e6e8ef);background:#fff;border-radius:7px;padding:1px 6px;font-size:12px;cursor:pointer;line-height:1.4}
+.cc-ab-invbtn:hover{background:#eef0fb}
+.cc-ab-inv{font-size:12px;opacity:.55}
+.cc-ab-more{width:100%;background:none;border:0;border-top:1px solid var(--line,#e6e8ef);color:var(--brand);font-weight:700;font-size:12px;padding:9px;cursor:pointer;margin-top:4px}
+.cc-ab-more:hover{background:#f7f9ff}
 `;
 document.head.appendChild(st);
 document.addEventListener('click', e => { if (!e.target.closest('.cc-mwrap')) ccMenuClose(); });
