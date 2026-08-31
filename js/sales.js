@@ -131,24 +131,9 @@ async function contractInvoice(contractId) {
       <button class="btn" onclick="${close} invOpenModal(_ciCust, 'proforma', false, {lines:_ciLines})">חשבון עסקה</button>
       <button class="btn" onclick="${close} invOpenModal(_ciCust, 'tax_invoice', false, {lines:_ciLines})">חשבונית מס</button>
       <button class="btn" onclick="${close} invOpenModal(_ciCust, 'invoice_receipt', true, {lines:_ciLines, vatInc:false})">חשבונית מס קבלה</button>
-      ${typeof invIssueFromAds === 'function' ? `<button class="btn btn-ghost" style="border:1px dashed var(--line,#cbd5e1)" onclick="${close} contractInvoiceUnbilled(${ct.id})" title="חיוב רק המודעות של החוזה שעדיין לא הופקה להן חשבונית">🎯 רק מודעות שטרם חויבו</button>` : ''}
       <button class="btn btn-ghost" onclick="${close}">ביטול</button>
     </div></div>`;
   document.body.appendChild(ov);
-}
-
-/* חיוב רק המודעות של החוזה שטרם הופקה להן חשבונית (deal_stage לא invoiced/paid) */
-async function contractInvoiceUnbilled(contractId) {
-  const ct = (_contracts || []).find(x => x.id === contractId) || (await run(db.from('contracts').select('*').eq('id', contractId).limit(1)))[0];
-  if (!ct) { toast('חוזה לא נמצא', true); return; }
-  const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === ct.customer_id))
-    || (cache.customers || []).find(x => x.id === ct.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', ct.customer_id).limit(1)))[0];
-  const ads = (await run(db.from('ads').select('*').eq('contract_id', contractId).not('status', 'in', '("cancelled","rejected")'))) || [];
-  const unbilled = ads.filter(a => !['invoiced', 'paid'].includes(a.deal_stage));
-  if (!unbilled.length) { toast('כל מודעות החוזה כבר חויבו', true); return; }
-  if (typeof invIssueFromAds === 'function') await invIssueFromAds(cust, unbilled, 'חוזה #' + ct.id + ' — ' + unbilled.length + ' מודעות שטרם חויבו');
-  else toast('פונקציית ההפקה לא זמינה', true);
 }
 
 /* ==================== הצעות מחיר ==================== */

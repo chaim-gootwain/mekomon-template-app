@@ -395,11 +395,10 @@ ${custAdsGroupedHtml(ads, id)}
 </div>
 ${canMoney ? `
 <div id="ccContracts" class="cc-tab hidden">
-${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th><th></th></tr></thead><tbody>
+${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th></tr></thead><tbody>
 ${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}${ct.is_standing_order ? ' <span class="pill amber" title="הוראת קבע חודשית">🔁 הו"ק</span>' : ''}</td>
 <td id="ctUsed${ct.id}">—</td><td>${money(ct.total_price)}</td>
-<td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td>
-<td>${(typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role) && typeof contractInvoice === 'function') ? `<button class="btn btn-sm" onclick="event.stopPropagation(); contractInvoice(${ct.id})" title="הפק חשבונית על החבילה">🧾 הפק</button>` : ''}</td></tr>`).join('')}
+<td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td></tr>`).join('')}
 </tbody></table></div>` : '<p class="muted">אין חוזים</p>'}
 ${contracts.filter(ct => Array.isArray(ct.payment_plan) && ct.payment_plan.length).map(ct => `<div style="margin-top:14px"><b>לוח תשלומים — ${esc(nameOf('priceList', ct.price_item_id))}</b>${(typeof dealPlanHtml==='function'?dealPlanHtml(ct):'')}</div>`).join('')}
 </div>
@@ -465,7 +464,7 @@ function custAdsGroupedHtml(ads, custId) {
         <span style="display:flex;gap:6px;align-items:center;white-space:nowrap"><b>${money(sub)}</b>${k && typeof adProofOpen === 'function' ? `<button class="btn btn-sm btn-ghost" title="הוכחת פרסום" onclick="adProofOpen(${k}, ${custId})">🖼️ הוכחה</button>` : ''}</span>
       </div>
       <table class="data" style="margin-top:6px"><tbody>
-      ${list.map(a => `<tr><td>${esc(a.title)}</td><td>${esc(nameOf('priceList', a.price_item_id)) || '—'}</td><td>${a.page_number ? ("עמ' " + a.page_number) : '—'}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)} ${(typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role)) && typeof DEAL_STAGES !== 'undefined' ? `<select onchange="adStatusSet(${a.id}, this.value).then(function(){ openCustomerCard(${custId}); })" style="font-size:.72rem;padding:2px 4px;border-radius:6px;border:1px solid var(--line,#d1d5db)"><option value="">— סטטוס —</option>${Object.entries(DEAL_STAGES).map(([v, t]) => `<option value="${v}" ${a.deal_stage === v ? 'selected' : ''}>${t[0]}</option>`).join('')}</select>` : (a.deal_stage && typeof dealStageLabel === 'function' ? '<span class="pill" style="font-size:.7rem">' + dealStageLabel(a.deal_stage) + '</span>' : '')}</td><td>${(!['cancelled', 'rejected'].includes(a.status) && typeof invoicesOn === 'function' && invoicesOn() && typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role) && typeof invIssueFromAd === 'function') ? (['invoiced', 'paid'].includes(a.deal_stage) ? '<span class="pill" title="חשבונית כבר הופקה" style="font-size:.68rem">🧾 חויב</span>' : `<button class="btn btn-sm btn-ghost" title="הפק חשבונית למודעה זו" onclick="event.stopPropagation(); invIssueFromAd(${a.id})">🧾</button>`) : ''}</td></tr>`).join('')}
+      ${list.map(a => `<tr><td>${esc(a.title)}</td><td>${esc(nameOf('priceList', a.price_item_id)) || '—'}</td><td>${a.page_number ? ("עמ' " + a.page_number) : '—'}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)} ${(typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role)) && typeof DEAL_STAGES !== 'undefined' ? `<select onchange="adStatusSet(${a.id}, this.value).then(function(){ openCustomerCard(${custId}); })" style="font-size:.72rem;padding:2px 4px;border-radius:6px;border:1px solid var(--line,#d1d5db)"><option value="">— סטטוס —</option>${Object.entries(DEAL_STAGES).map(([v, t]) => `<option value="${v}" ${a.deal_stage === v ? 'selected' : ''}>${t[0]}</option>`).join('')}</select>` : (a.deal_stage && typeof dealStageLabel === 'function' ? '<span class="pill" style="font-size:.7rem">' + dealStageLabel(a.deal_stage) + '</span>' : '')}</td></tr>`).join('')}
       </tbody></table>
     </div>`;
   }).join('');

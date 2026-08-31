@@ -333,7 +333,6 @@ function invChatRenderCard() {
           ${Object.keys(INVCHAT_DOC_HE).map(k => `<option value="${k}" ${k === f.doc_type ? 'selected' : ''}>${INVCHAT_DOC_HE[k]}</option>`).join('')}
         </select></div>
     </div>
-    <div id="icCtx-${_icState.reqId}"></div>
     <div class="ic-lh"><span>תיאור</span><span>כמות</span><span>מחיר יח׳</span><span>כולל מע"מ</span><span></span></div>
     <div id="icLines">${invChatLinesHtml()}</div>
     <button class="btn btn-sm btn-ghost" onclick="invChatAddLine()">+ הוסף שורה</button>
@@ -348,53 +347,6 @@ function invChatRenderCard() {
     </div>`;
   document.getElementById('icLog').appendChild(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  if (f.customer_id) invChatCustomerContext(f.customer_id, _icState.reqId);
-}
-
-/* פאנל הקשר ללקוח מזוהה בכרטיס הצ'אט: חוב פתוח + חוזים פעילים + שליחה.
-   מסתנכרן עם אותן טבלאות של המערכת (charges/payments/contracts/ads). */
-async function invChatCustomerContext(customerId, reqId) {
-  const box = document.getElementById('icCtx-' + reqId);
-  if (!box || !customerId) return;
-  try {
-    const charges = (await db.from('charges').select('id,amount,description,status')
-      .eq('customer_id', customerId).in('status', ['pending', 'invoiced', 'partial', 'overdue'])
-      .order('issued_date', { ascending: true })).data || [];
-    let openTotal = 0; const openList = [];
-    for (const ch of charges) {
-      const pays = (await db.from('payments').select('amount').eq('charge_id', ch.id)).data || [];
-      const bal = Number(ch.amount) - pays.reduce((s, p) => s + Number(p.amount), 0);
-      if (bal > 0.001) { openTotal += bal; openList.push({ desc: ch.description || 'חיוב', bal: Math.round(bal * 100) / 100 }); }
-    }
-    const contracts = (await db.from('contracts').select('id,price_item_id,total_inserts,used_offset,active')
-      .eq('customer_id', customerId).eq('active', true)).data || [];
-    const conRows = [];
-    for (const ct of contracts) {
-      const { count } = await db.from('ads').select('id', { count: 'exact', head: true })
-        .eq('contract_id', ct.id).not('status', 'in', '("cancelled","rejected")');
-      const used = (count || 0) + (Number(ct.used_offset) || 0);
-      conRows.push({ id: ct.id, label: (typeof nameOf === 'function' ? nameOf('priceList', ct.price_item_id) : '') || 'חבילה', used, total: ct.total_inserts || 0 });
-    }
-    if (!openTotal && !conRows.length) { box.innerHTML = ''; return; }
-    const canInv = typeof contractInvoice === 'function';
-    const debtHtml = openTotal > 0
-      ? `<div style="font-weight:800;color:#b45309">💰 חוב פתוח — ${money(openTotal)} <span style="font-weight:400;color:#8a5a00">(${openList.length})</span></div>
-         <div style="font-size:.78rem;color:#8a5a00;margin-top:2px">${openList.slice(0, 4).map(o => '• ' + esc(o.desc) + ' — ' + money(o.bal)).join('<br>')}${openList.length > 4 ? '<br>…' : ''}</div>`
-      : '<div class="muted" style="font-size:.8rem">אין חוב פתוח ✓</div>';
-    const conHtml = conRows.length
-      ? '<div style="margin-top:8px;font-weight:800;color:#1c2438">📦 חוזים פעילים</div>' + conRows.map(c =>
-        `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.8rem;margin-top:3px">
-           <span>${esc(c.label)} — נוצל ${c.used}/${c.total}${(c.total && c.used >= c.total) ? ' <span class="pill red" style="font-size:.66rem">נוצל</span>' : ''}</span>
-           ${canInv ? `<button class="btn btn-sm btn-ghost" title="הפק חשבונית מהחוזה" onclick="contractInvoice(${c.id})">🧾 הפק</button>` : ''}
-         </div>`).join('')
-      : '';
-    const sendBtns = `<div class="m-actions" style="flex-wrap:wrap;margin-top:10px;gap:6px">
-        ${typeof customerStatement === 'function' ? `<button class="btn btn-sm btn-ghost" onclick="customerStatement(${customerId})" title="דוח חוב / כרטסת להדפסה או PDF">📄 דוח חוב</button>` : ''}
-        ${typeof commOpen === 'function' ? `<button class="btn btn-sm btn-ghost" onclick="commOpen(${customerId}, 'whatsapp')" title="שליחת הודעה בוואטסאפ (תזכורת תשלום)">💬 שלח בוואטסאפ</button>` : ''}
-      </div>`;
-    box.innerHTML = `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:9px 11px;margin:2px 0 10px">
-      ${debtHtml}${conHtml}${sendBtns}</div>`;
-  } catch (e) { box.innerHTML = ''; }
 }
 function invChatLinesHtml() {
   return _icState.fields.line_items.map((l, i) => `<div class="ic-line">
