@@ -41,6 +41,15 @@ return cn || t || 'מודעה';
 }
 
 /* באנר מוכנוּת + ספירה לדדליין המודעות */
+/* קטגוריה נפתחת בסרגל הפלטפלן — בסגנון כרטיס הלקוח; לא מוצגת אם אין בה פעולות */
+function _fpToolbarMenu(id, label, btns, badge) {
+const html = btns.filter(Boolean).join('');
+return html ? `<div class="cc-mwrap">
+<button class="fp-cat" onclick="ccMenu(event,'${id}')">${label}${badge ? ` <span class="fp-badge">${badge}</span>` : ''}<span class="fp-caret">▾</span></button>
+<div id="${id}" class="cc-menu hidden">${html}</div>
+</div>` : '';
+}
+
 function _fpDeadlineBanner() {
 const dl = _fpIssue.ads_deadline; if (!dl) return '';
 const ms = new Date(dl).getTime() - Date.now();
@@ -224,21 +233,33 @@ const adPct = _fpIssue.pages_count ? Math.round(soldArea / _fpIssue.pages_count 
 _fpWarnings = warnings;
 _fpChecklistIncomplete = _fpChecklist.filter(c => !c.done).length;
 
+if (typeof _ccEnsureCss === 'function') _ccEnsureCss();
+const _fpDealsN = _fpAds.filter(a => a.deal_stage === 'in_progress').length;
 el.innerHTML = `
 <div class="page-head">
 <h2>פלטפלן — גיליון ${_fpIssue.issue_number} ${pill('issue', _fpIssue.status)}</h2>
-<div class="actions">
-<button class="btn btn-ghost btn-sm" onclick="openPage('issues')">→ לרשימה</button>
-${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpPlaceLikePrev()">↩ כמו קודם</button>` : ''}
-${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpAutoArrange()">🧩 סידור אוטומטי</button>` : ''}
-<button class="btn btn-sm btn-ghost" onclick="fpPrint()">🖨 הדפסה</button>
-<button class="btn btn-sm btn-ghost" onclick="fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>
-${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="openPrintVerify(${_fpIssue.id})">🖨️ אמת מול מודפס</button>` : ''}
-${canEdit ? `<button class="btn btn-sm" onclick="openIssueEntry(${_fpIssue.id})">＋ הזנת מודעות</button>` : ''}
-${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="fpPrevAdsList()">📋 מגיליון קודם</button>` : ''}
-${canEdit && _fpAds.filter(a => a.deal_stage === 'in_progress').length ? `<button class="btn btn-sm btn-ghost" onclick="dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpAds.filter(a => a.deal_stage === 'in_progress').length})</button>` : ''}
-${canEdit ? `<button class="btn btn-sm btn-ghost" onclick="issueStatusChange()">שינוי סטטוס</button>` : ''}
-${['admin','sales'].includes(profile.role) ? `<button class="btn btn-sm btn-ghost" onclick="openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : ''}
+<div class="actions cc-toolbar fp-toolbar">
+${canEdit ? `<button class="cc-tbtn cc-primary" data-tip="הזנת מודעות" aria-label="הזנת מודעות" onclick="openIssueEntry(${_fpIssue.id})">${typeof _ccIco === 'function' ? _ccIco('plus') : '＋'}</button>
+<span class="cc-tsep"></span>` : ''}
+${_fpToolbarMenu('fpMenuEntry', 'מודעות ושיבוץ', [
+  canEdit ? `<button class="btn" onclick="ccMenuClose();openIssueEntry(${_fpIssue.id})">＋ הזנת מודעות</button>` : '',
+  canEdit && _fpDealsN ? `<button class="btn" onclick="ccMenuClose();dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpDealsN})</button>` : '',
+  canEdit ? `<button class="btn" onclick="ccMenuClose();fpPrevAdsList()">📋 מגיליון קודם</button>` : '',
+  canEdit ? `<button class="btn" onclick="ccMenuClose();fpPlaceLikePrev()">↩ כמו קודם</button>` : '',
+  canEdit ? `<button class="btn" onclick="ccMenuClose();fpAutoArrange()">🧩 סידור אוטומטי</button>` : ''
+], canEdit && _fpDealsN ? _fpDealsN : 0)}
+${_fpToolbarMenu('fpMenuPrint', 'הפקה ודפוס', [
+  `<button class="btn" onclick="ccMenuClose();fpPrint()">🖨 הדפסה</button>`,
+  `<button class="btn" onclick="ccMenuClose();fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>`,
+  canEdit ? `<button class="btn" onclick="ccMenuClose();openPrintVerify(${_fpIssue.id})">🔍 אמת מול מודפס</button>` : ''
+])}
+${_fpToolbarMenu('fpMenuMoney', 'כספים', [
+  ['admin','sales'].includes(profile.role) ? `<button class="btn" onclick="ccMenuClose();openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : ''
+])}
+${_fpToolbarMenu('fpMenuManage', 'ניהול', [
+  canEdit ? `<button class="btn" onclick="ccMenuClose();issueStatusChange()">🔄 שינוי סטטוס</button>` : ''
+])}
+<button class="fp-cat" onclick="openPage('issues')">→ לרשימה</button>
 </div>
 </div>
 
