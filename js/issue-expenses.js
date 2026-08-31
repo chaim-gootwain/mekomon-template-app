@@ -1,4 +1,4 @@
-/* ============================================================
+/* =========================================================
    issue-expenses.js — ניהול הוצאות לפי גיליון (עלויות הגיליון)
    ------------------------------------------------------------
    - קטגוריות קבועות לכל גיליון (דפוס, הפצה, שכר...) — הזנת נטו
@@ -15,6 +15,8 @@ function icoRate() { const r = Number((cache.settings || {}).vat_rate); return i
 function icoCats() { try { const a = JSON.parse((cache.settings || {}).issue_cost_categories || 'null'); return Array.isArray(a) && a.length ? a : ICO_DEFAULT_CATS; } catch (e) { return ICO_DEFAULT_CATS; } }
 function icoPrintTable() { try { const t = JSON.parse((cache.settings || {}).print_price_table || 'null'); if (t && typeof t === 'object') return t; } catch (e) {} return { 32: 2600, 40: 3580, 48: 4100, 56: 4695 }; }
 function icoDistrib() { const v = Number((cache.settings || {}).distribution_cost); return isFinite(v) && v > 0 ? v : 500; }
+function _icoPagesFor(iss) { if (iss.pages_count != null) return iss.pages_count; const dpc = Number((cache.settings || {}).default_pages_count); return isFinite(dpc) && dpc > 0 ? dpc : null; }
+function _icoPrintNet(pt, pages) { if (pages == null) return null; return pt[pages] != null ? pt[pages] : (pt[String(pages)] != null ? pt[String(pages)] : null); }
 function _icoTag(id) { return '#issue:' + id + ';'; }
 function _icoNet(notes) { const m = String(notes || '').match(/#net:([0-9.]+)/); return m ? Number(m[1]) : null; }
 function _icoCat(notes) { const m = String(notes || '').match(/#cat:([^;]+);/); return m ? m[1] : ''; }
@@ -143,10 +145,10 @@ async function icoSave() {
   document.getElementById('viewBack').classList.remove('open');
 }
 
-/* החלת עלויות (דפוס+הפצה) על כל הגיליונות שעדיין לא נסגרו — בלי לדרוס קיים */
-async function icoApplyAll() {
-  if (!['admin', 'sales'].includes(profile.role)) { toast('אין הרשאה', true); return; }
-  if (!confirm('למלא עלויות דפוס + הפצה לכל הגיליונות שחסרות בהם?\nכולל גיליונות שפורסמו · לא דורס עלויות שכבר הוזנו.')) return;
+/* מנוע יצירת עלויות דפוס+הפצה לגיליונות — משותף לכפתור הידני ולריצה האוטומטית.
+   נופל למספר עמודים ברירת־מחדל (settings.default_pages_count) כשלא הוזן לגיליון.
+   אידמפוטנטי: לא יוצר קטגוריה שכבר קיימת לגיליון (#issue:<id>#cat:<שם>). */
+async function icoGenerateExpenses() {
   const issues = await run(db.from('issues').select('id,issue_number,pages_count,print_date,publish_date,status'));
   const existing = await run(db.from('expenses').select('notes').ilike('notes', '%#issue:%'));
   const has = {};
@@ -155,7 +157,7 @@ async function icoApplyAll() {
   let created = 0, noPrice = 0;
   for (const iss of issues) {
     const date = (iss.print_date || iss.publish_date || today()).slice(0, 10);
-    const printNet = pt[iss.pages_count] != null ? pt[iss.pages_count] : (pt[String(iss.pages_count)] != null ? pt[String(iss.pages_count)] : null);
+    const printNet = _icoPrintNet(pt, _icoPagesFor(iss));
     const rows = [];
     if (printNet != null) { if (!has[iss.id + '|דפוס']) rows.push(['דפוס', printNet]); } else noPrice++;
     if (!has[iss.id + '|הפצה']) rows.push(['הפצה', dist]);
@@ -165,6 +167,35 @@ async function icoApplyAll() {
       created++;
     }
   }
+  return { created, noPrice };
+}
+
+/* החלת עלויות (דפוס+הפצה) על כל הגיליונות שעדיין לא נסגרו — בלי לדרוס קיים */
+async function icoApplyAll() {
+  if (!['admin', 'sales'].includes(profile.role)) { toast('אין הרשאה', true); return; }
+  if (!confirm('למלא עלויות דפוס + הפצה לכל הגיליונות שחסרות בהם?\nכולל גיליונות שפורסמו · לא דורס עלויות שכבר הוזנו.')) return;
+  const { created, noPrice } = await icoGenerateExpenses();
   toast('נוצרו ' + created + ' שורות עלות' + (noPrice ? ' · ' + noPrice + ' גיליונות בלי מחיר דפוס לספירת העמודים' : ''));
   if (typeof openPage === 'function') openPage('issues');
+}
+
+/* יצירת עלויות דפוס+הפצה אוטומטית — רצה ברקע פעם ביום (אדמין) דרך רצף הטעינה.
+   דלוקה כברירת מחדל: רק settings.issue_costs_auto === '0' מכבה אותה. */
+function _icoAutoOn() { const v = (cache.settings || {}).issue_costs_auto; return String(v == null ? '1' : v) !== '0'; }
+async function icoToggleAuto(on) {
+  await run(db.from('settings').upsert({ key: 'issue_costs_auto', value: on ? '1' : '0' }));
+  if (cache.settings) cache.settings.issue_costs_auto = on ? '1' : '0';
+  toast(on ? 'עלויות גיליון אוטומטיות: הופעל' : 'עלויות גיליון אוטומטיות: כובה');
+}
+async function icoCostsAutoCheck() {
+  try {
+    if (typeof profile === 'undefined' || profile.role !== 'admin') return;
+    if (!_icoAutoOn()) return;
+    const d = new Date().toISOString().slice(0, 10);
+    if ((cache.settings || {}).issue_costs_last === d) return;
+    await run(db.from('settings').upsert({ key: 'issue_costs_last', value: d }));
+    if (cache.settings) cache.settings.issue_costs_last = d;
+    const r = await icoGenerateExpenses();
+    if (r && r.created) toast('💸 עלויות גיליון: נוצרו ' + r.created + ' שורות אוטומטית');
+  } catch (e) { }
 }
