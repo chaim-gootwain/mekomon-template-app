@@ -231,6 +231,8 @@ el.innerHTML = `
 </label>
 </div>
 
+${typeof adsAutoCard === 'function' ? adsAutoCard() : ''}
+
 ${typeof alertsSettingsCard === 'function' ? alertsSettingsCard() : ''}
 
 ${typeof weeklySummaryCard === 'function' ? weeklySummaryCard() : ''}

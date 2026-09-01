@@ -38,6 +38,7 @@ ${canRoute ? `<button class="btn" onclick="adAdd()">+ מודעה ידנית</but
 <button data-f="done" onclick="adsTab(this)">פורסמו</button>
 <button data-f="all" onclick="adsTab(this)">הכל</button>
 </div>
+${String(cache.settings.ads_auto_route_enabled || '0') === '1' ? '<p class="muted" style="font-size:.8rem;margin:6px 2px">🤖 ניתוב אוטומטי פעיל — מודעות חדשות מנותבות מעצמן; כאן נשארות רק מודעות שדורשות החלטה (עצירת חוב, או שאין בהן קובץ וטקסט).</p>' : ''}
 <div class="filter-bar">
 <input id="adSearch" placeholder="חיפוש..." oninput="adsDraw()" style="min-width:200px">
 <select id="adIssueFilter" onchange="adsDraw()">
@@ -77,7 +78,7 @@ renderTable(document.getElementById('adsTable'), rows, [
 { h: 'גודל', f: r => esc(nameOf('priceList', r.price_item_id)) },
 { h: 'גיליון', f: r => esc(nameOf('issues', r.issue_id, 'issue')) || '<span class="muted">טרם</span>' },
 { h: 'מחיר', f: r => money(r.price - r.discount) },
-{ h: 'סטטוס', f: r => pill('ad', r.status) },
+{ h: 'סטטוס', f: r => pill('ad', r.status) + (r.debt_hold && r.status === 'received' ? ' <span class="pill red" title="נעצרה לאישור — ללקוח יתרה פתוחה">🔒 חוב</span>' : '') },
 { h: 'התקבלה', f: r => heDateTime(r.created_at) },
 ], { onRow: r => openAdCard(r.id), empty: _adsFilter === 'inbox' ? 'אין מודעות חדשות לניתוב 👍' : 'אין מודעות' });
 }
@@ -155,6 +156,15 @@ const canRoute = ['admin', 'sales'].includes(profile.role);
 
 /* כפתורי הניתוב הרלוונטיים לסטטוס הנוכחי */
 let routeButtons = '';
+let debtHoldBlock = '';
+if (canRoute && a.status === 'received' && a.debt_hold) {
+debtHoldBlock = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:.88rem">
+🔒 <b>נעצרה על ידי האוטומציה</b> — ללקוח יתרה פתוחה. אשר כדי שתמשיך במסלול האוטומטי, או דחה.
+<div class="m-actions" style="margin-top:8px">
+<button class="btn btn-sm" style="background:var(--ok)" onclick="adDebtRelease(${id})">✓ אשר והמשך</button>
+<button class="btn btn-sm btn-danger-ghost" onclick="adRoute(${id},'reject',true)">✗ דחייה</button>
+</div></div>`;
+}
 if (canRoute) {
 if (a.status === 'received') routeButtons = `
 <button class="btn btn-sm" onclick="adRoute(${id},'to_graphics',true)">🎨 לגרפיקה</button>
@@ -178,6 +188,7 @@ const filesHtml = files.length
 
 document.getElementById('viewModal').innerHTML = `
 <h3>${esc(a.title)} ${pill('ad', a.status)}</h3>
+${debtHoldBlock}
 <div class="grid3" style="font-size:.9rem">
 <div><label>לקוח</label><b>${esc(nameOf('customers', a.customer_id)) || '—'}</b></div>
 <div><label>סוכן</label><b>${esc(nameOf('agents', a.agent_id)) || '—'}</b></div>
@@ -397,4 +408,84 @@ function adAddByCustomerGo() {
   if (!cid) { toast('בחר לקוח קודם', true); return; }
   document.getElementById('abcOv')?.remove();
   adAdd({ customer_id: cid });
+}
+
+
+/* ============================================================
+   אוטומציית זרימת המודעות (01.09.2026)
+   ------------------------------------------------------------
+   - שחרור עצירת חוב: מנקה debt_hold וקורא ל-ads_auto_route_one
+     כדי שהמודעה תמשיך במסלול (קובץ→שיבוץ, טקסט→גרפיקה).
+   - כרטיס הגדרות: מתגי הניתוב האוטומטי ודיוור הוועדה.
+   ============================================================ */
+
+async function adDebtRelease(id) {
+  await run(db.from('ads').update({ debt_hold: false, debt_ok: true }).eq('id', id));
+  await addInteraction('ad', id, 'עצירת החוב שוחררה — המודעה ממשיכה במסלול');
+  let routed = '';
+  try { routed = (await db.rpc('ads_auto_route_one', { p_ad_id: id })).data || ''; } catch (e) { }
+  toast(routed === 'approved' ? 'שוחררה — מוכנה לשיבוץ' :
+        routed === 'in_graphics' ? 'שוחררה — נשלחה לגרפיקה' : 'עצירת החוב שוחררה');
+  document.getElementById('viewBack').classList.remove('open');
+  openPage('ads');
+}
+
+/* --- כרטיס ההגדרות (מוצג בעמוד ההגדרות של המנהל) --- */
+function adsAutoCard() {
+  const s = cache.settings;
+  return `<div class="card card-pad">
+<b>🤖 אוטומציית מודעות</b>
+<p class="muted" style="font-size:.82rem">מודעה עם קובץ מעוצב עוברת ישר לשיבוץ; מודעת טקסט — ישר לגרפיקה. לקוח עם חוב פתוח נעצר לאישורך. הוועדה מקבלת מייל מרוכז בזמנים קבועים במקום להיות תחנה בזרימה.</p>
+<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+<input type="checkbox" id="setAdsAuto" ${String(s.ads_auto_route_enabled || '0') === '1' ? 'checked' : ''} onchange="adsAutoToggle(this.checked)" style="width:18px;height:18px">
+ניתוב אוטומטי פעיל
+</label>
+<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+<input type="checkbox" id="setCommDigest" ${String(s.committee_digest_enabled || '0') === '1' ? 'checked' : ''} onchange="committeeDigestToggle(this.checked)" style="width:18px;height:18px">
+דיוור מרוכז לוועדה (מבטל את תחנת הוועדה בזרימה)
+</label>
+<div class="grid2" style="margin-top:10px">
+<div class="field"><label>מיילים של הוועדה (מופרד בפסיקים)</label>
+<input id="setCommEmails" value="${esc(s.committee_emails || '')}" dir="ltr" placeholder="a@b.com, c@d.com"></div>
+<div class="field"><label>זמני הדיוור (יום ושעה, מופרד בפסיקים)</label>
+<input id="setCommTimes" value="${esc(s.committee_digest_times || 'רביעי 20:00, חמישי 13:00, חמישי 19:00')}"></div>
+</div>
+<div class="m-actions" style="margin-top:8px">
+<button class="btn btn-sm" onclick="committeeDigestSave()">שמירה</button>
+<button class="btn btn-sm btn-ghost" onclick="committeeDigestTest(this)">📧 שליחת דיוור עכשיו (בדיקה)</button>
+</div>
+<p class="muted" style="font-size:.78rem;margin-top:6px">דורש הרצת המיגרציה ותזמון הפונקציה committee-digest פעם בשעה (Supabase → Cron). המייל נשלח מכתובת העיתון — תשובות הוועדה מגיעות לתיבה שלה.</p>
+</div>`;
+}
+
+async function adsAutoToggle(on) {
+  await run(db.from('settings').upsert({ key: 'ads_auto_route_enabled', value: on ? '1' : '0' }));
+  cache.settings.ads_auto_route_enabled = on ? '1' : '0';
+  toast(on ? 'ניתוב אוטומטי הופעל' : 'ניתוב אוטומטי כובה');
+}
+
+async function committeeDigestToggle(on) {
+  await run(db.from('settings').upsert({ key: 'committee_digest_enabled', value: on ? '1' : '0' }));
+  cache.settings.committee_digest_enabled = on ? '1' : '0';
+  toast(on ? 'דיוור הוועדה הופעל' : 'דיוור הוועדה כובה');
+}
+
+async function committeeDigestSave() {
+  const updates = [
+    { key: 'committee_emails', value: (document.getElementById('setCommEmails')?.value || '').trim() },
+    { key: 'committee_digest_times', value: (document.getElementById('setCommTimes')?.value || '').trim() },
+  ];
+  for (const u of updates) { await run(db.from('settings').upsert(u)); cache.settings[u.key] = u.value; }
+  toast('נשמר');
+}
+
+async function committeeDigestTest(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  try {
+    const { data, error } = await db.functions.invoke('committee-digest', { body: { force: true } });
+    if (error) throw error;
+    if (data?.ok) toast(`נשלח ✓ (${data.ads} מודעות ל-${data.sent} נמענים)`);
+    else toast('לא נשלח: ' + (data?.error || data?.skipped || 'שגיאה'), true);
+  } catch (e) { toast('שגיאה בשליחה: ' + (e.message || e), true); }
+  if (btn) { btn.disabled = false; btn.textContent = '📧 שליחת דיוור עכשיו (בדיקה)'; }
 }
