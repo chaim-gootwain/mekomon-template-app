@@ -254,7 +254,8 @@ ${_fpToolbarMenu('fpMenuPrint', 'הפקה ודפוס', [
   canEdit ? `<button class="btn" onclick="ccMenuClose();openPrintVerify(${_fpIssue.id})">🔍 אמת מול מודפס</button>` : ''
 ])}
 ${_fpToolbarMenu('fpMenuMoney', 'כספים', [
-  ['admin','sales'].includes(profile.role) ? `<button class="btn" onclick="ccMenuClose();openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : ''
+  ['admin','sales'].includes(profile.role) ? `<button class="btn" onclick="ccMenuClose();openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : '',
+  profile.role === 'admin' ? `<button class="btn" onclick="ccMenuClose();fpPublishAll()">📣 פרסום כל המשובצות (יוצר חיובים)</button>` : ''
 ])}
 ${_fpToolbarMenu('fpMenuManage', 'ניהול', [
   canEdit ? `<button class="btn" onclick="ccMenuClose();issueStatusChange()">🔄 שינוי סטטוס</button>` : ''
@@ -567,6 +568,25 @@ toast(`✓ שובצו ${plan.length} מודעות`);
 }
 
 /* הדפסת/ייצוא הפלטפלן — עמוד נקי למעצב/דפוס */
+/* פרסום מרוכז (אוטומציית המודעות, 01.09.2026): כל המשובצות בגיליון
+מסומנות פורסמו בקריאה אחת ל-publish_issue_ads בשרת, שמריץ את route_ad
+('publish') פר מודעה — יצירת החיובים זהה אחד-לאחד לכפתור הידני. */
+async function fpPublishAll() {
+if (profile.role !== 'admin') { toast('פרסום מרוכז — מנהל בלבד', true); return; }
+const placed = _fpAds.filter(a => a.status === 'placed');
+if (!placed.length) { toast('אין מודעות משובצות שממתינות לפרסום'); return; }
+const total = placed.reduce((s, a) => s + (Number(a.price) || 0) - (Number(a.discount) || 0), 0);
+if (!confirm(`לסמן ${placed.length} מודעות כפורסמו?\nייווצרו חיובים בסך ${money(total)}.\nפעולה זו אינה ניתנת לביטול מרוכז.`)) return;
+try {
+const { data, error } = await db.rpc('publish_issue_ads', { p_issue_id: _fpIssue.id });
+if (error) throw error;
+const errs = (data && data.errors) || [];
+toast(`פורסמו ${data?.published ?? 0} מודעות ✓` + (errs.length ? ` (${errs.length} נכשלו)` : ''), errs.length > 0);
+if (errs.length) console.error('publish_issue_ads errors', errs);
+} catch (e) { toast('שגיאה בפרסום המרוכז: ' + (e.message || e), true); }
+openFlatplan(_fpIssue.id);
+}
+
 function fpPrint() {
 let rows = '';
 for (let p = 1; p <= _fpIssue.pages_count; p++) {
