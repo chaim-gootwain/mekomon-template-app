@@ -77,11 +77,19 @@ Deno.serve(async (req)=>{
         }
       }
     });
+    /* נושא בעברית/אמוג'י: קידוד Base64 ידני (encoded-word יחיד, כמו ב-send-clip).
+       denomailer מקודד נושא לא-ASCII ב-quoted-printable עם שבירות שורה בתוך
+       ה-encoded-word — נושא ארוך שובר את בלוק הכותרות וכל המייל מגיע כטקסט גולמי.
+       הרווח המוביל מונע מ-denomailer לזהות "=?" ולקודד שוב. */
+    const subjRaw = String(subject || "הודעה מ@@PAPER_NAME@@");
+    const subjSafe = /[^\x00-\x7f]/.test(subjRaw)
+      ? " =?UTF-8?B?" + btoa(String.fromCharCode.apply(null, Array.from(new TextEncoder().encode(subjRaw)))) + "?="
+      : subjRaw;
     await client.send({
       from: user,
       to: dest,
       replyTo: "@@PAPER_EMAIL@@",
-      subject: String(subject || "הודעה מ@@PAPER_NAME@@"),
+      subject: subjSafe,
       content: String(body || ""),
       html: html ? String(html) : undefined,
       attachments: atts
