@@ -16,7 +16,8 @@ const ALERTS_EVENT_NAMES = {
   debt_over_threshold: 'חוב שחצה סף',
   issue_deadline: 'דדליין מודעות לגיליון',
   payment_failed: 'תשלום שנכשל',
-  check_bounced: "צ'ק שחזר"
+  check_bounced: "צ'ק שחזר",
+  agent_deal_closed: 'סוכן סגר עסקה (בוט הזנה)'
 };
 const ALERTS_CHANNEL_NAMES = { inapp: 'מערכת', email: 'מייל', whatsapp: 'וואטסאפ' };
 const ALERTS_SEV_ICONS = { info: 'ℹ️', warning: '⚠️', critical: '🚨' };
@@ -95,14 +96,18 @@ function alertsRenderDrop() {
     const cid = payload.customer_id, iid = payload.issue_id;
     const openClick = cid ? `onclick="alertsCloseDrop();openCustomerCard(${Number(cid)})" style="cursor:pointer"` :
       iid ? `onclick="alertsCloseDrop();openFlatplan(${Number(iid)})" style="cursor:pointer"` : '';
+    // התראת "סוכן סגר עסקה" (בוט ההזנה): כפתור שפותח את צ'אט החשבוניות ממולא
+    const dealBtn = (payload.entry_kind === 'agent_deal' && typeof deAlertInvoice === 'function')
+      ? `<button class="btn btn-sm" onclick="alertsCloseDrop();deAlertInvoice(${a.id})">🧾 הפק מסמך</button>` : '';
     return `<div class="notif-item" style="${a.status === 'new' ? '' : 'opacity:.65'}">
       <div class="notif-row" ${openClick}>
         <span class="notif-ico">${ALERTS_SEV_ICONS[a.severity] || 'ℹ️'}</span>
         <div><div class="notif-text">${esc(a.title)}</div>
-        <div class="notif-sub">${esc(a.body || '')}</div>
+        ${a.body && a.body !== a.title ? `<div class="notif-sub">${esc(a.body)}</div>` : ''}
         <div class="notif-sub">${heDateTime(a.created_at)}</div></div>
       </div>
       <div class="notif-actions">
+        ${dealBtn}
         ${a.status === 'new' ? `<button class="btn btn-sm btn-ghost" onclick="alertsMarkRead(${a.id})">✓ נקרא</button>` : ''}
         <button class="btn btn-sm btn-ghost" onclick="alertsDismiss(${a.id})">✕ הסר</button>
       </div>
