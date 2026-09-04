@@ -1,0 +1,28 @@
+# CI לריפו התבנית: על כל PR (ועל push ל-main) —
+# 1. בונה את app.bundle.js לפי ה-ORDER שב-build.sh (כולל node --check על הבאנדל):
+#    תופס קובץ JS חסר/שבור וקובץ חדש שנשכח מה-ORDER.
+# 2. מריץ את בדיקות ה-unit שב-tests/ (קובצי .test.mjs — לא מסונכרנים למופעים).
+# לא נוגע ב-notify-instances.yml ובמנגנון הסנכרון.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: בניית הבאנדל (כולל בדיקת תחביר)
+        run: bash build.sh
+      - name: בדיקות unit
+        run: |
+          shopt -s nullglob
+          found=0
+          for f in tests/*.test.mjs; do found=1; echo "▶ $f"; node "$f"; done
+          [ "$found" = "1" ] || echo "אין קובצי בדיקה — מדלג"
