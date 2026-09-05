@@ -213,7 +213,7 @@ async function _pvRender() {
       <div>
         <div style="font-weight:700;color:@@COLOR_BRAND@@;margin-bottom:6px">העימוד מצפה בעמוד ${p}:</div>
         ${rows}
-        <button class="btn btn-sm" style="margin-top:6px" onclick="_pvAddPrompt()">➕ מודעה שנוספה בעמוד זה</button>
+        <button class="btn btn-sm" style="margin-top:6px" onclick="_pvAddPrompt()">➕ מודעה שנוספה בעמוד זה</button><button class="btn btn-sm" style="margin-top:6px;margin-right:6px" onclick="_pvNewAdOpen()">➕ מודעה חדשה לעמוד</button>
         <div id="pvAddBox"></div>
       </div>
       <div>
@@ -314,3 +314,70 @@ async function _pvFinish() {
   document.getElementById('viewBack').classList.add('open');
   _pvState = null;
 }
+
+
+/* ---------- הזנת מודעת רגע-אחרון חדשה ממסך אמת מול מודפס ---------- */
+var _pvNewAd = null;
+function _pvNewAdOpen(){
+  var box = document.getElementById('pvAddBox');
+  if(!box || !_pvState) return;
+  _pvNewAd = { customer_id:null, customer_name:'' };
+  var opts = (cache.priceList||[]).map(function(p){ return '<option value="'+p.id+'" data-price="'+(p.price||0)+'">'+esc(p.name||'')+'</option>'; }).join('');
+  box.innerHTML =
+    '<div style="border:1px solid #ddd;border-radius:8px;padding:10px;margin-top:8px">'
+    +'<div style="font-weight:600;margin-bottom:6px">➕ מודעה חדשה לעמוד '+_pvState.page+'</div>'
+    +'<input id="pvNaCust" placeholder="חיפוש לקוח (שם/טלפון)…" oninput="_pvNewAdCustSearch()" style="width:100%;padding:6px;margin-bottom:4px;box-sizing:border-box">'
+    +'<div id="pvNaCustRes" style="max-height:140px;overflow:auto;margin-bottom:6px"></div>'
+    +'<div id="pvNaForm" style="display:none">'
+    +'<div style="margin-bottom:4px">לקוח: <b id="pvNaCustName"></b></div>'
+    +'<select id="pvNaSize" onchange="_pvNewAdSizeChange()" style="width:100%;padding:6px;margin-bottom:4px;box-sizing:border-box"><option value="">— בחר גודל —</option>'+opts+'</select>'
+    +'<input id="pvNaPrice" type="number" step="0.01" placeholder="מחיר" style="width:100%;padding:6px;margin-bottom:4px;box-sizing:border-box">'
+    +'<input id="pvNaTitle" placeholder="כותרת / הערה (רשות)" style="width:100%;padding:6px;margin-bottom:6px;box-sizing:border-box">'
+    +'<button class="btn btn-sm" onclick="_pvNewAdSave()">שמור מודעה לעמוד</button> '
+    +'<button class="btn btn-sm btn-ghost" onclick="_pvNaClose()">ביטול</button>'
+    +'</div>'
+    +'</div>';
+  var i=document.getElementById('pvNaCust'); if(i) i.focus();
+}
+function _pvNewAdCustSearch(){
+  var i=document.getElementById('pvNaCust'), res=document.getElementById('pvNaCustRes');
+  if(!i||!res) return;
+  var q=(i.value||'').trim();
+  if(q.length<2){ res.innerHTML=''; return; }
+  var list=(cache.customers||[]).filter(function(c){ return (c.name||'').includes(q) || (c.phone||'').includes(q); }).slice(0,8);
+  res.innerHTML = list.map(function(c){ return '<div style="padding:4px;cursor:pointer;border-bottom:1px solid #eee" onclick="_pvNewAdPick('+c.id+')">'+esc(c.name||'')+(c.phone?(' · '+esc(c.phone)):'')+'</div>'; }).join('') || '<div class="muted" style="padding:4px">לא נמצא לקוח</div>';
+}
+function _pvNewAdPick(id){
+  var c=(cache.customers||[]).find(function(x){ return x.id===id; });
+  if(!c) return;
+  _pvNewAd.customer_id=c.id; _pvNewAd.customer_name=c.name||'';
+  var n=document.getElementById('pvNaCustName'); if(n) n.textContent=c.name||'';
+  var res=document.getElementById('pvNaCustRes'); if(res) res.innerHTML='';
+  var i=document.getElementById('pvNaCust'); if(i) i.value=c.name||'';
+  var f=document.getElementById('pvNaForm'); if(f) f.style.display='';
+  var ti=document.getElementById('pvNaTitle'); if(ti && !ti.value) ti.value=c.name||'';
+}
+function _pvNewAdSizeChange(){
+  var sel=document.getElementById('pvNaSize'); if(!sel) return;
+  var opt=sel.options[sel.selectedIndex];
+  var p=opt?opt.getAttribute('data-price'):'';
+  var pi=document.getElementById('pvNaPrice');
+  if(pi && p!=null && p!=='') pi.value=p;
+}
+async function _pvNewAdSave(){
+  if(!_pvNewAd || !_pvNewAd.customer_id){ toast('בחר לקוח', true); return; }
+  var sel=document.getElementById('pvNaSize');
+  var itemId=sel?sel.value:'';
+  if(!itemId){ toast('בחר גודל', true); return; }
+  var pv=parseFloat((document.getElementById('pvNaPrice').value||'').trim());
+  var title=(document.getElementById('pvNaTitle').value||'').trim();
+  var rec={ issue_id:_pvState.issue.id, customer_id:_pvNewAd.customer_id, price_item_id:itemId, price:isNaN(pv)?null:pv, title:title||_pvNewAd.customer_name, page_number:_pvState.page, status:'placed' };
+  try{
+    var data=await run(db.from('ads').insert(rec).select().single());
+    if(data){ _pvState.ads.push(data); _pvState.changes.push({ t:'added', cust:nameOf('customers', data.customer_id), from:null, to:_pvState.page }); }
+    toast('המודעה נוספה לעמוד '+_pvState.page);
+    _pvNaClose();
+    _pvRender();
+  }catch(e){ toast('שגיאה: '+(e&&e.message||e), true); }
+}
+function _pvNaClose(){ var b=document.getElementById('pvAddBox'); if(b) b.innerHTML=''; }
