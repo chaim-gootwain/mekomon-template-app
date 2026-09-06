@@ -234,9 +234,21 @@ function invRenderModal() {
   let total = 0; s.lines.forEach(l => total += (Number(l.amount) || 0) * (Number(l.price) || 0));
   const payFields = s.isPayment ? `
     <div class="grid2" style="margin-top:10px">
-      <div class="field"><label>אמצעי תשלום</label><select id="invMethod" onchange="_invState.method=this.value">
+      <div class="field"><label>אמצעי תשלום</label><select id="invMethod" onchange="invSetMethod(this.value)">
         ${INV_PAY_METHODS.map(m => `<option value="${m.v}" ${m.v === s.method ? 'selected' : ''}>${m.t}</option>`).join('')}</select></div>
       <div class="field"><label>תאריך תשלום</label><input type="date" value="${s.date}" onchange="_invState.date=this.value"></div>
+    </div>` : '';
+  // פרטי צ׳ק — חובה בקבלה/חשבונית-מס-קבלה על תשלום בצ׳ק (הוראות ניהול פנקסים)
+  const checkFields = (s.isPayment && s.method === 'check') ? `
+    <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:9px;padding:9px 11px;margin-top:8px">
+      <div class="muted" style="font-size:.8rem;margin-bottom:6px">פרטי הצ׳ק — חובה לרשום בקבלה על תשלום בצ׳ק</div>
+      <div class="grid2">
+        <div class="field"><label>שם הבנק</label><input value="${esc(s.checkBank || '')}" oninput="_invState.checkBank=this.value" placeholder="למשל בנק לאומי"></div>
+        <div class="field"><label>מס' צ׳ק</label><input value="${esc(s.checkNum || '')}" dir="ltr" oninput="_invState.checkNum=this.value" placeholder="מספר הצ׳ק"></div>
+        <div class="field"><label>סניף</label><input value="${esc(s.checkBranch || '')}" dir="ltr" oninput="_invState.checkBranch=this.value" placeholder="מס' סניף"></div>
+        <div class="field"><label>מס' חשבון</label><input value="${esc(s.checkAccount || '')}" dir="ltr" oninput="_invState.checkAccount=this.value" placeholder="מס' חשבון"></div>
+        <div class="field"><label>תאריך פירעון</label><input type="date" value="${s.checkDue || ''}" onchange="_invState.checkDue=this.value"></div>
+      </div>
     </div>` : '';
   document.getElementById('invOv').innerHTML = `<div class="inv-box">
     <h3>הנפקת ${DOC_KIND_HE[s.kind]} — ${esc(s.name)}</h3>
@@ -279,6 +291,7 @@ function invRenderModal() {
     <label style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
       <input type="checkbox" ${s.vatInc ? 'checked' : ''} onchange="_invState.vatInc=this.checked; invUpdateTotal()" style="width:18px;height:18px"> המחירים כוללים מע"מ</label>
     ${payFields}
+    ${checkFields}
     <div class="inv-total" id="invTotal" style="display:block;text-align:right">${_invTotalsHtml()}</div>
     <div class="m-actions" style="justify-content:flex-start;gap:8px">
       <button class="btn" onclick="invSubmit()">הפק ${DOC_KIND_HE[s.kind]}</button>
@@ -314,6 +327,7 @@ function invUpdateTotal() {
 function invAddLine() { _invState.lines.push({ details: '', amount: 1, price: '', disc: 0 }); invRenderModal(); }
 function invRmLine(i) { _invState.lines.splice(i, 1); if (!_invState.lines.length) _invState.lines.push({ details: '', amount: 1, price: '' }); invRenderModal(); }
 function invSetKind(k) { if (_invState) { _invState.kind = k; invRenderModal(); } }
+function invSetMethod(v) { if (_invState) { _invState.method = v; invRenderModal(); } }
 function invSetIssue(id) {
   if (!id) { _invState.issueId = null; if (_invState.lines[0]) _invState.lines[0].details = ''; invRenderModal(); return; }
   _invState.issueId = Number(id);
@@ -357,6 +371,16 @@ async function invSubmit() {
     // קבלה בלבד: הסכום שהוזן הוא הסכום הסופי (אין שורות מע"מ). חשבונית מס-קבלה: מגלמים מע"מ אם המחירים "פלוס מע"מ".
     const gross = (s.vatInc || s.kind === 'receipt') ? base : Math.round(base * 1.18 * 100) / 100;
     body.payment = { method: s.method, sum: gross, date: _ezDate(s.date) };
+    // פרטי צ׳ק — חובה על פי הוראות ניהול פנקסים; חוסמים הפקה בלי שם בנק ומס' צ׳ק
+    if (s.method === 'check') {
+      const _bank = (s.checkBank || '').trim(), _num = (s.checkNum || '').trim();
+      if (!_bank || !_num) { toast('בתשלום בצ׳ק חובה למלא שם בנק ומס\' צ׳ק', true); return; }
+      body.payment.bank_name = _bank;
+      body.payment.check_number = _num;
+      if ((s.checkBranch || '').trim()) body.payment.branch = s.checkBranch.trim();
+      if ((s.checkAccount || '').trim()) body.payment.account = s.checkAccount.trim();
+      if (s.checkDue) body.payment.date = _ezDate(s.checkDue); // תאריך הפירעון של הצ׳ק
+    }
     if (s.kind === 'receipt') delete body.items; // קבלה בלבד — בלי פירוט חשבונית
   }
   if (s.parentUuid) body.parent = s.parentUuid; // שיוך המסמך למסמך המקור (חשבון עסקה / חשבונית מס)

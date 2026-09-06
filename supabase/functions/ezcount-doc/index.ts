@@ -95,6 +95,8 @@ Deno.serve(async (req)=>{
       if (payment.method === "check") {
         p.checks_bank_name = payment.bank_name || "—";
         p.checks_number = payment.check_number || "—";
+        if (payment.branch) p.checks_bank_branch = payment.branch;
+        if (payment.account) p.checks_bank_account = payment.account;
       } else if (payment.method === "credit") {
         p.cc_type = 0;
         p.cc_type_name = payment.cc_name || "אשראי";
