@@ -20,6 +20,12 @@ const INV_PAY_METHODS = [
   { v: 'cash', t: 'מזומן' }, { v: 'check', t: 'צ׳ק' }, { v: 'transfer', t: 'העברה' },
   { v: 'bit', t: 'ביט' }, { v: 'paybox', t: 'פייבוקס' }, { v: 'credit', t: 'אשראי' },
 ];
+/* רשימת הבנקים בישראל — לתפריט הבחירה בפרטי צ׳ק (גם במסך וגם בבוט) */
+const INV_BANKS = [
+  'בנק הפועלים', 'בנק לאומי', 'בנק דיסקונט', 'בנק מזרחי-טפחות', 'הבנק הבינלאומי',
+  'בנק ירושלים', 'בנק יהב', 'בנק מסד', 'מרכנתיל דיסקונט', 'בנק אוצר החייל',
+  'בנק הדואר', 'וואן זירו (One Zero)',
+];
 
 function invEnsureStyles() {
   if (document.getElementById('invFxStyles')) return;
@@ -243,7 +249,12 @@ function invRenderModal() {
     <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:9px;padding:9px 11px;margin-top:8px">
       <div class="muted" style="font-size:.8rem;margin-bottom:6px">פרטי הצ׳ק — חובה לרשום בקבלה על תשלום בצ׳ק</div>
       <div class="grid2">
-        <div class="field"><label>שם הבנק</label><input value="${esc(s.checkBank || '')}" oninput="_invState.checkBank=this.value" placeholder="למשל בנק לאומי"></div>
+        <div class="field"><label>שם הבנק</label><select onchange="invSetCheckBank(this.value)">
+          <option value="">— בחר בנק —</option>
+          ${INV_BANKS.map(b => `<option value="${esc(b)}" ${b === s.checkBank ? 'selected' : ''}>${esc(b)}</option>`).join('')}
+          <option value="__other" ${(s.checkBankOther || (s.checkBank && !INV_BANKS.includes(s.checkBank))) ? 'selected' : ''}>אחר…</option>
+        </select></div>
+        ${(s.checkBankOther || (s.checkBank && !INV_BANKS.includes(s.checkBank))) ? `<div class="field"><label>שם הבנק (אחר)</label><input value="${esc(s.checkBank || '')}" oninput="_invState.checkBank=this.value" placeholder="שם הבנק"></div>` : ''}
         <div class="field"><label>מס' צ׳ק</label><input value="${esc(s.checkNum || '')}" dir="ltr" oninput="_invState.checkNum=this.value" placeholder="מספר הצ׳ק"></div>
         <div class="field"><label>סניף</label><input value="${esc(s.checkBranch || '')}" dir="ltr" oninput="_invState.checkBranch=this.value" placeholder="מס' סניף"></div>
         <div class="field"><label>מס' חשבון</label><input value="${esc(s.checkAccount || '')}" dir="ltr" oninput="_invState.checkAccount=this.value" placeholder="מס' חשבון"></div>
@@ -328,6 +339,12 @@ function invAddLine() { _invState.lines.push({ details: '', amount: 1, price: ''
 function invRmLine(i) { _invState.lines.splice(i, 1); if (!_invState.lines.length) _invState.lines.push({ details: '', amount: 1, price: '' }); invRenderModal(); }
 function invSetKind(k) { if (_invState) { _invState.kind = k; invRenderModal(); } }
 function invSetMethod(v) { if (_invState) { _invState.method = v; invRenderModal(); } }
+function invSetCheckBank(v) {
+  if (!_invState) return;
+  if (v === '__other') { _invState.checkBank = ''; _invState.checkBankOther = true; }
+  else { _invState.checkBank = v; _invState.checkBankOther = false; }
+  invRenderModal();
+}
 function invSetIssue(id) {
   if (!id) { _invState.issueId = null; if (_invState.lines[0]) _invState.lines[0].details = ''; invRenderModal(); return; }
   _invState.issueId = Number(id);

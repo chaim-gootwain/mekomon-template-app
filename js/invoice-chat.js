@@ -309,17 +309,30 @@ function invChatSetPay(k) { _icState.fields.payment_method = k; _icState.pending
 /* פרטי צ׳ק — חובה בקבלה על תשלום בצ׳ק (הוראות ניהול פנקסים); אותם כללים כמו מסך החשבוניות */
 function invChatCheckFieldsHtml(f) {
   if (f.payment_method !== 'check') return '';
+  const bankOther = f.check_bank_other || (f.check_bank && !INV_BANKS.includes(f.check_bank));
   return `
     <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:9px;padding:9px 11px;margin-top:8px">
       <div class="muted" style="font-size:.8rem;margin-bottom:6px">פרטי הצ׳ק — חובה לרשום בקבלה על תשלום בצ׳ק</div>
       <div class="grid2">
-        <div class="field"><label>שם הבנק</label><input value="${esc(f.check_bank || '')}" oninput="_icState.fields.check_bank=this.value" placeholder="למשל בנק לאומי"></div>
+        <div class="field"><label>שם הבנק</label><select onchange="invChatSetCheckBank(this.value)">
+          <option value="">— בחר בנק —</option>
+          ${INV_BANKS.map(b => `<option value="${esc(b)}" ${b === f.check_bank ? 'selected' : ''}>${esc(b)}</option>`).join('')}
+          <option value="__other" ${bankOther ? 'selected' : ''}>אחר…</option>
+        </select></div>
+        ${bankOther ? `<div class="field"><label>שם הבנק (אחר)</label><input value="${esc(f.check_bank || '')}" oninput="_icState.fields.check_bank=this.value" placeholder="שם הבנק"></div>` : ''}
         <div class="field"><label>מס' צ׳ק</label><input value="${esc(f.check_num || '')}" dir="ltr" oninput="_icState.fields.check_num=this.value" placeholder="מספר הצ׳ק"></div>
         <div class="field"><label>סניף</label><input value="${esc(f.check_branch || '')}" dir="ltr" oninput="_icState.fields.check_branch=this.value" placeholder="מס' סניף"></div>
         <div class="field"><label>מס' חשבון</label><input value="${esc(f.check_account || '')}" dir="ltr" oninput="_icState.fields.check_account=this.value" placeholder="מס' חשבון"></div>
         <div class="field"><label>תאריך פירעון</label><input type="date" value="${f.check_due || ''}" onchange="_icState.fields.check_due=this.value"></div>
       </div>
     </div>`;
+}
+function invChatSetCheckBank(v) {
+  const f = _icState.fields;
+  if (v === '__other') { f.check_bank = ''; f.check_bank_other = true; }
+  else { f.check_bank = v; f.check_bank_other = false; }
+  // רענון הכרטיס הנכון לפי המסלול (הפקה רגילה / "לקוח שילם")
+  if (_icState.pay) invChatRenderPayCard(); else invChatRenderCard();
 }
 /* מוסיף את פרטי הצ׳ק ל-payment; מחזיר false (עם הודעה) אם חסרים שם בנק / מס' צ׳ק */
 function invChatApplyCheck(f, payment) {
