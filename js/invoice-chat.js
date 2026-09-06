@@ -306,6 +306,34 @@ function invChatNext() {
 function invChatSetDocType(k) { _icState.fields.doc_type = k; _icState.pending = null; invChatNext(); }
 function invChatSetPay(k) { _icState.fields.payment_method = k; _icState.pending = null; invChatNext(); }
 
+/* פרטי צ׳ק — חובה בקבלה על תשלום בצ׳ק (הוראות ניהול פנקסים); אותם כללים כמו מסך החשבוניות */
+function invChatCheckFieldsHtml(f) {
+  if (f.payment_method !== 'check') return '';
+  return `
+    <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:9px;padding:9px 11px;margin-top:8px">
+      <div class="muted" style="font-size:.8rem;margin-bottom:6px">פרטי הצ׳ק — חובה לרשום בקבלה על תשלום בצ׳ק</div>
+      <div class="grid2">
+        <div class="field"><label>שם הבנק</label><input value="${esc(f.check_bank || '')}" oninput="_icState.fields.check_bank=this.value" placeholder="למשל בנק לאומי"></div>
+        <div class="field"><label>מס' צ׳ק</label><input value="${esc(f.check_num || '')}" dir="ltr" oninput="_icState.fields.check_num=this.value" placeholder="מספר הצ׳ק"></div>
+        <div class="field"><label>סניף</label><input value="${esc(f.check_branch || '')}" dir="ltr" oninput="_icState.fields.check_branch=this.value" placeholder="מס' סניף"></div>
+        <div class="field"><label>מס' חשבון</label><input value="${esc(f.check_account || '')}" dir="ltr" oninput="_icState.fields.check_account=this.value" placeholder="מס' חשבון"></div>
+        <div class="field"><label>תאריך פירעון</label><input type="date" value="${f.check_due || ''}" onchange="_icState.fields.check_due=this.value"></div>
+      </div>
+    </div>`;
+}
+/* מוסיף את פרטי הצ׳ק ל-payment; מחזיר false (עם הודעה) אם חסרים שם בנק / מס' צ׳ק */
+function invChatApplyCheck(f, payment) {
+  if (f.payment_method !== 'check') return true;
+  const bank = (f.check_bank || '').trim(), num = (f.check_num || '').trim();
+  if (!bank || !num) { toast('בתשלום בצ׳ק חובה למלא שם בנק ומס\' צ׳ק', true); return false; }
+  payment.bank_name = bank;
+  payment.check_number = num;
+  if ((f.check_branch || '').trim()) payment.branch = f.check_branch.trim();
+  if ((f.check_account || '').trim()) payment.account = f.check_account.trim();
+  if (f.check_due) payment.date = (typeof _ezDate === 'function' ? _ezDate(f.check_due) : f.check_due); // תאריך הפירעון של הצ׳ק
+  return true;
+}
+
 /* ---------- כרטיס תצוגה מקדימה ---------- */
 function invChatRenderCard() {
   const f = _icState.fields;
@@ -338,9 +366,9 @@ function invChatRenderCard() {
     <div id="icLines">${invChatLinesHtml()}</div>
     <button class="btn btn-sm btn-ghost" onclick="invChatAddLine()">+ הוסף שורה</button>
     ${isPay ? `<div class="field" style="margin-top:10px;max-width:240px"><label>אמצעי תשלום</label>
-      <select onchange="_icState.fields.payment_method=this.value">
+      <select onchange="invChatCardSetPay(this.value)">
         ${Object.keys(INVCHAT_PAY_HE).map(k => `<option value="${k}" ${k === f.payment_method ? 'selected' : ''}>${INVCHAT_PAY_HE[k]}</option>`).join('')}
-      </select></div>` : ''}
+      </select></div>${invChatCheckFieldsHtml(f)}` : ''}
     <div class="ic-sum" id="icSum">${invChatSumHtml()}</div>
     <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
       <button class="btn" id="icApprove" onclick="invChatApprove()">✅ אשר והפק</button>
@@ -455,6 +483,10 @@ function invChatCardSetDoc(k) {
   document.getElementById('icCard-' + _icState.reqId)?.remove();
   invChatNext(); // ייתכן שעכשיו חסר אמצעי תשלום (קבלה/מס-קבלה)
 }
+function invChatCardSetPay(v) {
+  _icState.fields.payment_method = v;
+  invChatRenderCard(); // רענון הכרטיס — פרטי הצ׳ק מופיעים/נעלמים לפי אמצעי התשלום
+}
 
 /* ---------- אישור / ביטול ---------- */
 // מיפוי doc_type של הצ'אט → doc_kind של ezcount-doc (אותו ספק כמו כרטיס הלקוח = EZcount)
@@ -492,10 +524,11 @@ async function invChatApprove() {
   const f = _icState.fields;
   if (!f.line_items.some(l => Number(l.unit_price) > 0)) { toast('חסר מחיר — השלם לפני הפקה', true); return; }
   if (!f.customer_id && !(f.customer_name && f.customer_name.trim())) { toast('חסר לקוח', true); return; }
+  const body = invChatEzcountBody(f);
+  if (body.payment && !invChatApplyCheck(f, body.payment)) return;
   const btn = document.getElementById('icApprove');
   if (btn) { btn.disabled = true; btn.textContent = 'מפיק...'; }
   icSetBusy(true);
-  const body = invChatEzcountBody(f);
   const r = await invChatFn('ezcount-doc', body);
   icSetBusy(false);
   const doc = r.data && r.data.document;
@@ -621,12 +654,13 @@ function invChatRenderPayCard() {
     </div>
     <div class="grid2">
       <div class="field"><label>אמצעי תשלום</label>
-        <select onchange="_icState.fields.payment_method=this.value">
+        <select onchange="invChatPaySetMethod(this.value)">
           ${INV_PAY_METHODS.map(m => `<option value="${m.v}" ${m.v === f.payment_method ? 'selected' : ''}>${m.t}</option>`).join('')}
         </select></div>
       <div class="field"><label>תאריך תשלום</label>
         <input type="date" value="${esc(_icState.payDate)}" onchange="_icState.payDate=this.value"></div>
     </div>
+    ${invChatCheckFieldsHtml(f)}
     <div class="ic-sum">
       <div class="row tot"><span>סה"כ המס-קבלה</span><span>${money(Number(p.amount) || 0)}</span></div>
       <div class="muted" style="font-size:.75rem;margin-top:3px">הסכום כפי שנקבע בחשבון העסקה (כולל מע"מ).</div>
@@ -645,6 +679,8 @@ async function invChatPayApprove() {
   if (!(gross > 0)) { toast('סכום העסקה אינו תקין', true); return; }
   const method = f.payment_method || 'cash';
   const dstr = _icState.payDate || today();
+  const payment = { method, sum: gross, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) };
+  if (!invChatApplyCheck(f, payment)) return;
   const btn = document.getElementById('icApprove');
   if (btn) { btn.disabled = true; btn.textContent = 'מפיק...'; }
   icSetBusy(true);
@@ -655,7 +691,7 @@ async function invChatPayApprove() {
     vat_included: true,
     doc_date: dstr,
     pay_date: dstr,
-    payment: { method, sum: gross, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) },
+    payment,
     parent: p.uuid,
   };
   const r = await invChatFn('ezcount-doc', body);
