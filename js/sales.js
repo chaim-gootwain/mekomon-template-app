@@ -360,7 +360,7 @@ quotePrint({ ...q, recipient_phone: phone, recipient_email: email, valid_until: 
 /* הפקת ה-PDF: נפתח חלון הדפסה מעוצב — בוחרים "שמירה כ-PDF" */
 function quotePrint(q) {
 const items = q.items || [];
-const sum = items.reduce((s, i) => s + (i.type === 'text' ? 0 : i.price * i.qty), 0);
+const sum = items.reduce((s, i) => s + (i.type === 'text' ? 0 : (Number(i.price) || 0) * (Number(i.qty) || 0)), 0);
 const total = Math.max(0, sum - Number(q.discount || 0));
 const vat = Math.round(total * VAT_PCT) / 100;
 const _logo = new URL('img/logo.png', location.href).href;

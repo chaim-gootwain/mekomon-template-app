@@ -61,7 +61,7 @@ return;
 profile = data;
 if (profile.role === 'pending' || !profile.active) { show('pendingScreen'); return; }
 if (profile.role === 'committee') { // לוועדה ממשק ממוקד משלה
-buildShell(); show('app'); await refreshCache(); openPage('committee'); return;
+buildShell(); show('app'); await refreshCache(); await updateClockButton(); openPage('committee'); return;
 }
 buildShell();
 show('app');

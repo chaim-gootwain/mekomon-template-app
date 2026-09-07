@@ -635,7 +635,7 @@ async function maybeFollowupReminder() {
     let rows = data || [];
     // התזכורת אישית: קופצת רק אצל הסוכן שהליד משויך אליו — לא אצל שאר הסוכנים וגם לא אצל המנהל
     const mine = myAgentId();
-    rows = rows.filter(l => l.agent_id === mine);
+    rows = mine == null ? [] : rows.filter(l => l.agent_id === mine);
 
     // באדג' על פריט "לידים" בתפריט
     const badge = document.getElementById('badge-leads');

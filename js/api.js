@@ -267,7 +267,8 @@ await run(db.from('interactions').insert({ entity_type: entityType, entity_id: e
 
 /* ---------- 8. ייצוא לאקסל (CSV עם BOM לעברית) ולהדפסה/PDF ---------- */
 function exportCsv(filename, headers, rows) {
-const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
+// תא שמתחיל ב-= + @ (ואינו מספר) מקבל גרש — אקסל לא יריץ אותו כנוסחה
+const q = s => { let v = String(s ?? ''); if (/^[=+@]/.test(v) || (/^-/.test(v) && !/^-?\d+(\.\d+)?$/.test(v))) v = "'" + v; return `"${v.replace(/"/g, '""')}"`; };
 const csv = '﻿' + [headers.map(q).join(','), ...rows.map(r => r.map(q).join(','))].join('\r\n');
 const a = document.createElement('a');
 a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
