@@ -21,6 +21,16 @@ function _icPayMethod() { return (typeof PAY_METHODS !== 'undefined' && PAY_METH
 /* אסמכתא ייחודית למסמך (למניעת כפל) */
 function _icRef(doc, body) { return String((doc && doc.doc_number) || (body && body.transaction_id) || '').trim(); }
 
+/* התאמת תג מדויקת: "#doc:123" לא יתפוס "#doc:1234" (מספרי המסמכים רציפים,
+   כך שהתנגשות קידומת מובטחת עם הזמן). ilike נשאר כסינון גס בשאילתה —
+   ההכרעה הסופית כאן. */
+function _icTagIn(notes, tag) {
+  if (!notes || !tag) return false;
+  const esc = String(tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(esc + '(?![0-9A-Za-z])').test(String(notes));
+}
+function _icHasDocTag(notes, ref) { return _icTagIn(notes, '#doc:' + ref); }
+
 /* סכום המסמך כולל מע"מ (מעדיפים את total מהמסמך; אחרת מחשבים מהשורות) */
 function _icDocTotal(doc, body) {
   const t = Number(doc && doc.total);
@@ -49,10 +59,10 @@ function _icPlanSettlement(openCharges, total) {
 async function _icAlreadyDone(cid, ref) {
   if (!ref) return false;
   try {
-    const c = await db.from('charges').select('id').eq('customer_id', cid).ilike('notes', '%#doc:' + ref + '%').limit(1);
-    if (c.data && c.data.length) return true;
-    const p = await db.from('payments').select('id').eq('customer_id', cid).ilike('notes', '%#doc:' + ref + '%').limit(1);
-    if (p.data && p.data.length) return true;
+    const c = await db.from('charges').select('id,notes').eq('customer_id', cid).ilike('notes', '%#doc:' + ref + '%').limit(20);
+    if ((c.data || []).some(r => _icHasDocTag(r.notes, ref))) return true;
+    const p = await db.from('payments').select('id,notes').eq('customer_id', cid).ilike('notes', '%#doc:' + ref + '%').limit(20);
+    if ((p.data || []).some(r => _icHasDocTag(r.notes, ref))) return true;
   } catch (e) { /* אם notes לא קיים בסכימה — לא חוסמים */ }
   return false;
 }
@@ -80,20 +90,50 @@ async function applyInvoiceToLedger(body, doc) {
     const baseDesc = heKind + (docNum ? ' ' + docNum : '') + (body.comment ? ' — ' + body.comment : '');
 
     if (IC_CREDIT_KINDS.includes(kind)) {
-      // זיכוי / ביטול — רושם שורת חוב שלילית שמקזזת את הסכום שבוטל
-      const _cc = await db.from('charges').insert({
-        customer_id: cid, amount: -total, description: 'זיכוי/ביטול' + (docNum ? ' ' + docNum : '') + (body.credit_ref ? ' (למסמך ' + body.credit_ref + ')' : ''),
-        issued_date: _iDate, due_date: today(), status: 'paid',
-        invoice_number: docNum || null, agent_id: cust.agent_id || null, notes: 'זיכוי מחשבונית' + tag,
-      }).select('id').single();
-      // אם המסמך המקורי היה חשבונית מס-קבלה / קבלה — הוא יצר גם תשלום; מבטלים גם אותו
+      // זיכוי / ביטול. אם החיוב המקורי עדיין פתוח — מבטלים אותו ישירות, כך
+      // שהחוב יורד מכל מסכי הגבייה (שסופרים רק סטטוסים פתוחים ומתעלמים
+      // משורת קיזוז שלילית).
+      let _origCharges = [];
       if (body.credit_ref) {
         try {
-          const _origPays = (await db.from('payments').select('amount').eq('customer_id', cid).ilike('notes', '%#doc:' + body.credit_ref + '%')).data || [];
+          const _cand = (await db.from('charges').select('id,notes').eq('customer_id', cid)
+            .in('status', ['pending', 'invoiced', 'partial', 'overdue'])
+            .ilike('notes', '%#doc:' + body.credit_ref + '%')).data || [];
+          _origCharges = _cand.filter(r => _icHasDocTag(r.notes, body.credit_ref));
+          for (const r of _origCharges) {
+            await db.from('charges').update({
+              status: 'cancelled',
+              notes: (r.notes || '') + ' · בוטל בזיכוי' + (docNum ? ' ' + docNum : '') + tag,
+            }).eq('id', r.id);
+          }
+        } catch (e) { console.error('credit-cancel-orig', e); }
+      }
+      // שורת קיזוז שלילית נרשמת רק כשלא בוטל חוב פתוח (המקור כבר שולם, או
+      // שלא סונכרן לספר) — אחרת הכרטסת תספור את ההפחתה פעמיים.
+      let _creditChargeId = null;
+      if (!_origCharges.length) {
+        const _cc = await db.from('charges').insert({
+          customer_id: cid, amount: -total, description: 'זיכוי/ביטול' + (docNum ? ' ' + docNum : '') + (body.credit_ref ? ' (למסמך ' + body.credit_ref + ')' : ''),
+          issued_date: _iDate, due_date: today(), status: 'paid',
+          invoice_number: docNum || null, agent_id: cust.agent_id || null, notes: 'זיכוי מחשבונית' + tag,
+        }).select('id').single();
+        _creditChargeId = _cc.data ? _cc.data.id : null;
+      }
+      // אם המסמך המקורי יצר תשלומים (מס-קבלה / קבלה, או חיוב ששולם חלקית) —
+      // מבטלים גם אותם, לפי תג המסמך או שיוך לחיובים שבוטלו כעת
+      if (body.credit_ref) {
+        try {
+          const _byTag = (await db.from('payments').select('id,amount,notes').eq('customer_id', cid).ilike('notes', '%#doc:' + body.credit_ref + '%')).data || [];
+          const _origPays = _byTag.filter(r => _icHasDocTag(r.notes, body.credit_ref));
+          if (_origCharges.length) {
+            const _seen = new Set(_origPays.map(p => p.id));
+            const _byCh = (await db.from('payments').select('id,amount,notes').in('charge_id', _origCharges.map(r => r.id))).data || [];
+            _byCh.forEach(p => { if (!_seen.has(p.id) && Number(p.amount) > 0) _origPays.push(p); });
+          }
           const _paidSum = _origPays.reduce((s, p) => s + Number(p.amount || 0), 0);
           if (_paidSum > 0.001) {
             await db.from('payments').insert({
-              charge_id: (_cc.data ? _cc.data.id : null), customer_id: cid, amount: -Math.round(_paidSum * 100) / 100,
+              charge_id: _creditChargeId, customer_id: cid, amount: -Math.round(_paidSum * 100) / 100,
               method: _icPayMethod(), paid_date: _pDate,
               notes: 'ביטול תשלום — זיכוי' + (docNum ? ' ' + docNum : '') + ' (למסמך ' + body.credit_ref + ')' + tag,
               created_by: (typeof profile !== 'undefined' ? profile.id : null),

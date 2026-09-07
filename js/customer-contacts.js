@@ -54,10 +54,16 @@ async function _custSaveContacts(id, contacts) {
   openCustomerCard(id);
 }
 
+/* הרשימה נטענת תמיד מהמסד — לא מ-_customers, שריק כשהכרטיס נפתח בלי
+   לעבור בדף הלקוחות (דשבורד/התראות), מה שגרם לשמירה לדרוס את כל הרשימה. */
+async function _custLoadContacts(id) {
+  const row = await run(db.from('customers').select('contacts').eq('id', id).single());
+  return _custContacts(row).slice();
+}
+
 function custContactAdd(id) {
-  const c = (_customers || []).find(x => x.id === id);
   openForm('איש קשר חדש', _CONTACT_FIELDS, {}, async (rec) => {
-    const list = _custContacts(c).slice();
+    const list = await _custLoadContacts(id);
     if (rec.primary) list.forEach(x => x.primary = false);
     list.push({ name: (rec.name || '').trim(), role: rec.role || '', phone: rec.phone || '', whatsapp: rec.whatsapp || '', email: rec.email || '', primary: !!rec.primary });
     await _custSaveContacts(id, list);
@@ -65,9 +71,8 @@ function custContactAdd(id) {
   });
 }
 
-function custContactEdit(id, idx) {
-  const c = (_customers || []).find(x => x.id === id);
-  const list = _custContacts(c).slice();
+async function custContactEdit(id, idx) {
+  const list = await _custLoadContacts(id);
   const cur = list[idx]; if (!cur) return;
   openForm('עריכת איש קשר', _CONTACT_FIELDS, cur, async (rec) => {
     if (rec.primary) list.forEach(x => x.primary = false);
@@ -78,8 +83,8 @@ function custContactEdit(id, idx) {
 }
 
 async function custContactPrimary(id, idx) {
-  const c = (_customers || []).find(x => x.id === id);
-  const list = _custContacts(c).slice();
+  const list = await _custLoadContacts(id);
+  if (idx < 0 || idx >= list.length) { toast('הרשימה השתנתה — פתח את הכרטיס מחדש', true); return; }
   list.forEach((x, i) => x.primary = (i === idx));
   await _custSaveContacts(id, list);
   toast('✓ סומן כראשי');
@@ -87,8 +92,8 @@ async function custContactPrimary(id, idx) {
 
 async function custContactRemove(id, idx) {
   if (!confirm('להסיר את איש הקשר?')) return;
-  const c = (_customers || []).find(x => x.id === id);
-  const list = _custContacts(c).slice();
+  const list = await _custLoadContacts(id);
+  if (idx < 0 || idx >= list.length) { toast('הרשימה השתנתה — פתח את הכרטיס מחדש', true); return; }
   list.splice(idx, 1);
   await _custSaveContacts(id, list);
   toast('הוסר');

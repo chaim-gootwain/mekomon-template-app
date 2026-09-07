@@ -20,9 +20,9 @@ async function _invRecLoad() {
   const chg = (await db.from('charges').select('invoice_number,notes')).data || [];
   const pays = (await db.from('payments').select('notes')).data || [];
   // "כבר טופל" = יש חיוב או תשלום שמתייג את המסמך (מסמך תשלום שנזקף לחוב פתוח נחשב מסונכרן)
-  const has = (num) => chg.some(c => (c.notes && c.notes.includes('#doc:' + num)) ||
+  const has = (num) => chg.some(c => _icHasDocTag(c.notes, num) ||
     (c.invoice_number && String(c.invoice_number).trim() === String(num).trim())) ||
-    pays.some(p => p.notes && p.notes.includes('#doc:' + num));
+    pays.some(p => _icHasDocTag(p.notes, num));
   const items = [];
   docs.forEach(d => {
     const num = String(d.doc_number || '').trim();

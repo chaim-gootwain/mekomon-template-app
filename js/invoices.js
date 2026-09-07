@@ -429,8 +429,10 @@ async function invCredit(docId) {
   if (d.doc_kind === 'proforma') {
     if (!confirm('לבטל את חשבון העסקה ' + num + '?\n(ביטול פנימי בלבד — לא מופקת חשבונית זיכוי, כי חשבון עסקה אינו מסמך מס)')) return;
     try {
-      const { data: chs } = await db.from('charges').select('id').eq('customer_id', d.customer_id).ilike('notes', '%#doc:' + num + '%').in('status', ['pending', 'invoiced', 'partial', 'overdue']);
-      if (chs && chs.length) await db.from('charges').update({ status: 'cancelled', notes: 'בוטל — חשבון עסקה ' + num }).in('id', chs.map(c => c.id));
+      const { data: chs } = await db.from('charges').select('id,notes').eq('customer_id', d.customer_id).ilike('notes', '%#doc:' + num + '%').in('status', ['pending', 'invoiced', 'partial', 'overdue']);
+      // התאמה מדויקת — שביטול מסמך 123 לא יבטל בטעות את החוב של מסמך 1234
+      const _exact = (chs || []).filter(c => _icHasDocTag(c.notes, num));
+      if (_exact.length) await db.from('charges').update({ status: 'cancelled', notes: 'בוטל — חשבון עסקה ' + num + ' #doc:' + num }).in('id', _exact.map(c => c.id));
       await db.from('documents').update({ status: 'cancelled' }).eq('id', d.id);
       try { await addInteraction('customer', d.customer_id, '🚫 בוטל חשבון עסקה ' + num + ' (ביטול פנימי — ללא זיכוי מס)'); } catch (e) { }
       toast('✓ חשבון העסקה בוטל והחוב הוסר');
