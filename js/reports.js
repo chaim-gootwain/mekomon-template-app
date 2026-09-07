@@ -323,9 +323,9 @@ async function report_pnl() {
   const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1);
   const sinceM = since.toISOString().slice(0, 7);
   const [ads, issues, expenses] = await Promise.all([
-    run(db.from('ads').select('issue_id,price,discount,status').limit(8000)),
-    run(db.from('issues').select('id,publish_date,print_date').limit(2000)),
-    run(db.from('expenses').select('notes,amount,expense_date').gte('expense_date', sinceM + '-01').limit(4000)),
+    runAll((f, t) => db.from('ads').select('issue_id,price,discount,status').order('id').range(f, t)),
+    runAll((f, t) => db.from('issues').select('id,publish_date,print_date').order('id').range(f, t)),
+    runAll((f, t) => db.from('expenses').select('notes,amount,expense_date').gte('expense_date', sinceM + '-01').order('id').range(f, t)),
   ]);
   // חודש הגיליון = חודש הסגירה לדפוס (print_date), כמו העלויות — כדי שהכנסות ועלויות של אותו גיליון ייפלו באותו חודש
   const issMonth = {}; issues.forEach(i => { issMonth[i.id] = String(i.print_date || i.publish_date || '').slice(0, 7); });
@@ -396,8 +396,8 @@ async function _ledGather() {
   const range = _ledRange();
   if (!range) { toast('בחר חודש או טווח תאריכים', true); return null; }
   const [charges, payments] = await Promise.all([
-    run(db.from('charges').select('id,customer_id,amount,status,issued_date,description,invoice_number').lte('issued_date', range.to).limit(20000)),
-    run(db.from('payments').select('id,customer_id,charge_id,amount,method,paid_date,check_due_date').lte('paid_date', range.to).limit(20000)),
+    runAll((f, t) => db.from('charges').select('id,customer_id,amount,status,issued_date,description,invoice_number').lte('issued_date', range.to).order('id').range(f, t)),
+    runAll((f, t) => db.from('payments').select('id,customer_id,charge_id,amount,method,paid_date,check_due_date').lte('paid_date', range.to).order('id').range(f, t)),
   ]);
   const dead = c => ['cancelled', 'lost'].includes(c.status);
   const chargeCust = {}; charges.forEach(c => chargeCust[c.id] = c.customer_id);
@@ -603,8 +603,8 @@ async function reportProfitRun() {
   const box = document.getElementById('repTable'); if (!box) return;
   box.innerHTML = '<div class="empty">מחשב...</div>';
   const [ads, expenses] = await Promise.all([
-    run(db.from('ads').select('issue_id,customer_id,price,discount,status').not('status', 'in', '("cancelled","rejected")').limit(10000)),
-    run(db.from('expenses').select('amount,notes').ilike('notes', '%#issue:%').limit(5000)),
+    runAll((f, t) => db.from('ads').select('issue_id,customer_id,price,discount,status').not('status', 'in', '("cancelled","rejected")').order('id').range(f, t)),
+    runAll((f, t) => db.from('expenses').select('amount,notes').ilike('notes', '%#issue:%').order('id').range(f, t)),
   ]);
   const net = a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
   const listPrice = a => Number(a.price) || 0;

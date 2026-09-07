@@ -138,6 +138,19 @@ throw error;
 return data;
 }
 
+/* משיכת כל השורות בעימוד — Supabase מחזיר לכל היותר 1000 שורות לקריאה,
+   ולכן limit() גבוה מזה לא עוזר. makeQuery מקבל (from, to) ומחזיר שאילתה
+   עם range; חובה order יציב (למשל order('id')) כדי שהעמודים לא יחפפו. */
+async function runAll(makeQuery, errPrefix = 'שגיאה', pageSize = 1000, maxRows = 50000) {
+const all = [];
+for (let from = 0; from < maxRows; from += pageSize) {
+const rows = await run(makeQuery(from, from + pageSize - 1), errPrefix);
+if (rows && rows.length) all.push(...rows);
+if (!rows || rows.length < pageSize) break;
+}
+return all;
+}
+
 /* ---------- 5. מודאל טפסים גנרי ----------
 openForm(כותרת, שדות, ערכים, פונקציית-שמירה)
 סוגי שדה: text, number, date, select, textarea, checkbox
