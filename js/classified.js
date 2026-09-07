@@ -215,32 +215,46 @@ Pages.classified = {
   }
 };
 
-/* ---------- טופס מודעת לוח עם תמחור חי ---------- */
-function classifiedAdd(existingId) {
-  const ex = existingId ? { id: existingId } : null;
+/* ---------- טופס מודעת לוח עם תמחור חי ----------
+   נקרא גם לעריכה (existingId): הטופס נטען עם ערכי המודעה, והשמירה מעדכנת
+   את השורה הקיימת במקום ליצור מודעה כפולה */
+let _clEditId = null;
+async function classifiedAdd(existingId) {
+  let ex = null;
+  if (existingId) {
+    ex = (await run(db.from('classified_ads').select('*').eq('id', existingId).limit(1)))[0];
+    if (!ex) { toast('המודעה לא נמצאה', true); return; }
+  }
+  _clEditId = ex ? ex.id : null;
   const issuesOpen = (cache.issues || []).filter(i => !['published', 'closed'].includes(i.status))
     .sort((a, b) => (a.issue_number || 0) - (b.issue_number || 0));
+  // בעריכה: אם הגיליון של המודעה כבר לא פתוח — מציגים אותו בכל זאת כדי לא לאבד אותו
+  const issueOpts = issuesOpen.slice();
+  if (ex && ex.issue_id && !issueOpts.some(i => i.id === ex.issue_id)) {
+    const cur = (cache.issues || []).find(i => i.id === ex.issue_id);
+    if (cur) issueOpts.unshift(cur);
+  }
   document.getElementById('viewModal').innerHTML = `
-    <h3>מודעת לוח חדשה</h3>
+    <h3>${ex ? 'עריכת מודעת לוח' : 'מודעת לוח חדשה'}</h3>
     <div class="grid2">
-      <div class="field"><label>לקוח *</label>${custPickerHtml({ base: 'clCust' })}</div>
-      <div class="field"><label>קטגוריה *</label><select id="clCat">${CL_CATEGORIES.map(c => `<option value="${c.v}">${c.t}</option>`).join('')}</select></div>
+      <div class="field"><label>לקוח *</label>${custPickerHtml({ base: 'clCust', value: ex ? ex.customer_id : '' })}</div>
+      <div class="field"><label>קטגוריה *</label><select id="clCat">${CL_CATEGORIES.map(c => `<option value="${c.v}"${ex && ex.category === c.v ? ' selected' : ''}>${c.t}</option>`).join('')}</select></div>
     </div>
     <div class="grid2">
       <div class="field"><label>סוג *</label><select id="clType" onchange="classifiedRecalc()">
         <option value="regular">רגיל (${money(clBaseRegular())})</option>
-        <option value="bold">מודגש (${money(clBaseBold())})</option></select></div>
-      <div class="field"><label>גיליון *</label><select id="clIssue">${issuesOpen.map(i => `<option value="${i.id}">גיליון ${i.issue_number} · ${heDate(i.publish_date)}</option>`).join('')}</select></div>
+        <option value="bold"${ex && ex.ad_type === 'bold' ? ' selected' : ''}>מודגש (${money(clBaseBold())})</option></select></div>
+      <div class="field"><label>גיליון *</label><select id="clIssue">${issueOpts.map(i => `<option value="${i.id}"${ex && ex.issue_id === i.id ? ' selected' : ''}>גיליון ${i.issue_number} · ${heDate(i.publish_date)}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label>טקסט המודעה *</label>
-      <textarea id="clBody" rows="3" oninput="classifiedRecalc()" placeholder="לדוגמה: למכירה סלון מעור במצב מצוין, טלפון 05X-XXXXXXX"></textarea></div>
+      <textarea id="clBody" rows="3" oninput="classifiedRecalc()" placeholder="לדוגמה: למכירה סלון מעור במצב מצוין, טלפון 05X-XXXXXXX">${ex ? esc(ex.body || '') : ''}</textarea></div>
     <div class="card card-pad" style="background:#fbfdff;display:flex;justify-content:space-between;align-items:center;margin:6px 0">
       <span><b>מילים:</b> <span id="clWords">0</span></span>
       <span style="font-size:1.15rem"><b>מחיר (כולל מע"מ): <span id="clPrice" style="color:@@COLOR_BRAND@@">${money(clBaseRegular())}</span></b></span>
     </div>
-    <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="clPackage" onchange="classifiedRecalc()"> מסלול 4+1 (5 גיליונות במחיר 4)</label>
+    <label style="display:${ex ? 'none' : 'flex'};gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="clPackage" onchange="classifiedRecalc()"> מסלול 4+1 (5 גיליונות במחיר 4)</label>
     <div id="clPkgNote" class="hidden muted" style="font-size:.82rem;margin-bottom:6px"></div>
-    <div class="field"><label>הערות</label><textarea id="clNotes" rows="1"></textarea></div>
+    <div class="field"><label>הערות</label><textarea id="clNotes" rows="1">${ex ? esc(ex.notes || '') : ''}</textarea></div>
     <div class="m-actions" style="margin-top:10px">
       <button class="btn" onclick="classifiedSave()">שמירה</button>
       <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">ביטול</button>
@@ -273,6 +287,23 @@ async function classifiedSave() {
   if (!customer_id || !body || !issue_id) { toast('נא למלא לקוח, טקסט וגיליון', true); return; }
   const words = clCountWords(body);
   const single = clPrice(ad_type, words);
+
+  // עריכת מודעה קיימת — עדכון השורה במקום יצירת מודעה חדשה (מונע כפילות)
+  if (_clEditId) {
+    try {
+      const ex = (await run(db.from('classified_ads').select('id,package_id').eq('id', _clEditId).limit(1)))[0];
+      // מודעה במסלול 4+1: מעדכנים רק תוכן, בלי לשנות מחיר/גיליון של המסלול
+      const upd = ex && ex.package_id
+        ? { customer_id, category, body, word_count: words, notes }
+        : { customer_id, category, ad_type, body, word_count: words, price: single, issue_id, notes };
+      await run(db.from('classified_ads').update(upd).eq('id', _clEditId));
+      toast('✓ המודעה עודכנה');
+      _clEditId = null;
+      document.getElementById('viewBack').classList.remove('open');
+      openPage('classified');
+    } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+    return;
+  }
 
   // גיליונות עוקבים למסלול 4+1
   let issues = [issue_id];

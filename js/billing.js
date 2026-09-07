@@ -24,7 +24,16 @@ _charges.forEach(c => { if (overdueIds.includes(c.id)) c.status = 'overdue'; });
 }
 
 const open = _charges.filter(c => ['pending', 'invoiced', 'partial', 'overdue'].includes(c.status));
-const openSum = open.reduce((s, c) => s + Number(c.amount), 0);
+// חוב אמיתי: מפחיתים תשלומים שכבר נרשמו — חיוב חלקי לא נספר במלואו
+const _paidBy = {};
+if (open.length) {
+try {
+const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', open.map(c => c.id));
+pays.forEach(p => { _paidBy[p.charge_id] = (_paidBy[p.charge_id] || 0) + Number(p.amount || 0); });
+} catch (e) { console.error('open debt payments', e); }
+}
+const chBal = c => Math.max(0, Number(c.amount || 0) - (_paidBy[c.id] || 0));
+const openSum = open.reduce((s, c) => s + chBal(c), 0);
 const overdue = _charges.filter(c => c.status === 'overdue');
 
 el.innerHTML = `
@@ -40,7 +49,7 @@ el.innerHTML = `
 
 <div class="stats">
 ${stat(money(openSum) || '₪0', 'סה"כ חוב פתוח (' + open.length + ' חיובים)')}
-${stat(money(overdue.reduce((s, c) => s + Number(c.amount), 0)) || '₪0', 'מזה באיחור (' + overdue.length + ')', overdue.length ? 'red' : '')}
+${stat(money(overdue.reduce((s, c) => s + chBal(c), 0)) || '₪0', 'מזה באיחור (' + overdue.length + ')', overdue.length ? 'red' : '')}
 </div>
 
 ${overdue.length ? `<div class="card card-pad" style="border-right:4px solid var(--danger);margin-bottom:16px">

@@ -251,8 +251,12 @@ openPage('ads');
 });
 }
 
-function adEdit(id) {
-const a = _ads.find(x => x.id === id);
+async function adEdit(id) {
+// אם המטמון המקומי ריק (הכרטיס נפתח שלא מדף המודעות) — נטען מהמסד,
+// אחרת הטופס ייפתח ריק ושמירה תרוקן את המודעה
+let a = _ads.find(x => x.id === id);
+if (!a) a = (await run(db.from('ads').select('*').eq('id', id).limit(1)))[0];
+if (!a) { toast('המודעה לא נמצאה', true); return; }
 document.getElementById('viewBack').classList.remove('open');
 openForm('עריכת מודעה', [
 { name: 'title', label: 'תיאור', required: true },
