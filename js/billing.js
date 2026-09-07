@@ -34,6 +34,7 @@ el.innerHTML = `
 <button class="btn btn-ghost btn-sm" onclick="billingExport()">⬇ ייצוא לאקסל</button>
 <button class="btn" onclick="paymentAdd()">+ רישום תשלום</button>
 <button class="btn btn-ghost" onclick="chargeAdd()">+ חיוב ידני</button>
+<button class="btn btn-ghost" onclick="weeklyReviewOpenNow()">🗓️ סבב מעקב</button>
 </div>
 </div>
 
