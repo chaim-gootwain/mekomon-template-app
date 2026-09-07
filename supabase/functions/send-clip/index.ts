@@ -42,6 +42,16 @@ Deno.serve(async (req)=>{
       ok: false,
       error: "unauthorized"
     }, 401);
+    // רק צוות פעיל בהרשאת גבייה — ההרשמה פתוחה, ובלי הבדיקה כל נרשם יכול
+    // לשלוח מיילים ללקוחות ולדלות כתובות לפי מזהה.
+    const { data: prof } = await admin.from("profiles").select("role,active").eq("id", userData.user.id).single();
+    if (!prof?.active || ![
+      "admin",
+      "sales"
+    ].includes(prof.role)) return json({
+      ok: false,
+      error: "forbidden"
+    }, 403);
     const { customer_id, issue_id } = await req.json();
     if (!customer_id || !issue_id) return json({
       ok: false,

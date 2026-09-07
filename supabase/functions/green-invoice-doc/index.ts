@@ -47,19 +47,20 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
 
+    // הרשאה: admin או sales פעילים — לפני הכול, כולל probe (אחרת כל מחזיק
+    // מפתח anon יכול להריץ ניסיונות התחברות מול חשבונית ירוקה).
+    const authHeader = req.headers.get('Authorization') || '';
+    const caller = createClient(SUPABASE_URL, ANON, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user } } = await caller.auth.getUser();
+    if (!user) return json({ error: 'לא מזוהה' }, 401);
+    const { data: prof } = await svc.from('profiles').select('role,active').eq('id', user.id).single();
+    if (!prof || !prof.active || (prof.role !== 'admin' && prof.role !== 'sales')) return json({ error: 'אין הרשאה' }, 403);
+
     if (body.probe) {
       if (!KEY || !SECRET) return json({ probe: true, error: 'GI_KEY/GI_SECRET לא הוגדרו' });
       const tok = await giToken().catch((e) => null);
       return json({ probe: true, authOk: !!tok });
     }
-
-    // הרשאה: admin או sales
-    const authHeader = req.headers.get('Authorization') || '';
-    const caller = createClient(SUPABASE_URL, ANON, { global: { headers: { Authorization: authHeader } } });
-    const { data: { user } } = await caller.auth.getUser();
-    if (!user) return json({ error: 'לא מזוהה' }, 401);
-    const { data: prof } = await svc.from('profiles').select('role').eq('id', user.id).single();
-    if (!prof || (prof.role !== 'admin' && prof.role !== 'sales')) return json({ error: 'אין הרשאה' }, 403);
 
     const doc_kind = body.doc_kind || 'proforma';
     const giType = TYPE_MAP[doc_kind];

@@ -42,8 +42,8 @@ Deno.serve(async (req)=>{
       ok: false,
       error: "unauthorized"
     }, 401);
-    const { data: prof } = await admin.from("profiles").select("role").eq("id", uid).single();
-    if (!prof || ![
+    const { data: prof } = await admin.from("profiles").select("role,active").eq("id", uid).single();
+    if (!prof || !prof.active || ![
       "admin",
       "sales"
     ].includes(prof.role)) return json({

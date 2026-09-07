@@ -36,6 +36,18 @@ Deno.serve(async (req)=>{
         ok: false,
         error: "unauthorized"
       }, 401);
+      // ההרשמה למערכת פתוחה ומשתמש חדש נחסם כ-pending ב-UI בלבד — בלי בדיקת
+      // תפקיד כאן הפונקציה היא ממסר דואר פתוח מחשבון ה-Gmail של העיתון.
+      const { data: prof } = await admin.from("profiles").select("role,active").eq("id", userData.user.id).single();
+      if (!prof?.active || ![
+        "admin",
+        "sales",
+        "editor",
+        "graphics"
+      ].includes(prof.role)) return json({
+        ok: false,
+        error: "forbidden"
+      }, 403);
     }
     const { to, subject, body, html, customer_id, attachments } = await req.json();
     let dest = String(to || "").trim();
