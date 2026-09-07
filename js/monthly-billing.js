@@ -197,7 +197,9 @@ async function mbSaveEmail(cid, ym, alsoSend) {
       if (issueIds.length && typeof adProofSendMonth === 'function') {
         toast('שולח גזירי החודש...');
         const r = await adProofSendMonth(cid, issueIds, ym, { email: true });
-        toast(r && r.emailed ? '✅ גזירי החודש נשלחו למייל' : 'הגזירים מוכנים');
+        if (r && r.emailed) toast('✅ גזירי החודש נשלחו למייל');
+        else if (r && r.downloaded) toast('⚠️ שליחת המייל נכשלה' + (r.emailError ? ' — ' + r.emailError : '') + ' — הורדתי לך את הגזירים', true);
+        else toast('הגזירים מוכנים');
       } else { toast('אין גזירים לחודש זה לשליחה', true); }
     }
     if (typeof monthlyBillingReview === 'function') await monthlyBillingReview(ym);
@@ -338,7 +340,8 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
       toast('מכין גזירי החודש...');
       const _r = await adProofSendMonth(cid, _issueIds, ym);
       if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
-      else if (_r && _r.downloaded) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
+      else if (_r && _r.downloaded && !_r.email) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
+      else if (_r && _r.downloaded) toast('⚠️ שליחת המייל נכשלה' + (_r.emailError ? ' — ' + _r.emailError : '') + ' — הורדתי לך את גזירי החודש', true);
       else toast('גזירי החודש מוכנים');
     }
   } catch (e) { toast('הערה: שליחת גזירי החודש נכשלה — ' + (e && e.message || e), true); }

@@ -128,7 +128,7 @@ Deno.serve(async (req)=>{
     const _wantEmail = send_email !== false && !!cust.email;
     if (_wantEmail) {
       try {
-        const user = Deno.env.get("GMAIL_USER");
+        const user = Deno.env.get("GMAIL_USER") || "@@PAPER_EMAIL@@";
         const pass = Deno.env.get("GMAIL_APP_PASSWORD");
         if (!user || !pass) throw new Error("no-smtp");
         const CRLF = String.fromCharCode(13, 10);
