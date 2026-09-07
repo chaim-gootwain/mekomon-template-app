@@ -666,3 +666,5 @@ ${rows.map(r => `<tr>${r.map((v, i) => {
   }).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" class="empty">אין נתונים</td></tr>`}
 </tbody>${footRow ? `<tfoot>${footRow}</tfoot>` : ''}</table>`;
 }
+
+// בדיקת צינור: אימות שהסנכרון והמיזוג האוטומטי במופעים עובדים (הערה בלבד, אפשר למחוק)
