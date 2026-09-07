@@ -122,10 +122,26 @@ if (error) { errEl.textContent = errMap[error.message] || error.message; return;
 const { data } = await db.auth.getSession();
 session = data.session;
 if (session) await afterLogin();
-else errEl.textContent = 'נשלח מייל אימות — אשר אותו והתחב׫';
+else errEl.textContent = 'נשלח מייל אימות — אשר אותו והתחבר';
 }
 
 async function logout() { await db.auth.signOut(); location.reload(); }
+
+/* שכחתי סיסמה — שולח מייל עם קישור לדף קביעת הסיסמה */
+async function forgotPw() {
+const email = document.getElementById('authEmail').value.trim();
+const errEl = document.getElementById('authErr');
+if (!email) { errEl.textContent = 'מלא את האימייל שלך בשדה למעלה ולחץ שוב על "שכחתי סיסמה"'; return; }
+errEl.textContent = 'שולח...';
+const { error } = await db.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/set-password.html' });
+if (error) {
+errEl.textContent = /only request this after/i.test(error.message)
+? 'נשלח מייל ממש לא מזמן — המתן דקה ונסה שוב'
+: error.message;
+return;
+}
+errEl.textContent = 'נשלח מייל עם קישור לקביעת סיסמה חדשה — בדוק את תיבת הדואר (גם בספאם)';
+}
 
 /* ---------- 2. בניית המסך הראשי ---------- */
 function buildShell() {
