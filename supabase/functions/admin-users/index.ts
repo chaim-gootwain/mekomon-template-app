@@ -59,7 +59,9 @@ Deno.serve(async (req)=>{
         redirectTo: body.redirectTo || undefined
       });
       if (iErr) return json({
-        error: iErr.message
+        error: /already.*registered/i.test(iErr.message)
+          ? 'משתמש עם מייל זה כבר קיים במערכת. אם הוא לא סיים את ההרשמה — מחקו אותו מהרשימה והזמינו שוב; אם שכח סיסמה — שילחץ "שכחתי סיסמה" במסך הכניסה.'
+          : iErr.message
       }, 400);
       // קביעת התפקיד + הפרטים בפרופיל (דורס את ברירת המחדל 'pending')
       const uid = inv.user.id;
