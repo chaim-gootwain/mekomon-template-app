@@ -77,16 +77,63 @@ Deno.serve(async (req)=>{
     }, 500);
     const srcBytes = new Uint8Array(await file.arrayBuffer());
     const src = await PDFDocument.load(srcBytes);
-    const total = src.getPageCount();
-    const idxs = pages.map((p)=>p - 1).filter((i)=>i >= 0 && i < total);
-    if (!idxs.length) return json({
+    // מיפוי מספר עמוד עיתון -> דף ב-PDF: דף לרוחב = כפולה (RTL: הנמוך בימין),
+    // דף לאורך (שער/עמוד אחרון) = עמוד בודד — כמו ב-send-clip-month וב-ad-proof.js
+    const pmap = {};
+    let np = 1;
+    const tp = src.getPageCount();
+    for(let i = 0; i < tp; i++){
+      const pg = src.getPage(i);
+      const mb = pg.getMediaBox();
+      let rot = 0;
+      try {
+        rot = pg.getRotation() && pg.getRotation().angle || 0;
+      } catch (_e) {}
+      const land = mb.width / mb.height > 1.15;
+      if (land && rot % 180 === 0) {
+        pmap[np] = {
+          idx: i,
+          half: "right"
+        };
+        pmap[np + 1] = {
+          idx: i,
+          half: "left"
+        };
+        np += 2;
+      } else {
+        pmap[np] = {
+          idx: i,
+          half: "full"
+        };
+        np += 1;
+      }
+    }
+    const out = await PDFDocument.create();
+    const used = [];
+    for (const N of pages){
+      const e = pmap[N];
+      if (!e) continue;
+      const [cp] = await out.copyPages(src, [
+        e.idx
+      ]);
+      if (e.half !== "full") {
+        const b = cp.getMediaBox();
+        if (e.half === "right") {
+          cp.setMediaBox(b.x + b.width / 2, b.y, b.width / 2, b.height);
+          cp.setCropBox(b.x + b.width / 2, b.y, b.width / 2, b.height);
+        } else {
+          cp.setMediaBox(b.x, b.y, b.width / 2, b.height);
+          cp.setCropBox(b.x, b.y, b.width / 2, b.height);
+        }
+      }
+      out.addPage(cp);
+      used.push(N);
+    }
+    if (!used.length) return json({
       ok: false,
       error: "pages-range",
       detail: "מספרי העמודים מחוץ לטווח ה-PDF"
     }, 400);
-    const out = await PDFDocument.create();
-    const copied = await out.copyPages(src, idxs);
-    copied.forEach((p)=>out.addPage(p));
     const clipBytes = await out.save();
     const b64 = toB64(clipBytes);
     const user = Deno.env.get("GMAIL_USER") || "@@PAPER_EMAIL@@";
@@ -108,7 +155,7 @@ Deno.serve(async (req)=>{
     const _bodyText = [
       "שלום " + (cust.name || "") + ",",
       "",
-      "מצורף גזיר הפרסום שלך מגיליון " + issue.issue_number + " (עמוד " + pages.join(", ") + ").",
+      "מצורף גזיר הפרסום שלך מגיליון " + issue.issue_number + " (עמוד " + used.join(", ") + ").",
       "תודה שאתם מפרסמים ב@@PAPER_NAME@@!",
       "",
       "בברכה,",
@@ -190,7 +237,7 @@ Deno.serve(async (req)=>{
     });
     return json({
       ok: true,
-      pages,
+      pages: used,
       email: cust.email
     });
   } catch (e) {
