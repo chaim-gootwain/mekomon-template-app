@@ -8,10 +8,14 @@ attendance.js — שעון נוכחות
 
 'use strict';
 
+/* החודש הנבחר נשמר כאן — openPage מוחק את התוכן (והקלט attMonth) לפני הרינדור */
+let _attMonth = null;
+function attSetMonth(v) { _attMonth = v || null; openPage('attendance'); }
+
 Pages.attendance = {
 render: async (el) => {
 const isAdmin = profile.role === 'admin';
-const month = document.getElementById('attMonth')?.value || thisMonth();
+const month = _attMonth || thisMonth();
 const from = month + '-01', to = monthEnd(month);
 
 const [rows, requests] = await Promise.all([
@@ -36,7 +40,7 @@ el.innerHTML = `
 <div class="page-head">
 <h2>נוכחות</h2>
 <div class="actions">
-<input type="month" id="attMonth" value="${month}" onchange="openPage('attendance')" style="width:auto">
+<input type="month" id="attMonth" value="${month}" onchange="attSetMonth(this.value)" style="width:auto">
 ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="attendanceExport(${JSON.stringify(month).replace(/"/g, '&quot;')})">⬇ ייצוא לשכר</button>` : ''}
 <button class="btn btn-ghost btn-sm" onclick="attRequestFix()">בקשת תיקון</button>
 </div>
