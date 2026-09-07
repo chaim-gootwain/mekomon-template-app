@@ -40,22 +40,27 @@ async function _wrMarkWeekDone() {
   if (typeof cache !== 'undefined' && cache.settings) cache.settings.weekly_review_last = key;
 }
 
-/* נקרא בכניסה — מציג את הסבב פעם בשבוע. מחזיר true אם נפתח. */
-async function weeklyReviewCheckPending() {
+/* נקרא בכניסה — מציג את הסבב פעם בשבוע. מחזיר true אם נפתח.
+   force=true (הכפתור בדף הגבייה) פותח מיד גם אם כבר הוצג השבוע. */
+async function weeklyReviewCheckPending(force) {
   try {
     if (typeof profile === 'undefined' || !['admin', 'sales'].includes(profile.role)) return false;
-    if ((cache.settings || {}).weekly_review_last === _wrWeekKey()) return false;
+    if (!force && (cache.settings || {}).weekly_review_last === _wrWeekKey()) return false;
     const _vb = document.getElementById('viewBack');
-    if (_vb && _vb.classList.contains('open')) return false; // חלון אחר פתוח
+    if (!force && _vb && _vb.classList.contains('open')) return false; // חלון אחר פתוח
 
     const { data } = await db.from('ads')
       .select('id,customer_id,issue_id,title,price,discount,page_number,status,deal_stage')
       .or('deal_stage.is.null,deal_stage.eq.invoiced,deal_stage.eq.agreed')
       .gt('price', 0).not('status', 'in', '("cancelled","rejected")');
     let ads = (data || []).filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
+    // מנהל רואה את כל הסבב; סוכן מכירות רואה רק את הלקוחות שלו.
+    // (קודם ההשוואה === null אצל מנהל השאירה רק לקוחות בלי סוכן — והחלון לא קפץ)
     const _wrMine = (typeof myAgentId === 'function') ? myAgentId() : null;
-    const _wrCA = {}; (cache.customers || []).forEach(c => _wrCA[c.id] = c.agent_id);
-    ads = ads.filter(a => _wrCA[a.customer_id] === _wrMine);
+    if (profile.role === 'sales' && _wrMine != null) {
+      const _wrCA = {}; (cache.customers || []).forEach(c => _wrCA[c.id] = c.agent_id);
+      ads = ads.filter(a => _wrCA[a.customer_id] === _wrMine);
+    }
     if (!ads.length) return false;
 
     const snoozed = _wrSnoozed();
@@ -79,6 +84,12 @@ async function weeklyReviewCheckPending() {
 function weeklyReviewClose(markDone) {
   document.getElementById('wrOv')?.remove();
   if (markDone !== false) _wrMarkWeekDone();
+}
+
+/* פתיחה ידנית — הכפתור "🗓️ סבב מעקב" בדף הגבייה */
+async function weeklyReviewOpenNow() {
+  const ok = await weeklyReviewCheckPending(true);
+  if (!ok) toast('אין כרגע מודעות שדורשות מעקב 🎉');
 }
 
 function _wrNet(a) { return Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)); }
@@ -167,7 +178,8 @@ async function wrSetStage(adId, stage, el) {
   const val = stage === '__clear__' ? null : (stage || undefined);
   if (val === undefined) return;
   try {
-    await db.from('ads').update({ deal_stage: val }).eq('id', adId);
+    const { error } = await db.from('ads').update({ deal_stage: val }).eq('id', adId);
+    if (error) { toast('עדכון נכשל: ' + error.message, true); if (el) el.value = ''; return; }
     const cur = _wrData[_wrIdx]; const a = cur && cur.ads.find(x => x.id === adId); if (a) a.deal_stage = val;
     toast(val ? ('סטטוס עודכן: ' + dealStageLabel(val)) : 'הסטטוס נוקה');
     if (el) { const tr = el.closest('tr'); if (tr) tr.querySelector('td:nth-child(4)').innerHTML = val ? `<span class="pill ${DEAL_STAGES[val][1]}">${DEAL_STAGES[val][0]}</span>` : '<span class="pill">ללא סטטוס</span>'; el.value = ''; }
@@ -184,11 +196,12 @@ async function wrMarkPaid() {
   const ids = cur.ads.map(a => a.id);
   const pool = cur.ads.reduce((s, a) => s + _wrNet(a), 0);
   toast('רושם...');
-  // 1) עדכון המודעות — עם fallback אם עמודת paid_date עדיין לא קיימת
-  try {
-    await db.from('ads').update({ deal_stage: 'paid', paid_date: date }).in('id', ids);
-  } catch (e1) {
-    try { await db.from('ads').update({ deal_stage: 'paid' }).in('id', ids); } catch (e2) { toast('עדכון המודעות נכשל: ' + (e2.message || e2), true); return; }
+  // 1) עדכון המודעות — עם fallback אם עמודת paid_date עדיין לא קיימת.
+  // supabase לא זורק חריגה — חייבים לבדוק את error, אחרת כשל שקט.
+  const _u1 = await db.from('ads').update({ deal_stage: 'paid', paid_date: date }).in('id', ids);
+  if (_u1.error) {
+    const _u2 = await db.from('ads').update({ deal_stage: 'paid' }).in('id', ids);
+    if (_u2.error) { toast('עדכון המודעות נכשל: ' + _u2.error.message, true); return; }
   }
   // 2) רישום תשלום כנגד חיובים פתוחים של הלקוח (הישן ביותר קודם)
   let recorded = 0;
@@ -203,7 +216,10 @@ async function wrMarkPaid() {
       const bal = Number(ch.amount) - (pays || []).reduce((s, p) => s + Number(p.amount), 0);
       if (bal <= 0.001) continue;
       const applied = Math.min(bal, left);
-      await db.from('payments').insert({ charge_id: ch.id, customer_id: cur.customer_id, amount: Math.round(applied * 100) / 100, method, paid_date: date, notes: 'סבב מעקב שבועי — סומן שולם', created_by: (typeof profile !== 'undefined' ? profile.id : null) });
+      // בודקים שהתשלום באמת נרשם לפני שמסמנים את החיוב כשולם — אחרת
+      // כשל ב-insert היה משאיר חיוב "שולם" בלי שורת תשלום בספר
+      const _ins = await db.from('payments').insert({ charge_id: ch.id, customer_id: cur.customer_id, amount: Math.round(applied * 100) / 100, method, paid_date: date, notes: 'סבב מעקב שבועי — סומן שולם', created_by: (typeof profile !== 'undefined' ? profile.id : null) });
+      if (_ins.error) { toast('רישום התשלום בגבייה נכשל: ' + _ins.error.message, true); break; }
       await db.from('charges').update({ status: (applied >= bal - 0.001) ? 'paid' : 'partial' }).eq('id', ch.id);
       left -= applied; recorded += applied;
     }
