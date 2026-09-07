@@ -178,8 +178,9 @@ async function issueBillingMarkPaid(issueId, customerId) {
   try {
     const cust = (cache.customers || []).find(x => x.id === customerId) || {};
     const pd = (_ibDates && _ibDates.pay) || today(); // תאריך התשלום שנבחר בתצוגה המקדימה
-    const dup = (await db.from('charges').select('id').eq('customer_id', customerId).ilike('notes', '%' + tag + '%').limit(1)).data;
-    if (dup && dup.length) {
+    const dup = (await db.from('charges').select('id,notes').eq('customer_id', customerId).ilike('notes', '%' + tag + '%').limit(20)).data;
+    // התאמה מדויקת — שהתג של לקוח 7 לא ייתפס בתוך התג של לקוח 71
+    if ((dup || []).some(r => _icTagIn(r.notes, tag))) {
       toast('כבר קיים רישום תשלום לגיליון זה');
     } else {
       const ins = await run(db.from('charges').insert({
