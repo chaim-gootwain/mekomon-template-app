@@ -25,7 +25,7 @@ run(db.from('attendance_requests').select('*').eq('status', 'pending').order('cr
 
 /* חישוב שעות לכל רישום — פשוט וגלוי */
 const hours = r => r.clock_out ? (new Date(r.clock_out) - new Date(r.clock_in)) / 3600000 : 0;
-const fmtH = h => Math.floor(h) + ':' + String(Math.round((h % 1) * 60)).padStart(2, '0');
+const fmtH = h => { const m = Math.round(h * 60); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
 
 /* סיכום לפי עובד */
 const byUser = {};

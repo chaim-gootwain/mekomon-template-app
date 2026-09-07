@@ -1154,8 +1154,16 @@ function _recOpenIssues() {
 
 /* ==================== הזרעה אידמפוטנטית ==================== */
 
+let _recSweepBusy = false; // מניעת מרוץ: שתי הזרעות מקבילות יוצרות מודעות כפולות
 async function recAdsSweep() {
   if (!['admin', 'editor'].includes(profile.role)) return 0;
+  if (_recSweepBusy) return 0;
+  _recSweepBusy = true;
+  try {
+    return await _recAdsSweepInner();
+  } finally { _recSweepBusy = false; }
+}
+async function _recAdsSweepInner() {
   const list = (await recAdsLoad(true)).filter(r => r.active);
   if (!list.length) return 0;
   const open = _recOpenIssues();

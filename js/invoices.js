@@ -317,9 +317,10 @@ function _invLineNet(l) {
   const disc = Math.min(100, Math.max(0, Number(l.disc) || 0));
   return Math.round((Number(l.amount) || 0) * (Number(l.price) || 0) * (1 - disc / 100) * 100) / 100;
 }
+function _invVatRate() { const v = Number((cache.settings || {}).vat_rate); return (isFinite(v) && v > 0 ? v : 18) / 100; }
 function _invTotals() {
   const s = _invState; let net = 0; (s ? s.lines : []).forEach(l => net += _invLineNet(l));
-  const rate = 0.18; let base, vat, total;
+  const rate = _invVatRate(); let base, vat, total;
   if (s && s.vatInc) { total = net; base = Math.round(net / (1 + rate) * 100) / 100; vat = Math.round((total - base) * 100) / 100; }
   else { base = net; vat = Math.round(net * rate * 100) / 100; total = Math.round((net + vat) * 100) / 100; }
   return { base, vat, total, vatInc: !!(s && s.vatInc) };
@@ -327,9 +328,9 @@ function _invTotals() {
 function _invTotalsHtml() {
   const b = _invTotals();
   return `<div style="display:flex;justify-content:space-between;font-size:.9rem;color:#555"><span>בסיס (לפני מע"מ)</span><span>${money(b.base)}</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:.9rem;color:#555;margin-top:2px"><span>מע"מ 18%</span><span>${money(b.vat)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:.9rem;color:#555;margin-top:2px"><span>מע"מ ${Math.round(_invVatRate() * 100)}%</span><span>${money(b.vat)}</span></div>
     <div style="display:flex;justify-content:space-between;font-weight:800;font-size:1.1rem;margin-top:6px;padding-top:6px;border-top:1px solid var(--line,#e5e7eb)"><span>סה"כ לתשלום</span><span>${money(b.total)}</span></div>
-    <div class="muted" style="font-size:.75rem;margin-top:4px">${b.vatInc ? 'המחירים שהוזנו כוללים מע"מ (המע"מ מחולץ מתוכם)' : 'המחירים שהוזנו לפני מע"מ — מתווסף 18%'}</div>`;
+    <div class="muted" style="font-size:.75rem;margin-top:4px">${b.vatInc ? 'המחירים שהוזנו כוללים מע"מ (המע"מ מחולץ מתוכם)' : 'המחירים שהוזנו לפני מע"מ — מתווסף ${Math.round(_invVatRate() * 100)}%'}</div>`;
 }
 function invUpdateTotal() {
   const el = document.getElementById('invTotal');
@@ -386,7 +387,7 @@ async function invSubmit() {
     // אם המחירים "פלוס מע"מ" (vatInc=false) — EZcount יוסיף 18% לשורות, אז גם הקבלה חייבת לכלול מע"מ.
     let base = 0; items.forEach(it => base += it.amount * it.price);
     // קבלה בלבד: הסכום שהוזן הוא הסכום הסופי (אין שורות מע"מ). חשבונית מס-קבלה: מגלמים מע"מ אם המחירים "פלוס מע"מ".
-    const gross = (s.vatInc || s.kind === 'receipt') ? base : Math.round(base * 1.18 * 100) / 100;
+    const gross = (s.vatInc || s.kind === 'receipt') ? base : Math.round(base * (1 + _invVatRate()) * 100) / 100;
     body.payment = { method: s.method, sum: gross, date: _ezDate(s.date) };
     // פרטי צ׳ק — חובה על פי הוראות ניהול פנקסים; חוסמים הפקה בלי שם בנק ומס' צ׳ק
     if (s.method === 'check') {
@@ -413,7 +414,7 @@ async function invSubmit() {
   }
   const _tb = _invTotals();
   if (!confirm('תצוגה מקדימה — לפני הפקה:\n\n' + (DOC_KIND_HE[s.kind] || s.kind) + ' ל' + s.name +
-    '\nבסיס: ' + money(_tb.base) + '  ·  מע"מ 18%: ' + money(_tb.vat) +
+    '\nבסיס: ' + money(_tb.base) + '  ·  מע"מ ' + Math.round(_invVatRate() * 100) + '%: ' + money(_tb.vat) +
     '\nסה"כ לתשלום: ' + money(_tb.total) +
     '\nתאריך המסמך: ' + (s.docDate || today()) +
     '\n\nלהפיק? (לאחר ההפקה לא ניתן לבטל בקלות)')) return;

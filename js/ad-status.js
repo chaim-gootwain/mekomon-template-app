@@ -41,7 +41,8 @@ async function adStatusCheckPending() {
     let list = (ads || []).filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
     const _mine = (typeof myAgentId === 'function') ? myAgentId() : null;
     const _custAgent = {}; (cache.customers || []).forEach(c => _custAgent[c.id] = c.agent_id);
-    list = list.filter(a => _custAgent[a.customer_id] === _mine);
+    // מנהל (אין לו רשומת סוכן, myAgentId=null) רואה הכול; סוכן — רק את הלקוחות שלו
+    if (!(typeof isAdmin === 'function' && isAdmin())) list = list.filter(a => _custAgent[a.customer_id] === _mine);
     if (!list.length) return;
     adStatusRender(list);
   } catch (e) { console.error('ad-status', e); }
