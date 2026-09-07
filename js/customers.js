@@ -244,8 +244,11 @@ if (typeof onDone === 'function') await onDone(data);
 });
 }
 
-function customerEdit(id) {
-const c = _customers.find(x => x.id === id);
+async function customerEdit(id) {
+// כשהכרטיס נפתח שלא מדף הלקוחות המטמון עשוי להיות ריק — נטען מהמסד במקום לקרוס
+let c = (_customers || []).find(x => x.id === id);
+if (!c) c = (await run(db.from('customers').select('*').eq('id', id).limit(1)))[0];
+if (!c) { toast('הלקוח לא נמצא', true); return; }
 document.getElementById('viewBack').classList.remove('open');
 openForm('עריכת לקוח — ' + c.name, CUSTOMER_FIELDS, c, async (rec) => {
 const _changes = _custDiff(c, rec);
@@ -847,7 +850,7 @@ function agencyAdd() {
     if (error) { toast(/relation|exist/i.test(error.message) ? 'טבלת הסוכנויות חסרה — יש להריץ את מיגרציית agencies' : 'שגיאה: ' + error.message, true); return; }
     await refreshCache();
     toast('הסוכנות נוספה');
-    openPage('admin');
+    openPage('settings');
   });
 }
 
@@ -858,6 +861,6 @@ function agencyEdit(id) {
     await run(db.from('agencies').update(rec).eq('id', id));
     await refreshCache();
     toast('נשמר');
-    openPage('admin');
+    openPage('settings');
   });
 }

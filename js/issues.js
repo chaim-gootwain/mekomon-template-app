@@ -393,10 +393,11 @@ page_number: rec.page_number != null ? (Number(rec.page_number) || null) : a.pag
 deal_stage: rec.deal_stage || null,
 requested_placement: rec.requested_placement || null,
 };
+// שינוי הסטטוס (שובץ/אושר) נשמר גם במסד — לא רק בזיכרון, אחרת המודעה לא תחויב
+if (upd.page_number && a.status === 'approved') upd.status = 'placed';
+if (!upd.page_number && a.status === 'placed') upd.status = 'approved';
 await run(db.from('ads').update(upd).eq('id', id));
 Object.assign(a, upd);
-if (upd.page_number && a.status === 'approved') a.status = 'placed';
-if (!upd.page_number && a.status === 'placed') a.status = 'approved';
 toast('✓ המודעה עודכנה');
 _fpPaint();
 });

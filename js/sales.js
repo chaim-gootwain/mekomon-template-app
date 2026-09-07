@@ -98,8 +98,11 @@ openPage('contracts');
 });
 }
 
-function contractEdit(id) {
-const c = _contracts.find(x => x.id === id);
+async function contractEdit(id) {
+// כשהכרטיס נפתח שלא מדף החוזים המטמון עשוי להיות ריק — נטען מהמסד במקום לקרוס
+let c = (_contracts || []).find(x => x.id === id);
+if (!c) c = (await run(db.from('contracts').select('*').eq('id', id).limit(1)))[0];
+if (!c) { toast('החוזה לא נמצא', true); return; }
 openForm('עריכת חוזה — ' + nameOf('customers', c.customer_id), CONTRACT_FIELDS, c, async (rec) => {
 await run(db.from('contracts').update(rec).eq('id', id));
 toast('נשמר');
