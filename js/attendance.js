@@ -78,6 +78,7 @@ renderTable(document.getElementById('attTable'), rows, [
 { h: 'יציאה', f: r => r.clock_out ? new Date(r.clock_out).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '<span class="pill green">פתוח</span>' },
 { h: 'שעות', f: r => r.clock_out ? fmtH(hours(r)) : '' },
 { h: '', f: r => r.manual ? '<span class="pill amber">תיקון ידני</span>' : '' },
+...(isAdmin ? [{ h: '', f: r => `<button class="btn btn-ghost btn-sm" onclick="attAdminFix(${r.id})" title="תיקון שעות">✎</button>` }] : []),
 ], { empty: 'אין רישומי נוכחות החודש' });
 }
 };
@@ -98,6 +99,31 @@ profile_id: profile.id, work_date: rec.work_date,
 requested_in: rin, requested_out: mk(rec.work_date, rec.out_time), reason: rec.reason,
 }));
 toast('הבקשה נשלחה למנהל');
+openPage('attendance');
+});
+}
+
+/* תיקון מנהל — עריכת שעות רישום קיים, למשל עובד ששכח להחתים יציאה.
+   רץ דרך פונקציית שרת (admin_fix_attendance) שמוודאת הרשאת מנהל,
+   והרישום מסומן "תיקון ידני" כדי לשמור על שקיפות מול העובד. */
+async function attAdminFix(id) {
+const [r] = await run(db.from('attendance').select('*').eq('id', id).limit(1));
+if (!r) { toast('הרישום לא נמצא', true); return; }
+const workDate = String(r.clock_in).slice(0, 10);
+const t = v => v ? new Date(v).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
+const who = (cache.profiles.find(p => p.id === r.profile_id) || {}).full_name || '';
+openForm('תיקון שעות — ' + who, [
+{ name: 'work_date', label: 'תאריך העבודה', type: 'date', required: true, default: workDate },
+{ name: 'in_time', label: 'שעת כניסה (למשל 08:30)', required: true, dir: 'ltr', default: t(r.clock_in) },
+{ name: 'out_time', label: 'שעת יציאה (למשל 16:00)', dir: 'ltr', default: t(r.clock_out) },
+], {}, async (rec) => {
+const mk = (d, tm) => tm && /^\d{1,2}:\d{2}$/.test(tm) ? new Date(d + 'T' + tm.padStart(5, '0') + ':00').toISOString() : null;
+const rin = mk(rec.work_date, rec.in_time);
+if (!rin) { toast('שעת כניסה לא תקינה — פורמט 08:30', true); return; }
+const rout = mk(rec.work_date, rec.out_time);
+if (rout && rout <= rin) { toast('שעת היציאה חייבת להיות אחרי הכניסה', true); return; }
+await run(db.rpc('admin_fix_attendance', { p_id: r.id, p_clock_in: rin, p_clock_out: rout }));
+toast('הרישום עודכן וסומן כתיקון ידני');
 openPage('attendance');
 });
 }
