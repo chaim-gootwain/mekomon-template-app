@@ -116,8 +116,9 @@ function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, c => (
 function money(v) { return v == null || v === '' ? '' : '₪' + Number(v).toLocaleString('he-IL', { maximumFractionDigits: 2 }); }
 function heDate(d) { if (!d) return ''; const s = String(d).slice(0, 10).split('-'); return `${s[2]}.${s[1]}.${s[0]}`; }
 function heDateTime(d) { if (!d) return ''; const dt = new Date(d); return dt.toLocaleDateString('he-IL') + ' ' + dt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }); }
-function today() { return new Date().toISOString().slice(0, 10); }
-function thisMonth() { return new Date().toISOString().slice(0, 7); }
+/* תאריך לפי שעון מקומי (ולא UTC) — בין חצות ל-03:00 UTC נתן את היום הקודם */
+function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function thisMonth() { return today().slice(0, 7); }
 function monthEnd(ym) { const [y, m] = ym.split('-').map(Number); return ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0'); }
 
 function toast(msg, isError = false) {

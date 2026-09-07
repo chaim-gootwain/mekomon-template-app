@@ -45,12 +45,16 @@ document.getElementById('reportArea').innerHTML = `
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
 <b style="font-size:1.05rem">${title}</b>
 <span>
-<button class="btn btn-sm btn-ghost" onclick="${exportFn}">⬇ אקסל</button>
-<button class="btn btn-sm btn-ghost" onclick="printArea('${title}', document.getElementById('repTable').innerHTML)">🖨 PDF</button>
+<button class="btn btn-sm btn-ghost" id="repExportBtn">⬇ אקסל</button>
+<button class="btn btn-sm btn-ghost" id="repPrintBtn">🖨 PDF</button>
 </span>
 </div>
 <div id="repTable" class="table-wrap" style="margin-top:12px">${tableHtml}</div>
 </div>`;
+// חיבור בקוד ולא בתוך onclick — גרשיים בכותרות (דו"ח, סה"כ) שברו את המאפיין והכפתורים מתו
+const expBtn = document.getElementById('repExportBtn');
+if (typeof exportFn === 'function') expBtn.onclick = exportFn; else expBtn.style.display = 'none';
+document.getElementById('repPrintBtn').onclick = () => printArea(title, document.getElementById('repTable').innerHTML);
 }
 
 let _repData = []; // הנתונים של הדו"ח האחרון — לייצוא
@@ -80,7 +84,7 @@ reportShell('הכנסות — 6 חודשים', `
 ${rows.map(([m, v]) => `<tr><td>${m}</td><td>${money(v.billed)}</td><td>${money(v.collected)}</td>
 <td style="color:${v.billed - v.collected > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(v.billed - v.collected)}</td></tr>`).join('')}
 </tbody></table>`,
-`exportCsv('הכנסות', ['חודש','נמכר','נגבה'], _repData)`);
+() => exportCsv('הכנסות', ['חודש','נמכר','נגבה'], _repData));
 }
 
 /* ---------- עסקאות שנסגרו: לפי חודש-סגירה (צמיחה ותזרים) ---------- */
@@ -119,7 +123,7 @@ ${agentRows.length ? `<br><b style="font-size:.95rem">לפי סוכן:</b>
 ${agentRows.map(([a, v]) => `<tr><td>${esc(Number(a) ? (nameOf('agents', Number(a)) || '—') : 'ללא סוכן')}</td><td><b>${v.count}</b></td><td>${money(v.sum)}</td></tr>`).join('')}
 </tbody></table>` : ''}
 ${!rows.length ? '<p class="empty" style="margin-top:8px">אין עדיין עסקאות עם תאריך סגירה. מלא/י "תאריך סגירת עסקה" בחוזים כדי לראות כאן צמיחה חודשית.</p>' : ''}`,
-`exportCsv('עסקאות_שנסגרו', ['חודש','עסקאות','סה"כ','ממוצע'], _repData)`);
+() => exportCsv('עסקאות_שנסגרו', ['חודש','עסקאות','סה"כ','ממוצע'], _repData));
 }
 
 /* ---------- משפך מכירות ---------- */
@@ -140,7 +144,7 @@ ${byStage.map(([s, n]) => `<tr><td>${s}</td><td>${n}</td></tr>`).join('')}
 <table class="data"><thead><tr><th>מקור</th><th>לידים</th></tr></thead><tbody>
 ${Object.entries(bySource).map(([s, n]) => `<tr><td>${esc(s)}</td><td>${n}</td></tr>`).join('')}
 </tbody></table>`,
-`exportCsv('משפך_מכירות', ['שלב','לידים'], _repData)`);
+() => exportCsv('משפך_מכירות', ['שלב','לידים'], _repData));
 }
 
 /* ---------- גיול חובות — פר לקוח, יתרות אמת (פיצ'ר #9) ---------- */
@@ -194,7 +198,7 @@ ${r.buckets.map((v, i) => `<td style="${i >= 3 && v > 0.005 ? 'color:var(--dange
 </tbody>
 ${rows.length ? `<tfoot><tr style="border-top:2px solid var(--line)"><td><b>סה"כ</b></td>${colSum.map(v => `<td><b>${fmt(v)}</b></td>`).join('')}<td><b>${money(grand)}</b></td><td></td><td></td></tr></tfoot>` : ''}
 </table>`,
-`exportCsv('גיול_חובות', ['לקוח',${AGING_BUCKETS.map(b => `'${b}'`).join(',')},'סה"כ','ותק_מרבי_ימים'], _repData)`);
+() => exportCsv('גיול_חובות', ['לקוח', ...AGING_BUCKETS, 'סה"כ', 'ותק_מרבי_ימים'], _repData));
 }
 
 /* ---------- דו"ח גיליון ---------- */
@@ -210,7 +214,7 @@ reportShell('דו"ח גיליונות — 12 אחרונים', `
 <table class="data"><thead><tr><th>גיליון</th><th>תאריך</th><th>מודעות</th><th>הכנסה</th><th>סטטוס</th></tr></thead><tbody>
 ${_repData.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td><td>${money(r[3])}</td><td>${r[4]}</td></tr>`).join('')}
 </tbody></table>`,
-`exportCsv('גיליונות', ['גיליון','תאריך','מודעות','הכנסה','סטטוס'], _repData)`);
+() => exportCsv('גיליונות', ['גיליון','תאריך','מודעות','הכנסה','סטטוס'], _repData));
 }
 
 /* ---------- היסטוריית לקוח ---------- */
@@ -269,7 +273,7 @@ async function report_top() {
     ${rows.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${r[1]}</td><td>${r[2]}</td><td><b>${money(r[3])}</b></td></tr>`).join('')
       || '<tr><td colspan="4" class="empty">אין עדיין נתוני מודעות — יתמלא כשתזין מודעות לגיליונות</td></tr>'}
     </tbody></table>`,
-    `exportCsv('מפרסמים_מובילים', ['לקוח','מודעות','גיליונות','הכנסה'], _repData)`);
+    () => exportCsv('מפרסמים_מובילים', ['לקוח','מודעות','גיליונות','הכנסה'], _repData));
 }
 
 /* ---------- שטח שלא נמכר (עמודים ריקים לפי גיליון) ---------- */
@@ -292,7 +296,7 @@ async function report_unsold() {
     ${_repData.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td>
       <td style="color:${r[3] > 0 ? 'var(--warn)' : 'var(--ok)'}"><b>${r[3]}</b></td><td>${r[4]}</td></tr>`).join('')}
     </tbody></table>`,
-    `exportCsv('שטח_לא_נמכר', ['גיליון','עמודים','מאוישים','ריקים','אחוז_ריק'], _repData)`);
+    () => exportCsv('שטח_לא_נמכר', ['גיליון','עמודים','מאוישים','ריקים','אחוז_ריק'], _repData));
 }
 
 /* ---------- לקוחות שהפסיקו לפרסם (churn) ---------- */
@@ -314,7 +318,7 @@ async function report_churn() {
     ${rows.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>גיליון ${r[1]}</td><td style="color:var(--warn)"><b>${r[2]}</b></td></tr>`).join('')
       || '<tr><td colspan="3" class="empty">אין — כולם פעילים 🎉 (או שעדיין אין היסטוריית מודעות)</td></tr>'}
     </tbody></table>`,
-    `exportCsv('churn', ['לקוח','גיליון_אחרון','גיליונות_מאז'], _repData)`);
+    () => exportCsv('churn', ['לקוח','גיליון_אחרון','גיליונות_מאז'], _repData));
 }
 
 
@@ -355,7 +359,7 @@ async function report_pnl() {
       <td><b style="color:${tP >= 0 ? 'var(--ok)' : 'var(--danger)'}">${money(tP)}</b></td></tr></tfoot>
     </table>
     <p class="muted" style="font-size:.78rem;margin-top:8px">הכנסות = שווי המודעות (נטו) לפי חודש הסגירה לדפוס של הגיליון · הוצאות = עלויות נטו שהוזנו (כולל עלויות הגיליון). מספרים ללא מע"מ.</p>`,
-    `exportCsv('רווח_והפסד', ['חודש','הכנסות','הוצאות','רווח'], _repData)`);
+    () => exportCsv('רווח_והפסד', ['חודש','הכנסות','הוצאות','רווח'], _repData));
 }
 
 /* ---------- כרטסות לרו"ח: ייצוא חודשי של כל התנועות (פיצ'ר #4) ---------- */
@@ -569,7 +573,7 @@ async function report_agencies() {
 <table class="data"><thead><tr><th>סוכנות</th><th>לקוחות</th><th>מחזור ${ym}</th><th>עמלה ${ym}</th><th>מחזור ${prevYm}</th><th>עמלה ${prevYm}</th><th>%</th></tr></thead><tbody>
 ${_repData.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${r[1]}</td><td>${money(r[2])}</td><td><b>${money(r[3])}</b></td><td>${money(r[4])}</td><td>${money(r[5])}</td><td>${r[6]}%</td></tr>`).join('')}
 </tbody></table>`,
-    `exportCsv('עמלות_סוכנויות', ['סוכנות','לקוחות','מחזור_נוכחי','עמלה_נוכחית','מחזור_קודם','עמלה_קודמת','אחוז'], _repData)`);
+    () => exportCsv('עמלות_סוכנויות', ['סוכנות','לקוחות','מחזור_נוכחי','עמלה_נוכחית','מחזור_קודם','עמלה_קודמת','אחוז'], _repData));
 }
 
 /* ---------- דוח רווחיות (פיצ'ר #3) — מנהל בלבד ---------- */
