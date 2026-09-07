@@ -118,6 +118,7 @@ function heDate(d) { if (!d) return ''; const s = String(d).slice(0, 10).split('
 function heDateTime(d) { if (!d) return ''; const dt = new Date(d); return dt.toLocaleDateString('he-IL') + ' ' + dt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }); }
 function today() { return new Date().toISOString().slice(0, 10); }
 function thisMonth() { return new Date().toISOString().slice(0, 7); }
+function monthEnd(ym) { const [y, m] = ym.split('-').map(Number); return ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0'); }
 
 function toast(msg, isError = false) {
 const t = document.getElementById('toast');
