@@ -44,10 +44,10 @@ async function checkCustomerStatusGate(customerId, actionLabel) {
 async function _loadCustDebt() {
   const map = {};
   try {
-    const open = await run(db.from('charges').select('id,customer_id,amount,due_date,status').in('status', ['pending', 'invoiced', 'partial', 'overdue']));
+    const open = await runAll((f, t) => db.from('charges').select('id,customer_id,amount,due_date,status').in('status', ['pending', 'invoiced', 'partial', 'overdue']).order('id').range(f, t));
     if (!open.length) return map;
     const ids = open.map(c => c.id); const paid = {};
-    try { const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', ids)); pays.forEach(pp => { paid[pp.charge_id] = (paid[pp.charge_id] || 0) + Number(pp.amount); }); } catch (e) { }
+    try { const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', ids); pays.forEach(pp => { paid[pp.charge_id] = (paid[pp.charge_id] || 0) + Number(pp.amount); }); } catch (e) { }
     const T = today();
     open.forEach(c => { const bal = Number(c.amount) - (paid[c.id] || 0); if (bal > 0.001) { const m = map[c.customer_id] = map[c.customer_id] || { debt: 0, overdue: false }; m.debt += bal; if (c.status === 'overdue' || (c.due_date && c.due_date < T)) m.overdue = true; } });
   } catch (e) { console.error('cust debt', e); }
@@ -59,7 +59,7 @@ function _importTerms(v) { const x = String(v || '').replace(/\s/g, ''); if (/60
 
 Pages.customers = {
 render: async (el) => {
-_customers = await run(db.from('customers').select('*').order('name'));
+_customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
 const canWrite = ['admin', 'sales'].includes(profile.role);
 el.innerHTML = `
 <div class="page-head">
@@ -269,8 +269,8 @@ const canMoney = ['admin', 'sales'].includes(profile.role);
 const [ads, contracts, charges, payments, notes] = await Promise.all([
 run(db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).limit(300)),
 canMoney ? run(db.from('contracts').select('*').eq('customer_id', id).order('created_at', { ascending: false })) : [],
-canMoney ? run(db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).limit(50)) : [],
-canMoney ? run(db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).limit(50)) : [],
+canMoney ? runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)) : [],
+canMoney ? runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)) : [],
 loadTimeline('customer', id),
 ]);
 
@@ -694,7 +694,7 @@ async function customersImportCommit() {
 async function portalTokenReset(id) {
 if (!confirm('לחדש את הקישור? הקישור הישן יפסיק לעבוד מיידית.')) return;
 await run(db.rpc('reset_portal_token', { p_customer_id: id }));
-_customers = await run(db.from('customers').select('*').order('name'));
+_customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
 await refreshCache();
 toast('קישור חדש הונפק');
 openCustomerCard(id);

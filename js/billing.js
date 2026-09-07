@@ -12,7 +12,7 @@ let _charges = [];
 
 Pages.billing = {
 render: async (el) => {
-_charges = await run(db.from('charges').select('*').order('issued_date', { ascending: false }).limit(400));
+_charges = await runAll((f, t) => db.from('charges').select('*').order('issued_date', { ascending: false }).order('id').range(f, t));
 
 // עדכון אוטומטי של חיובים שעברו את תאריך היעד ל"באיחור"
 const overdueIds = _charges

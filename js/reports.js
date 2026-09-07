@@ -59,8 +59,8 @@ let _repData = []; // הנתונים של הדו"ח האחרון — לייצו�
 async function report_revenue() {
 const since = new Date(); since.setMonth(since.getMonth() - 6);
 const [charges, payments] = await Promise.all([
-run(db.from('charges').select('amount,issued_date,agent_id,status').gte('issued_date', since.toISOString().slice(0, 10))),
-run(db.from('payments').select('amount,paid_date').gte('paid_date', since.toISOString().slice(0, 10))),
+runAll((f, t) => db.from('charges').select('amount,issued_date,agent_id,status').gte('issued_date', since.toISOString().slice(0, 10)).order('id').range(f, t)),
+runAll((f, t) => db.from('payments').select('amount,paid_date').gte('paid_date', since.toISOString().slice(0, 10)).order('id').range(f, t)),
 ]);
 const months = {};
 charges.filter(c => !['cancelled'].includes(c.status)).forEach(c => {
@@ -85,7 +85,7 @@ ${rows.map(([m, v]) => `<tr><td>${m}</td><td>${money(v.billed)}</td><td>${money(
 
 /* ---------- עסקאות שנסגרו: לפי חודש-סגירה (צמיחה ותזרים) ---------- */
 async function report_deals() {
-const contracts = await run(db.from('contracts').select('closed_date,total_price,customer_id,agent_id').not('closed_date', 'is', null));
+const contracts = await runAll((f, t) => db.from('contracts').select('closed_date,total_price,customer_id,agent_id').not('closed_date', 'is', null).order('id').range(f, t));
 const months = {};
 (contracts || []).forEach(c => {
 const m = String(c.closed_date).slice(0, 7);
@@ -124,7 +124,7 @@ ${!rows.length ? '<p class="empty" style="margin-top:8px">אין עדיין עס
 
 /* ---------- משפך מכירות ---------- */
 async function report_funnel() {
-const leads = await run(db.from('leads').select('status,source,agent_id,created_at'));
+const leads = await runAll((f, t) => db.from('leads').select('status,source,agent_id,created_at').order('id').range(f, t));
 const stages = ['new', 'contacted', 'meeting', 'proposal', 'won', 'lost'];
 const byStage = stages.map(s => [STATUS.lead[s][0], leads.filter(l => l.status === s).length]);
 const bySource = {};
@@ -150,12 +150,12 @@ ${Object.entries(bySource).map(([s, n]) => `<tr><td>${esc(s)}</td><td>${n}</td><
 const AGING_BUCKETS = ['שוטף', '1-30 יום', '31-60 יום', '61-90 יום', 'מעל 90 יום'];
 
 async function report_aging() {
-const charges = await run(db.from('charges').select('id,customer_id,amount,status,due_date').in('status', ['pending', 'invoiced', 'partial', 'overdue']));
+const charges = await runAll((f, t) => db.from('charges').select('id,customer_id,amount,status,due_date').in('status', ['pending', 'invoiced', 'partial', 'overdue']).order('id').range(f, t));
 const ids = charges.map(c => c.id);
 const paid = {};
 if (ids.length) {
 try {
-const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', ids));
+const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', ids);
 pays.forEach(p => paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount || 0));
 } catch (e) { }
 }
@@ -200,7 +200,7 @@ ${rows.length ? `<tfoot><tr style="border-top:2px solid var(--line)"><td><b>סה
 /* ---------- דו"ח גיליון ---------- */
 async function report_issue() {
 const issues = await run(db.from('issues').select('*').order('issue_number', { ascending: false }).limit(12));
-const ads = await run(db.from('ads').select('issue_id,price,discount,status').not('issue_id', 'is', null));
+const ads = await runAll((f, t) => db.from('ads').select('issue_id,price,discount,status').not('issue_id', 'is', null).order('id').range(f, t));
 _repData = issues.map(i => {
 const iAds = ads.filter(a => a.issue_id === i.id && !['cancelled', 'rejected'].includes(a.status));
 const rev = iAds.reduce((s, a) => s + Number(a.price) - Number(a.discount), 0);
@@ -230,9 +230,9 @@ async function reportCustomerRun() {
 const id = Number(document.getElementById('repCust').value);
 if (!id) { toast('בחר לקוח מהחיפוש', true); return; }
 const [ads, charges, payments] = await Promise.all([
-run(db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false })),
-run(db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false })),
-run(db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false })),
+runAll((f, t) => db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).order('id').range(f, t)),
+runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)),
+runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)),
 ]);
 const billed = charges.filter(c => !['cancelled', 'lost'].includes(c.status)).reduce((s, c) => s + Number(c.amount), 0);
 const paid = payments.reduce((s, p) => s + Number(p.amount), 0);
@@ -253,7 +253,7 @@ ${ads.map(a => `<tr><td>${heDate(a.created_at)}</td><td>${esc(a.title)}</td>
 
 /* ---------- מפרסמים מובילים ---------- */
 async function report_top() {
-  const ads = await run(db.from('ads').select('customer_id,price,discount,status,issue_id').not('status', 'in', '("cancelled","rejected")'));
+  const ads = await runAll((f, t) => db.from('ads').select('customer_id,price,discount,status,issue_id').not('status', 'in', '("cancelled","rejected")').order('id').range(f, t));
   const by = {};
   ads.forEach(a => {
     const rev = (Number(a.price) || 0) - (Number(a.discount) || 0);
@@ -277,8 +277,8 @@ async function report_unsold() {
   const issues = await run(db.from('issues').select('*').order('issue_number', { ascending: false }).limit(12));
   const ids = issues.map(i => i.id);
   const [ads, articles] = await Promise.all([
-    run(db.from('ads').select('issue_id,page_number,status').in('issue_id', ids)),
-    run(db.from('articles').select('issue_id,page_number').in('issue_id', ids)),
+    runAll((f, t) => db.from('ads').select('issue_id,page_number,status').in('issue_id', ids).order('id').range(f, t)),
+    runAll((f, t) => db.from('articles').select('issue_id,page_number').in('issue_id', ids).order('id').range(f, t)),
   ]);
   _repData = issues.map(i => {
     const pages = new Set();
@@ -297,10 +297,10 @@ async function report_unsold() {
 
 /* ---------- לקוחות שהפסיקו לפרסם (churn) ---------- */
 async function report_churn() {
-  const issues = await run(db.from('issues').select('id,issue_number'));
+  const issues = await runAll((f, t) => db.from('issues').select('id,issue_number').order('id').range(f, t));
   const issNum = {}; issues.forEach(i => issNum[i.id] = i.issue_number);
   const maxIssue = issues.length ? Math.max(...issues.map(i => i.issue_number || 0)) : 0;
-  const ads = await run(db.from('ads').select('customer_id,issue_id,status').not('status', 'in', '("cancelled","rejected")'));
+  const ads = await runAll((f, t) => db.from('ads').select('customer_id,issue_id,status').not('status', 'in', '("cancelled","rejected")').order('id').range(f, t));
   const last = {};
   ads.forEach(a => { const n = issNum[a.issue_id] || 0; if (!last[a.customer_id] || n > last[a.customer_id]) last[a.customer_id] = n; });
   const GAP = 3;
@@ -547,8 +547,8 @@ async function report_agencies() {
   const ym = new Date().toISOString().slice(0, 7);
   const d = new Date(); d.setMonth(d.getMonth() - 1);
   const prevYm = d.toISOString().slice(0, 7);
-  const charges = await run(db.from('charges').select('customer_id,amount,status,issued_date')
-    .gte('issued_date', prevYm + '-01').not('status', 'in', '("cancelled","lost")'));
+  const charges = await runAll((f, t) => db.from('charges').select('customer_id,amount,status,issued_date')
+    .gte('issued_date', prevYm + '-01').not('status', 'in', '("cancelled","lost")').order('id').range(f, t));
   const custAgency = {}; (cache.customers || []).forEach(c => { if (c.agency_id) custAgency[c.id] = c.agency_id; });
   const sums = {}; // agency_id -> {cur, prev}
   charges.forEach(c => {

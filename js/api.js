@@ -151,6 +151,18 @@ if (!rows || rows.length < pageSize) break;
 return all;
 }
 
+/* כמו runAll, אבל עם פילטר in() על רשימת ערכים שיכולה להיות ארוכה מאוד —
+   מפצל לקבוצות של 500 כדי לא לחרוג מאורך ה-URL של הבקשה */
+async function runAllIn(makeQuery, column, values, errPrefix = 'שגיאה') {
+const all = [];
+for (let i = 0; i < values.length; i += 500) {
+const part = values.slice(i, i + 500);
+const rows = await runAll((f, t) => makeQuery(f, t).in(column, part), errPrefix);
+all.push(...rows);
+}
+return all;
+}
+
 /* ---------- 5. מודאל טפסים גנרי ----------
 openForm(כותרת, שדות, ערכים, פונקציית-שמירה)
 סוגי שדה: text, number, date, select, textarea, checkbox
