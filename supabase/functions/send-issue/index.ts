@@ -27,8 +27,8 @@ Deno.serve(async (req)=>{
     if (!authorized) {
       const { data: u } = await admin.auth.getUser((req.headers.get("Authorization") || "").replace("Bearer ", ""));
       if (u?.user?.id) {
-        const { data: p } = await admin.from("profiles").select("role").eq("id", u.user.id).single();
-        if (p?.role === "admin") authorized = true;
+        const { data: p } = await admin.from("profiles").select("role,active").eq("id", u.user.id).single();
+        if (p?.role === "admin" && p?.active) authorized = true;
       }
     }
     if (!authorized) return json({
