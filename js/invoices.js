@@ -466,6 +466,20 @@ async function invCall(body) {
     if (data && data.ok) {
       toast('✅ הופק מסמך ' + (data.document && data.document.doc_number ? data.document.doc_number : '') + ' — ה-PDF יהיה מוכן בעוד רגע');
       if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); } }
+      // מסמך תשלום המשויך למסמך מקור (parent) — מסמנים את המקור כסגור,
+      // כדי ש"לקוח שילם" בצ'אט לא יציע אותו שוב (קבלה כפולה). עד עכשיו
+      // רק הצ'אט סימן settled_at; הפקה מכרטיס הלקוח השאירה אותו "פתוח".
+      if (body.parent && ['invoice_receipt', 'receipt'].includes(body.doc_kind) && body.customer_id) {
+        try {
+          const { data: _srcs } = await db.from('documents').select('*').eq('customer_id', body.customer_id)
+            .in('doc_kind', ['proforma', 'tax_invoice']).is('settled_at', null).limit(100);
+          const _src = (_srcs || []).find(d => typeof _icProformaUuid === 'function' && _icProformaUuid(d) === body.parent);
+          if (_src) await db.from('documents').update({
+            settled_at: new Date().toISOString(),
+            settled_by_doc: (data.document && data.document.doc_number) ? String(data.document.doc_number) : null,
+          }).eq('id', _src.id);
+        } catch (e) { /* עמודת settled_at אולי לא קיימת במופע — לא חוסם */ }
+      }
       try { if (Array.isArray(body.ad_ids) && body.ad_ids.length) { await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', body.ad_ids).or('deal_stage.is.null,deal_stage.neq.paid'); } } catch (e) { console.error('mark invoiced', e); }
     } else if (data && data.status === 'pending_allocation') {
       toast('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount', true);
