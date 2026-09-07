@@ -39,7 +39,7 @@ function leadDupTag(l) {
 Pages.leads = {
   render: async (el) => {
     // צפייה משותפת: כולם רואים את כל הלידים; ההגבלה בשרת היא על כתיבה בלבד
-    _leads = await run(db.from('leads').select('*').order('created_at', { ascending: false }));
+    _leads = await runAll((f, t) => db.from('leads').select('*').order('created_at', { ascending: false }).order('id').range(f, t));
 
     // כפילות מול לקוחות (RPC עם security definer — רואה את כל הלקוחות).
     // אם המיגרציה עוד לא רצה במופע — ממשיכים בשקט בלי תגי כפילות.
@@ -454,8 +454,8 @@ async function leadsImport() {
   if (!rows.length) { toast('הקובץ ריק או שאין שורת כותרות', true); return; }
 
   const [exLeads, exCustomers] = await Promise.all([
-    run(db.from('leads').select('phone')),
-    run(db.from('customers').select('phone')),
+    runAll((f, t) => db.from('leads').select('phone').order('id').range(f, t)),
+    runAll((f, t) => db.from('customers').select('phone').order('id').range(f, t)),
   ]);
   const knownPhones = new Set([...exLeads, ...exCustomers].map(x => x.phone).filter(Boolean));
   const myAgent = cache.agents.find(a => a.profile_id === profile.id);

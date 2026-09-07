@@ -332,13 +332,17 @@ openPage('settings');
 async function fullBackup() {
 toast('מייצא... זה יכול לקחת כמה שניות');
 const tables = ['customers', 'leads', 'agents', 'ads', 'issues', 'articles', 'charges', 'payments', 'contracts', 'expenses', 'price_list', 'quotes'];
+const failed = [], empty = [];
 for (const t of tables) {
-const { data, error } = await db.from(t).select('*').limit(5000);
-if (error || !data || !data.length) continue;
+let data;
+try { data = await runAll((f, to) => db.from(t).select('*').order('id').range(f, to), 'שגיאה בגיבוי ' + t); }
+catch (e) { failed.push(t); continue; }
+if (!data.length) { empty.push(t); continue; }
 const headers = Object.keys(data[0]);
 exportCsv('גיבוי_' + t + '_' + today(), headers, data.map(r => headers.map(h => typeof r[h] === 'object' && r[h] !== null ? JSON.stringify(r[h]) : r[h])));
 await new Promise(r => setTimeout(r, 400)); // רווח בין הורדות
 }
-toast('הייצוא הושלם — בדוק את תיקיית ההורדות');
+if (failed.length) toast('הגיבוי הסתיים אך נכשל בטבלאות: ' + failed.join(', '), true);
+else toast('הייצוא הושלם' + (empty.length ? ' (טבלאות ריקות דולגו: ' + empty.join(', ') + ')' : '') + ' — בדוק את תיקיית ההורדות');
 }
 /* v: invoices module */
