@@ -45,11 +45,21 @@ Pages.finhub = {
       isAdmin ? runAll((f, t) => db.from('payments').select('amount,paid_date').gte('paid_date', yearStart).order('id').range(f, t)) : [],
     ]);
 
+    /* חוב אמיתי: מפחיתים תשלומים שנרשמו על חיובים פתוחים (חלקיים) */
+    const fhPaid = {};
+    if (openCh.length) {
+      try {
+        const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', openCh.map(c => c.id));
+        pays.forEach(p => { fhPaid[p.charge_id] = (fhPaid[p.charge_id] || 0) + Number(p.amount || 0); });
+      } catch (e) { console.error('open debt payments', e); }
+    }
+    const fhBal = c => Math.max(0, Number(c.amount || 0) - (fhPaid[c.id] || 0));
+
     /* ---- מדדים ---- */
-    const totalDebt = openCh.reduce((s, c) => s + Number(c.amount || 0), 0);
-    const overdueAmt = openCh.filter(c => c.due_date && c.due_date < t).reduce((s, c) => s + Number(c.amount || 0), 0);
+    const totalDebt = openCh.reduce((s, c) => s + fhBal(c), 0);
+    const overdueAmt = openCh.filter(c => c.due_date && c.due_date < t).reduce((s, c) => s + fhBal(c), 0);
     const t30 = (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })();
-    const expected30 = openCh.filter(c => c.due_date && c.due_date >= t && c.due_date <= t30).reduce((s, c) => s + Number(c.amount || 0), 0);
+    const expected30 = openCh.filter(c => c.due_date && c.due_date >= t && c.due_date <= t30).reduce((s, c) => s + fhBal(c), 0);
     const revMonth = recentCh.filter(c => String(c.issued_date || '').slice(0, 7) === mNow).reduce((s, c) => s + Number(c.amount || 0), 0);
     const expMonth = expenses.filter(e => String(e.expense_date || '').slice(0, 7) === mNow).reduce((s, e) => s + Number(e.amount || 0), 0);
     const profitMonth = revMonth - expMonth;
@@ -77,7 +87,7 @@ Pages.finhub = {
       { k: 'b90p', t: '90+ יום', sum: 0, color: '#b91c1c' },
     ];
     openCh.forEach(c => {
-      const days = _fhDaysOver(_fhAgeDate(c)), amt = Number(c.amount || 0);
+      const days = _fhDaysOver(_fhAgeDate(c)), amt = fhBal(c);
       let b;
       if (days <= 0) b = buckets[0];
       else if (days <= 30) b = buckets[1];
@@ -130,7 +140,7 @@ Pages.finhub = {
     openCh.forEach(c => {
       const id = c.customer_id; if (!id) return;
       if (!byCust[id]) byCust[id] = { id, sum: 0, oldest: 0 };
-      byCust[id].sum += Number(c.amount || 0);
+      byCust[id].sum += fhBal(c);
       const days = _fhDaysOver(_fhAgeDate(c));
       if (days > byCust[id].oldest) byCust[id].oldest = days;
     });

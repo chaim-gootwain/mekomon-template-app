@@ -196,6 +196,15 @@ if (role === 'admin')
 jobs.push(db.from('attendance').select('id,profile_id').is('clock_out', null).then(r => q.present = r.data || []));
 await Promise.all(jobs);
 
+// חוב אמיתי בקוביית הדשבורד: מפחיתים תשלומים שנרשמו על חיובים פתוחים
+if (q.charges && q.charges.length) {
+try {
+const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', q.charges.map(c => c.id));
+const paid = {}; pays.forEach(p => { paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount || 0); });
+q.charges.forEach(c => { c._balance = Math.max(0, Number(c.amount || 0) - (paid[c.id] || 0)); });
+} catch (e) { console.error('open debt payments', e); }
+}
+
 /* --- קוביות מספרים --- */
 let stats = '';
 if (q.leads) {
@@ -205,7 +214,7 @@ stats += stat(mine.length, 'לידים פתוחים' + (due ? ` · <b style="col
 }
 if (q.newAds) stats += stat(q.newAds.length, 'מודעות חדשות ממתינות לניתוב', q.newAds.length ? 'gold' : '');
 if (q.charges) {
-const open = q.charges.reduce((s, c) => s + Number(c.amount), 0);
+const open = q.charges.reduce((s, c) => s + (c._balance != null ? c._balance : Number(c.amount)), 0);
 stats += stat(money(open), 'חוב פתוח (' + q.charges.length + ' חיובים)');
 }
 if (q.articles) stats += stat(q.articles.length, 'כתבות בעבודה');
