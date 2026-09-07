@@ -36,7 +36,7 @@ Deno.serve(async (req)=>{
       error: "forbidden"
     }, 403);
     const body = await req.json();
-    const { customer_id, issue_ids, ym, send_email } = body || {};
+    const { customer_id, issue_ids, ym, send_email, to_email, category_he, note, ad_ids, invoice } = body || {};
     if (!customer_id || !Array.isArray(issue_ids) || !issue_ids.length) return json({
       ok: false,
       error: "bad-request"
@@ -46,12 +46,15 @@ Deno.serve(async (req)=>{
       ok: false,
       error: "customer not found"
     }, 404);
+    const _rcpt = to_email || cust.email || null;
     const out = await PDFDocument.create();
     const usedByIssue = [];
     for (const iid of issue_ids){
       const { data: issue } = await admin.from("issues").select("issue_number,pdf_path").eq("id", iid).single();
       if (!issue || !issue.pdf_path) continue;
-      const { data: adRows } = await admin.from("ads").select("page_number").eq("issue_id", iid).eq("customer_id", customer_id).not("status", "in", "(\"cancelled\",\"rejected\")");
+      let _adsQ = admin.from("ads").select("page_number").eq("issue_id", iid).eq("customer_id", customer_id).not("status", "in", "(\"cancelled\",\"rejected\")");
+      if (Array.isArray(ad_ids) && ad_ids.length) _adsQ = _adsQ.in("id", ad_ids);
+      const { data: adRows } = await _adsQ;
       const pages = [
         ...new Set((adRows || []).map((a)=>a.page_number).filter((p)=>p))
       ].sort((a, b)=>a - b);
@@ -125,7 +128,7 @@ Deno.serve(async (req)=>{
     const pdf_b64 = btoa(_bs);
     let emailed = false;
     let emailError = null;
-    const _wantEmail = send_email !== false && !!cust.email;
+    const _wantEmail = send_email !== false && !!_rcpt;
     if (_wantEmail) {
       try {
         const user = Deno.env.get("GMAIL_USER") || "@@PAPER_EMAIL@@";
@@ -139,13 +142,34 @@ Deno.serve(async (req)=>{
           });
         const _E = "=?UTF-8?B?";
         const _list = usedByIssue.map((u)=>"גיליון " + u.num).join(", ");
-        const _subject = "גזירי הפרסום שלך — " + (ym || "") + " · @@PAPER_NAME@@";
+        const _subject = (category_he ? "[" + category_he + "] " : "") + "גזירי הפרסום שלך — " + (ym || "") + " · @@PAPER_NAME@@";
         const _fname = "גזירי_החודש_" + (ym || "") + ".pdf";
-        const _bodyText = "שלום " + (cust.name || "") + "," + NL + NL + "מצורפים גזירי הפרסום שלך לחודש " + (ym || "") + " (" + _list + ")." + NL + "תודה שאתם מפרסמים ב@@PAPER_NAME@@!" + NL + NL + "בברכה," + NL + "מערכת @@PAPER_NAME@@";
+        const _bodyText = (note ? note + NL + NL : "") + "שלום " + (cust.name || "") + "," + NL + NL + "מצורפים גזירי הפרסום שלך לחודש " + (ym || "") + " (" + _list + ")." + NL + "תודה שאתם מפרסמים ב@@PAPER_NAME@@!" + NL + NL + "בברכה," + NL + "מערכת @@PAPER_NAME@@";
+        let _invB64 = null;
+        let _invFname = null;
+        try {
+          if (invoice && (invoice.pdf_url || invoice.doc_uuid)) {
+            let _pu = invoice.pdf_url || null;
+            if (!_pu && invoice.doc_uuid) {
+              const { data: _docRow } = await admin.from("documents").select("pdf_url").eq("doc_uuid", invoice.doc_uuid).single();
+              _pu = _docRow && _docRow.pdf_url || null;
+            }
+            if (_pu) {
+              const _pr = await fetch(_pu);
+              if (_pr.ok) {
+                const _pb = new Uint8Array(await _pr.arrayBuffer());
+                let _ps = "";
+                for(let i = 0; i < _pb.length; i += _CH)_ps += String.fromCharCode.apply(null, _pb.subarray(i, i + _CH));
+                _invB64 = btoa(_ps);
+                _invFname = "חשבונית_" + (invoice.doc_number || "") + ".pdf";
+              }
+            }
+          }
+        } catch (_e) {}
         const _bound = "emu_" + Date.now().toString(36);
         const _msg = [
           "From: " + user,
-          "To: " + cust.email,
+          "To: " + _rcpt,
           "Reply-To: @@PAPER_EMAIL@@",
           "Subject: " + _E + _b64s(_subject) + "?=",
           "Date: " + new Date().toUTCString(),
@@ -163,6 +187,14 @@ Deno.serve(async (req)=>{
           "Content-Disposition: attachment; filename=\"" + _E + _b64s(_fname) + "?=\"",
           "",
           _wrap(pdf_b64),
+          ...(_invB64 ? [
+            "--" + _bound,
+            "Content-Type: application/pdf; name=\"" + _E + _b64s(_invFname) + "?=\"",
+            "Content-Transfer-Encoding: base64",
+            "Content-Disposition: attachment; filename=\"" + _E + _b64s(_invFname) + "?=\"",
+            "",
+            _wrap(_invB64)
+          ] : []),
           "--" + _bound + "--"
         ].join(CRLF);
         const _conn = await Deno.connectTls({
@@ -225,7 +257,7 @@ Deno.serve(async (req)=>{
         await _cmd(_b64s(user), "334");
         await _cmd(_b64s(pass), "235");
         await _cmd("MAIL FROM:<" + user + ">", "250");
-        await _cmd("RCPT TO:<" + cust.email + ">", "250");
+        await _cmd("RCPT TO:<" + _rcpt + ">", "250");
         await _cmd("DATA", "354");
         await _writeAll(_te.encode(_msg + CRLF + "." + CRLF));
         const _final = await _reply();
@@ -246,7 +278,7 @@ Deno.serve(async (req)=>{
       pdf_b64,
       issues: usedByIssue.map((u)=>u.num),
       emailed,
-      email: cust.email || null,
+      email: _rcpt,
       emailError
     });
   } catch (e) {
