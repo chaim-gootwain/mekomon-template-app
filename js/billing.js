@@ -125,9 +125,14 @@ openForm('חיוב ידני', [
 { name: 'customer_id', label: 'לקוח', type: 'customer', required: true },
 { name: 'amount', label: 'סכום (₪)', type: 'number', required: true },
 { name: 'description', label: 'תיאור', required: true },
+// תאריך החיוב קובע את סדר סגירת התשלומים (הוותיק נסגר ראשון) — לחוב ישן
+// מהתוכנה הקודמת מזינים את התאריך המקורי, כדי שקבלה עליו לא תיסגר
+// בטעות על חיובים חדשים שכבר הופקו
+{ name: 'issued_date', label: 'תאריך החיוב (לחוב ישן — התאריך המקורי)', type: 'date' },
 { name: 'due_date', label: 'לתשלום עד', type: 'date' },
 { name: 'notes', label: 'הערות', type: 'textarea' },
-], {}, async (rec) => {
+], { issued_date: today() }, async (rec) => {
+if (!rec.issued_date) rec.issued_date = today();
 const cust = cache.customers.find(x => x.id === rec.customer_id);
 if (cust) rec.agent_id = cust.agent_id;
 await run(db.from('charges').insert(rec));
