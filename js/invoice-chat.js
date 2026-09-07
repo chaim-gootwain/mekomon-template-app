@@ -514,19 +514,29 @@ function invChatEzcountBody(f) {
   // מע"מ ברמת המסמך (ezcount-doc מקבל דגל אחד): כלול רק אם כל השורות "כולל מע"מ"
   const vatInc = lines.length ? lines.every(l => !!l.price_includes_vat) : false;
   const pct = invChatVatPct();
+  // שורות מעורבות (חלק כולל מע"מ וחלק לא): מיישרים הכול ל"כולל מע"מ" —
+  // מגלמים מע"מ בשורות ה"לפני" — כדי שהמסמך יצא בדיוק כמו התצוגה המקדימה
+  // שאושרה (דגל אחד על מחירים גולמיים היה מחייב את הלקוח סכום שונה).
+  const anyInc = lines.some(l => !!l.price_includes_vat);
+  let docVatInc = vatInc, docLines = lines;
+  if (anyInc && !vatInc) {
+    docVatInc = true;
+    docLines = lines.map(l => l.price_includes_vat ? l : Object.assign({}, l, { unit_price: Math.round(Number(l.unit_price) * (1 + pct / 100) * 100) / 100 }));
+  }
   const dstr = (f.doc_date ? String(f.doc_date).slice(0, 10) : today());
   const body = {
     customer_id: f.customer_id || null,
     doc_kind: INVCHAT_EZ_DOC_KIND[f.doc_type] || f.doc_type,
-    items: lines.map(l => ({ details: String(l.description || '').trim() || 'פרסום', amount: Number(l.quantity) || 1, price: Number(l.unit_price) || 0 })),
-    vat_included: vatInc,
+    items: docLines.map(l => ({ details: String(l.description || '').trim() || 'פרסום', amount: Number(l.quantity) || 1, price: Number(l.unit_price) || 0 })),
+    vat_included: docVatInc,
     doc_date: dstr,
   };
   if (!f.customer_id && f.customer_name) body.client_name = String(f.customer_name).trim();
   if (isPay) {
-    const base = lines.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);
-    // מס-קבלה: אם המחירים "לפני מע"מ" — מגלמים מע"מ כדי שהתשלום יתאים לסה"כ. קבלה: הסכום כפי שנגבה.
-    const gross = (vatInc || f.doc_type === 'receipt') ? base : base * (1 + pct / 100);
+    // קבלה בלבד: הסכום כפי שנגבה (השורות המקוריות). מס-קבלה: מגלמים מע"מ אם צריך.
+    const rawBase = lines.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);
+    const docBase = docLines.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);
+    const gross = f.doc_type === 'receipt' ? rawBase : (docVatInc ? docBase : docBase * (1 + pct / 100));
     body.pay_date = dstr;
     body.payment = { method: f.payment_method || 'cash', sum: Math.round(gross * 100) / 100, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) };
     if (f.doc_type === 'receipt') delete body.items; // קבלה בלבד — מסמך תשלום ללא פירוט חשבונית
@@ -596,7 +606,21 @@ async function invChatFindOpenProformas(customerId) {
     .order('created_at', { ascending: false }).limit(50);
   if (error) return { err: error.message, rows: [] };
   // פתוח = לא סומן settled (העמודה אולי עדיין לא קיימת → undefined = פתוח)
-  return { err: null, rows: (data || []).filter(d => !d.settled_at) };
+  let rows = (data || []).filter(d => !d.settled_at);
+  // חגורת ביטחון: פרופורמה שהחיוב שלה בספר החוב כבר שולם/בוטל — סגורה,
+  // גם אם settled_at לא נכתב (למשל קבלה שהופקה מכרטיס הלקוח). בלי זה
+  // הצ'אט מציע אותה שוב ונוצרת קבלה כפולה.
+  if (rows.length) {
+    try {
+      const chg = (await db.from('charges').select('notes,status').eq('customer_id', customerId).ilike('notes', '%#doc:%')).data || [];
+      rows = rows.filter(d => {
+        const num = String(d.doc_number || '').trim();
+        if (!num) return true;
+        return !chg.some(c => ['paid', 'cancelled'].includes(c.status) && _icHasDocTag(c.notes, num));
+      });
+    } catch (e) { /* אין notes בסכימה — משאירים כמו שהיה */ }
+  }
+  return { err: null, rows };
 }
 async function invChatStartPayExisting() {
   const f = _icState.fields;
