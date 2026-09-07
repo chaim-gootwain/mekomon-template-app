@@ -211,7 +211,7 @@ el.innerHTML = `
 const [rows, payouts, charges] = await Promise.all([
 run(db.from('v_commissions').select('*').eq('month', month)),
 isAdmin ? run(db.from('commission_payouts').select('*').eq('month', month)) : [],
-run(db.from('charges').select('agent_id,amount,issued_date').gte('issued_date', month + '-01').lte('issued_date', month + '-31')),
+run(db.from('charges').select('agent_id,amount,issued_date').gte('issued_date', month + '-01').lte('issued_date', monthEnd(month))),
 ]);
 
 /* סיכום לפי סוכן */

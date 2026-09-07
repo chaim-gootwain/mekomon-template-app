@@ -12,7 +12,7 @@ Pages.attendance = {
 render: async (el) => {
 const isAdmin = profile.role === 'admin';
 const month = document.getElementById('attMonth')?.value || thisMonth();
-const from = month + '-01', to = month + '-31';
+const from = month + '-01', to = monthEnd(month);
 
 const [rows, requests] = await Promise.all([
 run(db.from('attendance').select('*').gte('clock_in', from).lte('clock_in', to + 'T23:59:59').order('clock_in', { ascending: false })),
@@ -110,7 +110,7 @@ openPage('attendance');
 
 /* ייצוא חודשי להכנת שכר */
 async function attendanceExport(month) {
-const from = month + '-01', to = month + '-31';
+const from = month + '-01', to = monthEnd(month);
 const rows = await run(db.from('attendance').select('*').gte('clock_in', from).lte('clock_in', to + 'T23:59:59').order('clock_in'));
 exportCsv('נוכחות_' + month,
 ['עובד', 'תאריך', 'כניסה', 'יציאה', 'שעות', 'תיקון ידני'],
