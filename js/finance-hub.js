@@ -39,10 +39,10 @@ Pages.finhub = {
     const yearStart = t.slice(0, 4) + '-01-01';
 
     const [openCh, recentCh, expenses, payments] = await Promise.all([
-      run(db.from('charges').select('id,customer_id,amount,status,due_date,issued_date').in('status', FH_OPEN).limit(4000)),
-      run(db.from('charges').select('amount,status,issued_date').gte('issued_date', sixAgo).not('status', 'in', '("cancelled","lost")').limit(4000)),
-      isAdmin ? run(db.from('expenses').select('amount,status,expense_date').gte('expense_date', sixAgo).limit(2000)) : [],
-      isAdmin ? run(db.from('payments').select('amount,paid_date').gte('paid_date', yearStart).limit(4000)) : [],
+      runAll((f, t) => db.from('charges').select('id,customer_id,amount,status,due_date,issued_date').in('status', FH_OPEN).order('id').range(f, t)),
+      runAll((f, t) => db.from('charges').select('amount,status,issued_date').gte('issued_date', sixAgo).not('status', 'in', '("cancelled","lost")').order('id').range(f, t)),
+      isAdmin ? runAll((f, t) => db.from('expenses').select('amount,status,expense_date').gte('expense_date', sixAgo).order('id').range(f, t)) : [],
+      isAdmin ? runAll((f, t) => db.from('payments').select('amount,paid_date').gte('paid_date', yearStart).order('id').range(f, t)) : [],
     ]);
 
     /* ---- מדדים ---- */

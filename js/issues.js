@@ -105,8 +105,8 @@ let _revByIssue = {}, _costByIssue = {};
 if (_canFin) {
 try {
 const [_adsF, _expF] = await Promise.all([
-run(db.from('ads').select('issue_id,price,discount,status').limit(8000)),
-run(db.from('expenses').select('notes').ilike('notes', '%#issue:%').limit(4000)),
+runAll((f, t) => db.from('ads').select('issue_id,price,discount,status').order('id').range(f, t)),
+runAll((f, t) => db.from('expenses').select('notes').ilike('notes', '%#issue:%').order('id').range(f, t)),
 ]);
 (_adsF || []).forEach(a => {
 if (!a.issue_id || ['cancelled', 'rejected'].includes(a.status)) return;
