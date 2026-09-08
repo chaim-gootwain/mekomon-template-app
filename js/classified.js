@@ -56,7 +56,7 @@ function _clQueueHtml(rows) {
     const issues = grp.map(x => (cache.issues.find(i => i.id === x.issue_id) || {}).issue_number).filter(Boolean).join(', ');
     const typeHe = r.ad_type === 'image' ? 'תמונה' : r.ad_type === 'bold' ? 'מודגש' : 'רגיל';
     return `<tr>
-          <td><b>${esc(r.contact_name || nameOf('customers', r.customer_id))}</b><br><small class="muted">${esc(r.contact_phone || '')}</small>${r.source === 'portal_public' ? '<br><span class="pill green" style="font-size:.66rem">🟢 הלקוח סימן: תשלום הוסדר</span>' : ''}</td>
+          <td><b>${esc(r.contact_name || nameOf('customers', r.customer_id))}</b><br><small class="muted">${esc(r.contact_phone || '')}</small>${r.source === 'portal_public' ? '<br><span class="pill amber" style="font-size:.66rem" title="הסימון בטופס הפורטל הוא הצהרה בלבד — הטופס מחייב לסמן אותו כדי לשלוח">🟡 הצהרת לקוח בטופס — לוודא שהתשלום התקבל</span>' : ''}</td>
           <td>${_clCatHe(r.category)} · ${typeHe}${grp.length > 1 ? ' · <span class="pill amber">4+1</span>' : ''}</td>
           <td>${esc((r.body || '').slice(0, 46))}${(r.body || '').length > 46 ? '…' : ''}${r.image_path ? ' 📷' : ''}</td>
           <td>${esc(issues)}</td>
@@ -72,10 +72,15 @@ function _clQueueHtml(rows) {
 }
 function _clPayMethod() { return (typeof _icPayMethod === 'function') ? _icPayMethod() : 'cash'; }
 
+/* נעילת אישור/דחייה — לחיצה כפולה על "אשר + שולם" רשמה בעבר תשלום כפול */
+let _clBusy = false;
 async function classifiedApprove(id, settled) {
+  if (_clBusy) return;
+  _clBusy = true;
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
+    if (r.status !== 'pending') { toast('המודעה כבר טופלה (' + r.status + ')'); openPage('classified'); return; }
     const usePkg = !!r.package_id;
     const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
     const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: settled ? 'settled' : 'pending' };
@@ -85,7 +90,11 @@ async function classifiedApprove(id, settled) {
       for (const a of grp) {
         if (a.charge_id && Number(a.price) > 0) {
           await db.from('charges').update({ status: 'paid' }).eq('id', a.charge_id);
-          await db.from('payments').insert({ charge_id: a.charge_id, customer_id: a.customer_id, amount: a.price, method: _clPayMethod(), paid_date: today(), notes: 'מודעת לוח (פורטל) — התשלום הוסדר', created_by: profile.id });
+          // לא רושמים תשלום אם כבר קיים לאותו חוב (ריצה מקבילה / מכשיר שני)
+          const existP = (await db.from('payments').select('id').eq('charge_id', a.charge_id).limit(1)).data;
+          if (!existP || !existP.length) {
+            await db.from('payments').insert({ charge_id: a.charge_id, customer_id: a.customer_id, amount: a.price, method: _clPayMethod(), paid_date: today(), notes: 'מודעת לוח (פורטל) — התשלום הוסדר', created_by: profile.id });
+          }
         }
       }
     }
@@ -93,14 +102,18 @@ async function classifiedApprove(id, settled) {
     toast('✓ המודעה אושרה' + (settled ? ' + סומן שולם' : ''));
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+  finally { _clBusy = false; }
 }
 
 /* אישור בלי לגבות תשלום כלל — למשל מודעות גמ"ח. המודעה נכנסת לגיליון (payment_status='settled'),
    אבל החוב שנוצר בעבורה מבוטל ולא נרשם שום תשלום בפועל. */
 async function classifiedApproveFree(id) {
+  if (_clBusy) return;
+  _clBusy = true;
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     if (!r) { toast('מודעה לא נמצאה', true); return; }
+    if (r.status !== 'pending') { toast('המודעה כבר טופלה (' + r.status + ')'); openPage('classified'); return; }
     const usePkg = !!r.package_id;
     const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
     const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: 'settled' };
@@ -113,10 +126,13 @@ async function classifiedApproveFree(id) {
     toast('✓ אושר ללא תשלום — המודעה נכנסת לגיליון');
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+  finally { _clBusy = false; }
 }
 
 async function classifiedReject(id) {
   if (!confirm('לדחות את המודעה? (החוב שנוצר יבוטל)')) return;
+  if (_clBusy) return;
+  _clBusy = true;
   try {
     const r = await run(db.from('classified_ads').select('*').eq('id', id).single());
     const usePkg = !!(r && r.package_id);
@@ -127,6 +143,7 @@ async function classifiedReject(id) {
     toast('המודעה נדחתה');
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+  finally { _clBusy = false; }
 }
 
 /* סימון מודעת לוח כ"שולם" — רק אז היא נכנסת לגיליון/מדור */

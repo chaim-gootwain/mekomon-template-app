@@ -31,7 +31,9 @@ function custFixedDiscountAmount(customerId, price) {
 async function checkCustomerStatusGate(customerId, actionLabel) {
   try {
     let c = _custFind(customerId);
-    if (!c) { try { c = await run(db.from('customers').select('status,status_reason,name').eq('id', customerId).single()); } catch (e) { return true; } }
+    // שורת מטמון בלי עמודת status (מופע ישן / נפילה ל-_custColsOld) — משלימים מה-DB,
+    // אחרת השער "רואה" undefined ומאשר גם לקוח ברשימה שחורה
+    if (!c || c.status === undefined) { try { c = await run(db.from('customers').select('status,status_reason,name').eq('id', customerId).single()); } catch (e) { return true; } }
     if (!c) return true;
     const who = c.name || 'הלקוח';
     if (c.status === 'blacklist') { toast('⛔ ' + who + ' ברשימה שחורה' + (c.status_reason ? ' — ' + c.status_reason : '') + '. ' + (actionLabel || 'הפעולה') + ' חסומה.', true); return false; }

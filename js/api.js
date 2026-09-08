@@ -73,7 +73,9 @@ db.from('settings').select('*').then(r => { (r.data || []).forEach(s => cache.se
 if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
 // עימוד (runAll) — קריאה בודדת נחתכת ב-1000, ומעל 1000 לקוחות הבורר,
 // nameOf ובדיקות הכפילויות פשוט לא ראו את סוף הרשימה
-const _custCols = 'id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser';
+// status/status_reason/fixed_discount חייבים להיות כאן: שער החסימה וההנחה
+// הקבועה קוראים מהמטמון, ושורה בלי העמודות האלה נראית כמו "אין סטטוס/אין הנחה"
+const _custCols = 'id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
 const _custColsOld = 'id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms';
 const _pageCust = async (cols) => {
   const all = [];
