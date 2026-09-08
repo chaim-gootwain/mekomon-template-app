@@ -20,6 +20,13 @@ async function icLoadPending() {
   } catch (e) { return []; }
 }
 
+/* הערה חדשה בלי למחוק מה שנכתב בינתיים: מסירים רק את שורת סימון הייבוא
+   ומשאירים כל הערה אחרת (הסדרי תשלום, אזהרות) שהצוות הוסיף ללקוח */
+function _icCleanNotes(notes, size) {
+  const keep = String(notes || '').split('\n').filter(ln => !ln.includes(IMPORT_MARK)).join('\n').trim();
+  const tag = 'מפרסם גיליון 294' + (size ? ' · ' + size : '');
+  return keep ? tag + '\n' + keep : tag;
+}
 function _icSizeFromNote(notes) {
   const m = String(notes || '').match(/·\s*([^·]+?)\s*·/);
   return m ? m[1].trim() : '';
@@ -72,8 +79,9 @@ function icShow() {
   ov.querySelector('#icSave').addEventListener('click', () => icSave(c.id));
   ov.querySelector('#icFull').addEventListener('click', async () => {
     const _sz = _icSizeFromNote(c.notes);
-    try { await run(db.from('customers').update({ notes: 'מפרסם גיליון 294' + (_sz ? ' · ' + _sz : '') }).eq('id', c.id)); } catch (e) { }
-    const cc = (cache.customers || []).find(x => x.id === c.id); if (cc) cc.notes = 'מפרסם גיליון 294' + (_sz ? ' · ' + _sz : '');
+    const _newNotes = _icCleanNotes(c.notes, _sz);
+    try { await run(db.from('customers').update({ notes: _newNotes }).eq('id', c.id)); } catch (e) { }
+    const cc = (cache.customers || []).find(x => x.id === c.id); if (cc) cc.notes = _newNotes;
     icClose();
     if (typeof openPage === 'function') openPage('customers').then(() => { if (typeof openCustomerCard === 'function') openCustomerCard(c.id); });
     else if (typeof openCustomerCard === 'function') openCustomerCard(c.id);
@@ -92,8 +100,8 @@ async function icSave(id) {
     city: g('icCity').trim() || null,
     field: g('icField').trim() || null,
     payment_terms: g('icTerms') || 'immediate',
-    // מסיר את סימון ההשלמה — נשמר תיאור נקי
-    notes: 'מפרסם גיליון 294' + (size ? ' · ' + size : ''),
+    // מסיר את סימון ההשלמה — נשמר תיאור נקי, בלי למחוק הערות שנוספו בינתיים
+    notes: _icCleanNotes(_icQueue[_icIdx] && _icQueue[_icIdx].notes, size),
   };
   try {
     await run(db.from('customers').update(upd).eq('id', id));

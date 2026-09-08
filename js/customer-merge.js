@@ -86,7 +86,16 @@ async function _mgDo(gi) {
     _mergeGroups = _mgScan();
     _mgDraw();
     if (typeof customersDraw === 'function' && document.getElementById('custTable')) customersDraw();
-  } catch (e) { /* run מציג את השגיאה */ }
+  } catch (e) {
+    // חלק מהמיזוגים אולי הצליחו לפני הכשל — רענון וסריקה מחדש, אחרת
+    // המסך מציג רשומות שכבר נמחקו ולחיצה חוזרת מנסה למזג ids שאינם
+    try {
+      _customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
+      await refreshCache();
+      _mergeGroups = _mgScan();
+      _mgDraw();
+    } catch (_) { }
+  }
 }
 
 function _mgClose() { const ov = document.getElementById('mergeOverlay'); if (ov) ov.remove(); }

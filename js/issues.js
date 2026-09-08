@@ -180,6 +180,12 @@ toast(`נוצרו ${n} מודעות מחוזים`);
 
 async function openFlatplan(issueId) {
 _fpIssue = _issues.find(i => i.id === issueId) || (cache.issues || []).find(i => i.id === issueId);
+// שורת ה-cache מחזיקה עמודות חלקיות בלבד (בלי pages_count) — פלטפלן שנפתח
+// לפני שמסך הגיליונות נטען צייר אפס עמודים; משלימים את הרשומה מהמסד
+if (!_fpIssue || _fpIssue.pages_count == null) {
+  try { const full = await run(db.from('issues').select('*').eq('id', issueId).single()); if (full) _fpIssue = full; } catch (e) { }
+}
+if (!_fpIssue) { toast('הגיליון לא נמצא', true); return; }
 const el = document.getElementById('content');
 el.innerHTML = '<div class="empty">טוען פלטפלן...</div>';
 [_fpAds, _fpArticles] = await Promise.all([

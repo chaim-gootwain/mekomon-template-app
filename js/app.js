@@ -288,18 +288,23 @@ await updateClockButton();
 
 /* ---------- 6. חיפוש גלובלי ---------- */
 let _searchTimer = null;
+let _searchSeq = 0;
 function globalSearch(term) {
 clearTimeout(_searchTimer);
 const box = document.getElementById('searchResults');
 if (!term || term.length < 2) { box.classList.add('hidden'); return; }
 _searchTimer = setTimeout(async () => {
-const like = `%${term}%`;
+const seq = ++_searchSeq;
+// פסיק/סוגריים שוברים את תחביר ה-or של PostgREST ("כהן, בני" החזיר שגיאה
+// ו"לא נמצא"); מחליפים ברווח כדי שהחיפוש עדיין ימצא את השם
+const like = `%${term.replace(/[,()"]/g, ' ').trim()}%`;
 const [leads, customers, ads, articles] = await Promise.all([
 ['admin', 'sales'].includes(profile.role) ? db.from('leads').select('id,name,phone').or(`name.ilike.${like},phone.ilike.${like}`).limit(5) : { data: [] },
 db.from('customers').select('id,name,phone').or(`name.ilike.${like},phone.ilike.${like}`).limit(5),
 db.from('ads').select('id,title').ilike('title', like).limit(5),
 ['admin', 'editor'].includes(profile.role) ? db.from('articles').select('id,title').ilike('title', like).limit(5) : { data: [] },
 ]);
+if (seq !== _searchSeq) return; // תשובה איטית של חיפוש ישן לא דורסת את החדש
 const items = [
 ...(leads.data || []).map(r => ({ kind: 'ליד', label: r.name + (r.phone ? ' · ' + r.phone : ''), page: 'leads' })),
 ...(customers.data || []).map(r => ({ kind: 'לקוח', label: r.name, page: 'customers', id: r.id })),

@@ -214,6 +214,11 @@ async function saveContractSafe(payload) {
   }
   if (res.error && /payment_plan|cadence|selected_dates|column/i.test(res.error.message || '')) {
     const { payment_plan, cadence, selected_dates, is_standing_order, standing_order_amount, ...safe } = payload;
+    // בלי האזהרה המשתמש רואה "נשמר ✓" בעוד לוח התשלומים והתאריכים
+    // שבחר נזרקו בשקט
+    if (payment_plan || (selected_dates && selected_dates.length)) {
+      toast('העסקה נשמרה בלי לוח תשלומים/תאריכים — עמודות חסרות במסד, יש להריץ את המיגרציה המתאימה', true);
+    }
     res = await db.from('contracts').insert(safe);
   }
   return res;
@@ -252,12 +257,18 @@ async function dealPay(contractId, seq) {
   if (raw === null) return;
   const amt = Number(raw);
   if (!isFinite(amt) || amt <= 0) { toast('סכום לא תקין', true); return; }
-  row.paid = Number(row.paid || 0) + amt;
-  row.status = row.paid >= Number(row.amount) ? 'paid' : 'partial';
-  const { error } = await db.from('contracts').update({ payment_plan: plan }).eq('id', contractId);
+  // קריאה טרייה אחרי ה-prompt (שיכול להישאר פתוח דקות) — כתיבת ה-plan
+  // הישן הייתה מוחקת תשלום שנרשם בינתיים ממכשיר/משתמש אחר
+  const ct2 = await run(db.from('contracts').select('payment_plan').eq('id', contractId).single());
+  const plan2 = Array.isArray(ct2.payment_plan) ? ct2.payment_plan : [];
+  const row2 = plan2.find(p => p.seq === seq);
+  if (!row2) { toast('שורה לא נמצאה', true); return; }
+  row2.paid = Number(row2.paid || 0) + amt;
+  row2.status = row2.paid >= Number(row2.amount) ? 'paid' : 'partial';
+  const { error } = await db.from('contracts').update({ payment_plan: plan2 }).eq('id', contractId);
   if (error) { toast('שגיאה: ' + error.message, true); return; }
   await addInteraction('customer', ct.customer_id, `תשלום ${money(amt)} לעסקה (תשלום #${seq})`);
-  toast(row.status === 'paid' ? '✓ התשלום הושלם' : 'נרשם תשלום חלקי');
+  toast(row2.status === 'paid' ? '✓ התשלום הושלם' : 'נרשם תשלום חלקי');
   openCustomerCard(ct.customer_id);
 }
 
@@ -291,9 +302,14 @@ async function dealPayInvoice(contractId, seq) {
   if (raw === null) return;
   const amt = Number(raw);
   if (!isFinite(amt) || amt <= 0) { toast('סכום לא תקין', true); return; }
-  row.paid = Number(row.paid || 0) + amt;
-  row.status = row.paid >= Number(row.amount) ? 'paid' : 'partial';
-  const { error } = await db.from('contracts').update({ payment_plan: plan }).eq('id', contractId);
+  // כמו ב-dealPay: קריאה טרייה אחרי ה-prompt נגד דריסת עדכון מקביל
+  const ct2 = await run(db.from('contracts').select('payment_plan').eq('id', contractId).single());
+  const plan2 = Array.isArray(ct2.payment_plan) ? ct2.payment_plan : [];
+  const row2 = plan2.find(p => p.seq === seq);
+  if (!row2) { toast('שורה לא נמצאה', true); return; }
+  row2.paid = Number(row2.paid || 0) + amt;
+  row2.status = row2.paid >= Number(row2.amount) ? 'paid' : 'partial';
+  const { error } = await db.from('contracts').update({ payment_plan: plan2 }).eq('id', contractId);
   if (error) { toast('שגיאה: ' + error.message, true); return; }
   try { await addInteraction('customer', ct.customer_id, `תשלום ${money(amt)} לחוזה (תשלום #${seq}) — הופקה חשבונית מס קבלה`); } catch (e) { }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === ct.customer_id))
@@ -323,7 +339,7 @@ function _soPrevYm(ym) {
 
 /* יצירת חיובי הוראות קבע לחודש (ברירת מחדל: החודש הנוכחי) */
 async function standingOrdersRun(ym, silent) {
-  ym = ym || new Date().toISOString().slice(0, 7);
+  ym = ym || thisMonth(); // חודש מקומי — UTC נתן את החודש הקודם בליל ה-1
   let contracts = [];
   try {
     contracts = await run(db.from('contracts').select('*').eq('is_standing_order', true).eq('active', true));
@@ -411,7 +427,7 @@ async function standingOrdersAutoCheck() {
   try {
     if (typeof profile === 'undefined' || profile.role !== 'admin') return;
     if (!_soAutoOn()) return;
-    const ym = new Date().toISOString().slice(0, 7);
+    const ym = thisMonth(); // חודש מקומי — UTC נתן את החודש הקודם בליל ה-1
     if ((cache.settings || {}).standing_orders_last === ym) return;
     const r = await standingOrdersRun(ym, true);
     if (r && (r.created || r.alerts)) toast(`🔁 הוראות קבע: נוצרו ${r.created} חיובים לחודש${r.alerts ? ' · ' + r.alerts + ' דיווחי כשל' : ''}`);

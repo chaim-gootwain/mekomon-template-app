@@ -110,6 +110,7 @@ async function leadDealSave(customerId) {
       let { error } = await db.from('contracts').insert(payload);
       if (error && /cadence|selected_dates|column/i.test(error.message || '')) {
         const { cadence, selected_dates, ...safe } = payload;
+        toast('החוזה נשמר בלי תדירות/תאריכים — עמודות חסרות במסד, יש להריץ את המיגרציה המתאימה', true);
         ({ error } = await db.from('contracts').insert(safe));
       }
       if (error) { toast('שגיאה בשמירת החוזה: ' + error.message, true); return; }

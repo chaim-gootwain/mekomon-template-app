@@ -75,8 +75,9 @@ declare
   v_new  jsonb;
   v_row  bigint;
   k      text;
-  -- שדות רועשים / רגישים שלא נרשמים
-  skip   constant text[] := array['created_at','updated_at','portal_token','tags'];
+  -- שדות רועשים / רגישים שלא נרשמים (proof_token — טוקן אישור ציבורי;
+  -- signature_data — חתימת לקוח; רישומם ביומן חושף אותם מחוץ ל-RLS המקורי)
+  skip   constant text[] := array['created_at','updated_at','portal_token','proof_token','signature_data','tags'];
 begin
   if tg_op = 'INSERT' then
     begin v_row := (to_jsonb(new)->>'id')::bigint; exception when others then v_row := null; end;

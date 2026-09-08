@@ -409,7 +409,20 @@ async function leadConvert(id, skipConfirm = false) {
   if (!skipConfirm && !confirm(`להפוך את "${l.name}" ללקוח?\nכל ההיסטוריה תעבור לכרטיס הלקוח.`)) { leadsDraw(); return; }
   try {
     const customerId = await run(db.rpc('convert_lead', { p_lead_id: id }));
-    try { await db.from('customers').update({ invoice_name: l.name, whatsapp: l.whatsapp, city: l.city, contact_role: l.contact_role }).eq('id', customerId); } catch (e) { console.error(e); }
+    // משלימים רק שדות שחסרים אצל הלקוח — ההמרה יכולה להצביע על לקוח קיים
+    // ("קיים כלקוח"), וכתיבה עיוורת דרסה שם-חשבונית/עיר/וואטסאפ אמיתיים ב-null
+    try {
+      const { data: cur } = await db.from('customers').select('invoice_name,whatsapp,city,contact_role').eq('id', customerId).single();
+      const upd = {};
+      if (!(cur && cur.invoice_name) && l.name) upd.invoice_name = l.name;
+      if (!(cur && cur.whatsapp) && l.whatsapp) upd.whatsapp = l.whatsapp;
+      if (!(cur && cur.city) && l.city) upd.city = l.city;
+      if (!(cur && cur.contact_role) && l.contact_role) upd.contact_role = l.contact_role;
+      if (Object.keys(upd).length) {
+        const r = await db.from('customers').update(upd).eq('id', customerId);
+        if (r.error) console.error('leadConvert update', r.error);
+      }
+    } catch (e) { console.error(e); }
     document.getElementById('viewBack')?.classList.remove('open');
     await celebrate();   // 🏆 כל הכבוד — גביע ומטבעות זהב
     await refreshCache();
@@ -457,7 +470,9 @@ async function leadsImport() {
     runAll((f, t) => db.from('leads').select('phone').order('id').range(f, t)),
     runAll((f, t) => db.from('customers').select('phone').order('id').range(f, t)),
   ]);
-  const knownPhones = new Set([...exLeads, ...exCustomers].map(x => x.phone).filter(Boolean));
+  // נרמול טלפון (9 ספרות אחרונות) — 050-1234567 ו-0501234567 הם אותו מספר
+  const _phKey = p => String(p || '').replace(/\D/g, '').slice(-9);
+  const knownPhones = new Set([...exLeads, ...exCustomers].map(x => _phKey(x.phone)).filter(k => k.length >= 7));
   const myAgent = cache.agents.find(a => a.profile_id === profile.id);
 
   const toInsert = [], skipped = [];
@@ -465,7 +480,8 @@ async function leadsImport() {
     const name = pickField(row, ['שם העסק', 'שם הליד', 'שם']);
     if (!name) { skipped.push('(בלי שם)'); continue; }
     const phone = pickField(row, ['טלפון', 'נייד', 'פלאפון', 'סלולרי', 'phone']);
-    if (phone && knownPhones.has(phone)) { skipped.push(name); continue; }
+    const phKey = _phKey(phone);
+    if (phKey.length >= 7 && knownPhones.has(phKey)) { skipped.push(name); continue; }
     toInsert.push({
       name, phone,
       email: pickField(row, ['אימייל', 'מייל', 'email']),
@@ -476,7 +492,7 @@ async function leadsImport() {
       agent_id: matchAgent(row, myAgent ? myAgent.id : null), // עמודת "סוכן" בקובץ (ריק = מאגר)
       created_by: profile.id,
     });
-    if (phone) knownPhones.add(phone);
+    if (phKey.length >= 7) knownPhones.add(phKey);
   }
 
   if (!toInsert.length) { toast('אין שורות חדשות לייבוא', true); return; }

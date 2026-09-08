@@ -48,8 +48,12 @@ async function issueBillingOpen(issueId) {
     const docs = await run(db.from('documents').select('customer_id,status,transaction_id').ilike('transaction_id', 'emu-iss' + issueId + '-cust%'));
     docs.forEach(d => { if (!['failed', 'cancelled'].includes(d.status)) doneSet.add(d.customer_id); });
   } catch (e) { }
-  // סנכרון בין-מסלולי: גם חשבונית שהופקה מכרטיס הלקוח מסמנת את המודעות כ"חשבונית הופקה"/"שולם"
-  Object.keys(byCust).forEach(cid => { if (byCust[cid].some(a => ['invoiced', 'paid'].includes(a.deal_stage))) doneSet.add(Number(cid)); });
+  // סנכרון בין-מסלולי: חשבונית שהופקה מכרטיס הלקוח מסמנת "חויב" רק כשכל
+  // המודעות עם מחיר חויבו — מודעה אחת שחויבה ידנית לא מעלימה את השאר מהמסך
+  Object.keys(byCust).forEach(cid => {
+    const priced = byCust[cid].filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
+    if (priced.length && priced.every(a => ['invoiced', 'paid'].includes(a.deal_stage))) doneSet.add(Number(cid));
+  });
   // חשבוניות חודשיות שכבר הופקו לחודש של הגיליון — כדי לסמן לקוחות חודשיים כ"הופק" בכל גיליון של אותו חודש
   const monthlyDoneSet = new Set();
   try {

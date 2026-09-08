@@ -35,13 +35,17 @@ Pages.finhub = {
 
     const t = today();
     const mNow = thisMonth();
-    const sixAgo = (() => { const d = new Date(); d.setMonth(d.getMonth() - 5); d.setDate(1); return d.toISOString().slice(0, 10); })();
+    // בנייה עם יום=1 (ובשעון מקומי): setMonth על ה-31 בחודש גולש לחודש הלא נכון
+    const sixAgo = (() => { const d = new Date(); return localDay(new Date(d.getFullYear(), d.getMonth() - 5, 1)); })();
     const yearStart = t.slice(0, 4) + '-01-01';
+    // ההוצאות משמשות גם את "מזומן משוער" (חלון שנתי) וגם את המגמה (6 חודשים)
+    // — מושכים מהמוקדם מביניהם כדי ששני החישובים יהיו שלמים
+    const expSince = sixAgo < yearStart ? sixAgo : yearStart;
 
     const [openCh, recentCh, expenses, payments] = await Promise.all([
       runAll((f, t) => db.from('charges').select('id,customer_id,amount,status,due_date,issued_date').in('status', FH_OPEN).order('id').range(f, t)),
       runAll((f, t) => db.from('charges').select('amount,status,issued_date').gte('issued_date', sixAgo).not('status', 'in', '("cancelled","lost")').order('id').range(f, t)),
-      isAdmin ? runAll((f, t) => db.from('expenses').select('amount,status,expense_date').gte('expense_date', sixAgo).order('id').range(f, t)) : [],
+      isAdmin ? runAll((f, t) => db.from('expenses').select('amount,status,expense_date').gte('expense_date', expSince).order('id').range(f, t)) : [],
       isAdmin ? runAll((f, t) => db.from('payments').select('amount,paid_date').gte('paid_date', yearStart).order('id').range(f, t)) : [],
     ]);
 
@@ -65,7 +69,8 @@ Pages.finhub = {
     const profitMonth = revMonth - expMonth;
     const opening = Number((cache.settings || {}).opening_balance || 0);
     const paidThisYear = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    const expPaidYear = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + Number(e.amount || 0), 0);
+    // אותו חלון שנתי כמו התקבולים — קודם חלון 6 חודשים מול חלון שנה ניפח את המזומן
+    const expPaidYear = expenses.filter(e => e.status === 'paid' && String(e.expense_date || '') >= yearStart).reduce((s, e) => s + Number(e.amount || 0), 0);
     const cashEst = opening + paidThisYear - expPaidYear;
 
     let kpis = '';
@@ -110,7 +115,7 @@ Pages.finhub = {
 
     /* ---- הכנסות מול הוצאות 6 חודשים ---- */
     const months = [];
-    for (let i = 5; i >= 0; i--) { const d = new Date(); d.setMonth(d.getMonth() - i); months.push(d.toISOString().slice(0, 7)); }
+    for (let i = 5; i >= 0; i--) { const d = new Date(); months.push(localDay(new Date(d.getFullYear(), d.getMonth() - i, 1)).slice(0, 7)); }
     const trend = months.map(ym => ({
       ym,
       rev: recentCh.filter(c => String(c.issued_date || '').slice(0, 7) === ym).reduce((s, c) => s + Number(c.amount || 0), 0),

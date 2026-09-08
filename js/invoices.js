@@ -450,6 +450,11 @@ async function invCredit(docId) {
     comment: 'זיכוי למסמך ' + num,
   };
   if (parentUuid) body.parent = parentUuid;
+  // בלי סכום ידוע נוצר מסמך זיכוי על ₪0 שלא סוגר שום חוב — עוצרים במקום
+  if (!(Number(body.items[0].price) > 0)) {
+    toast('לא אותר סכום המסמך המקורי — לא ניתן להפיק זיכוי אוטומטי. הפק זיכוי ידני בחשבונית ירוקה/EZcount', true);
+    return;
+  }
   await invCall(body);
 }
 

@@ -40,9 +40,13 @@ return true;
 }
 const raw = localStorage.getItem(CFG_KEY); // גיבוי: הגדרה ידנית
 if (!raw) return false;
-const cfg = JSON.parse(raw);
-db = supabase.createClient(cfg.url, cfg.key);
-return true;
+// ערך פגום ב-localStorage אחרת מפיל את כל ה-boot למסך לבן בלי דרך החלמה
+try {
+  const cfg = JSON.parse(raw);
+  if (!cfg || !cfg.url || !cfg.key) throw new Error('bad cfg');
+  db = supabase.createClient(cfg.url, cfg.key);
+  return true;
+} catch (e) { try { localStorage.removeItem(CFG_KEY); } catch (_) { } return false; }
 }
 
 function saveConfig() {
@@ -344,6 +348,7 @@ return partial ? partial.id : fallbackAgentId;
 /* הדפסה של אזור מסוים — המשתמש בוחר "שמור כ-PDF" בחלון ההדפסה */
 function printArea(title, innerHtml) {
 const w = window.open('', '_blank');
+if (!w) { toast('הדפדפן חסם חלון קופץ — אפשרו חלונות קופצים לאתר ונסו שוב', true); return; }
 w.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
 <title>${esc(title)}</title>
 <style>

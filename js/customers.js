@@ -601,7 +601,10 @@ async function customersImport() {
   // runAll — קריאה בודדת מוגבלת ל-1000 שורות, ומעל 1000 לקוחות בדיקת
   // הכפילויות פספסה קיימים והיבוא יצר אותם שוב
   const existing = await runAll((f, t) => db.from('customers').select('id,name,phone').order('id').range(f, t));
-  const knownPhones = new Set(existing.map(c => c.phone).filter(Boolean));
+  // השוואת טלפונים מנורמלת (9 ספרות אחרונות) — 050-1234567 / 0501234567 /
+  // +972501234567 הם אותו מספר; השוואת מחרוזת גולמית יצרה כפילויות ביבוא
+  const _phKey = p => String(p || '').replace(/\D/g, '').slice(-9);
+  const knownPhones = new Set(existing.map(c => _phKey(c.phone)).filter(k => k.length >= 7));
   const knownNames = new Set(existing.map(c => (c.name || '').trim()).filter(Boolean));
 
   const F = _CI_FIELD_NAMES;
@@ -611,7 +614,8 @@ async function customersImport() {
     const name = pickField(row, F.name);
     if (!name) { skipped.push('(שורה בלי שם)'); continue; }
     const phone = pickField(row, F.phone);
-    if ((phone && knownPhones.has(phone)) || knownNames.has(name)) { skipped.push(name); continue; }
+    const phKey = _phKey(phone);
+    if ((phKey.length >= 7 && knownPhones.has(phKey)) || knownNames.has(name)) { skipped.push(name); continue; }
     // הערות שוליים: כל עמודה שלא זוהתה נאספת ל"הערות" — שום מידע לא הולך לאיבוד
     const extras = [];
     Object.keys(row).forEach(k => {
@@ -633,7 +637,7 @@ async function customersImport() {
       _extras: extras.join(' · '),
       agent_id: matchAgent(row, null), // עמודת "סוכן" בקובץ
     });
-    if (phone) knownPhones.add(phone);
+    if (phKey.length >= 7) knownPhones.add(phKey);
     knownNames.add(name);
   }
 

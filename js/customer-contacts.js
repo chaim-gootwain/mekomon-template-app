@@ -75,9 +75,16 @@ async function custContactEdit(id, idx) {
   const list = await _custLoadContacts(id);
   const cur = list[idx]; if (!cur) return;
   openForm('עריכת איש קשר', _CONTACT_FIELDS, cur, async (rec) => {
-    if (rec.primary) list.forEach(x => x.primary = false);
-    list[idx] = { name: (rec.name || '').trim(), role: rec.role || '', phone: rec.phone || '', whatsapp: rec.whatsapp || '', email: rec.email || '', primary: !!rec.primary };
-    await _custSaveContacts(id, list);
+    // טעינה טרייה בשמירה: הרשימה שנטענה בפתיחת הטופס יכולה להיות ישנה —
+    // כתיבתה דורסת אנשי קשר שנוספו בינתיים, ואם מישהו נמחק idx מצביע
+    // על איש קשר אחר לגמרי
+    const fresh = await _custLoadContacts(id);
+    let fi = fresh.findIndex(x => x && x.name === cur.name && x.phone === cur.phone && x.email === cur.email);
+    if (fi < 0) fi = (fresh[idx] && fresh.length === list.length) ? idx : -1;
+    if (fi < 0) { toast('הרשימה השתנתה בינתיים — פתח את הכרטיס מחדש', true); return; }
+    if (rec.primary) fresh.forEach(x => x.primary = false);
+    fresh[fi] = { name: (rec.name || '').trim(), role: rec.role || '', phone: rec.phone || '', whatsapp: rec.whatsapp || '', email: rec.email || '', primary: !!rec.primary };
+    await _custSaveContacts(id, fresh);
     toast('✓ עודכן');
   });
 }
