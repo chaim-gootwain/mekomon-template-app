@@ -802,8 +802,13 @@ async function archiveUpload() {
 const file = document.getElementById('archFile').files[0];
 const issueId = Number(document.getElementById('archIssue').value);
 if (!file) return;
-const issue = cache.issues.find(i => i.id === issueId);
-const path = `issue_${issue ? issue.issue_number : issueId}.pdf`;
+// מספר הגיליון חייב להגיע מהרשומה עצמה — cache.issues מחזיק רק 30 גיליונות
+// אחרונים; נפילה ל-id יצרה שם קובץ שמתנגש עם issue_number של גיליון אחר
+// ודורסת (upsert) את ה-PDF שלו בארכיון
+let issue = cache.issues.find(i => i.id === issueId);
+if (!issue) { try { issue = await run(db.from('issues').select('id,issue_number').eq('id', issueId).single()); } catch (e) { } }
+if (!issue || !issue.issue_number) { toast('לא אותר מספר הגיליון — רענן ונסה שוב', true); return; }
+const path = `issue_${issue.issue_number}.pdf`;
 const { error } = await db.storage.from('issues-archive').upload(path, file, { upsert: true });
 if (error) { toast('שגיאה: ' + error.message, true); return; }
 await run(db.from('issues').update({ pdf_path: path }).eq('id', issueId));

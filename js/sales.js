@@ -16,10 +16,11 @@ let _contracts = [];
 
 Pages.contracts = {
 render: async (el) => {
-_contracts = await run(db.from('contracts').select('*').order('created_at', { ascending: false }));
+// runAll — מעל 1000 שורות חוזים/מודעות המונים נחתכו ומדדי ניצול שיקרו
+_contracts = await runAll((f, t) => db.from('contracts').select('*').order('created_at', { ascending: false }).order('id').range(f, t));
 
 // חישוב ניצול לכל החוזים בשאילתה אחת — פשוט וקריא
-const ads = await run(db.from('ads').select('contract_id,status').not('contract_id', 'is', null));
+const ads = await runAll((f, t) => db.from('ads').select('contract_id,status').not('contract_id', 'is', null).order('id').range(f, t));
 const usedMap = {};
 ads.forEach(a => {
 if (!['cancelled', 'rejected'].includes(a.status))
@@ -388,7 +389,7 @@ ${q.discount > 0 ? `<tr><td colspan="3">הנחה${q.discount_pct ? ' (' + q.disc
 <b style="color:@@COLOR_BRAND@@">בכבוד רב, מערכת ${esc(_paper)}</b>
 <div style="font-size:11px;color:#64748b">חתימה וחותמת</div>
 </div>
-${q.signature_data ? `<div style="text-align:center">
+${q.signature_data && /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(q.signature_data) ? `<div style="text-align:center">
 <img src="${q.signature_data}" style="height:56px" alt=""><br>
 <b>${esc(q.signer_name || q.recipient_name)}</b>
 <div style="font-size:11px;color:#64748b">חתימת הלקוח · ${heDate(q.signed_at)}</div>

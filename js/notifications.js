@@ -20,8 +20,10 @@ async function notifBuild() {
   jobs.push(db.from('issues').select('id,issue_number,ads_deadline,status')
     .not('status', 'in', '("closed","published")').then(r => issues = r.data || []));
   if (canSales) {
+    // מנהל רואה את כל הלידים; סוכן — רק את שלו. (ההשוואה === null אצל מנהל
+    // בלי רשומת סוכן השאירה רק לידים ללא סוכן — והתראות על לידים משויכים נעלמו)
     jobs.push(db.from('leads').select('id,name,phone,status,follow_up,agent_id,created_at')
-      .not('status', 'in', '("won","lost")').then(r => myLeads = (r.data || []).filter(l => l.agent_id === mine)));
+      .not('status', 'in', '("won","lost")').then(r => myLeads = (r.data || []).filter(l => (role === 'sales' && mine != null) ? l.agent_id === mine : true)));
     jobs.push(db.from('charges').select('id,customer_id,amount,status,due_date')
       .in('status', ['pending', 'invoiced', 'partial', 'overdue']).then(r => charges = r.data || []));
   }
@@ -59,7 +61,20 @@ async function notifBuild() {
     else if (d < now) items.push({ type: 'deadline', prio: 0, icon: '❗', text: 'עבר דדליין מודעות — גיליון ' + i.issue_number, sub: heDateTime(i.ads_deadline), onclick: 'openFlatplan(' + i.id + ')' });
   });
   const byC = {};
-  charges.forEach(c => { if (c.due_date && c.due_date < T) byC[c.customer_id] = (byC[c.customer_id] || 0) + Number(c.amount || 0); });
+  // מקזזים תשלומים חלקיים — אחרת התזכורת (וגם המייל ללקוח) נוקבת בסכום
+  // המלא של חיוב ששולם ברובו
+  const _overdue = charges.filter(c => c.due_date && c.due_date < T);
+  const _payBy = {};
+  try {
+    if (_overdue.length) {
+      const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', _overdue.map(c => c.id)));
+      (pays || []).forEach(p => { _payBy[p.charge_id] = (_payBy[p.charge_id] || 0) + Number(p.amount || 0); });
+    }
+  } catch (e) { }
+  _overdue.forEach(c => {
+    const bal = Number(c.amount || 0) - (_payBy[c.id] || 0);
+    if (bal > 0.005) byC[c.customer_id] = (byC[c.customer_id] || 0) + bal;
+  });
   Object.entries(byC).forEach(([cid, amt]) => { if (amt > 0) items.push({ type: 'debt', prio: 2, icon: '💰', text: 'חוב באיחור — ' + (nameOf('customers', Number(cid)) || 'לקוח'), sub: money(amt), cid: Number(cid), amt }); });
   leads.forEach(l => items.push({ type: 'lead', prio: 3, icon: '📞', text: 'מעקב ליד — ' + l.name, sub: l.follow_up ? heDate(l.follow_up) : '', onclick: "openPage('leads')" }));
   staleLeads.forEach(x => items.push({ type: 'lead', prio: 4, icon: '🕐', text: 'ליד ללא טיפול ' + x.days + ' ימים — ' + x.l.name, sub: 'קבע מעקב או עדכן סטטוס', onclick: "openPage('leads')" }));
@@ -80,7 +95,7 @@ function _notifMailBtn(cid, amt) {
   if (!c || !c.email) return '';
   const subj = encodeURIComponent('תזכורת יתרת חוב — @@PAPER_NAME@@');
   const body = encodeURIComponent('שלום,\nרצינו להזכיר בעדינות שקיימת יתרת חוב פתוחה של ' + money(amt) + '.\nנשמח להסדרה בהקדם. תודה רבה!\n@@PAPER_NAME@@');
-  return '<a class="btn btn-sm btn-ghost" href="mailto:' + c.email + '?subject=' + subj + '&body=' + body + '">✉️ מייל</a>';
+  return '<a class="btn btn-sm btn-ghost" href="mailto:' + esc(encodeURIComponent(c.email)) + '?subject=' + subj + '&body=' + body + '">✉️ מייל</a>';
 }
 
 function notifToggle() {

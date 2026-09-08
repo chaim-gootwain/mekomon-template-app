@@ -173,7 +173,7 @@ el.innerHTML = `
 <b>הגדרות כלליות</b>
 <div class="grid2" style="margin-top:12px">
 <div class="field"><label>שם העיתון</label><input id="setPaper" value="${esc(s.paper_name || '')}"></div>
-<div class="field"><label>מספר עמודים ברירת מחדל לגיליון</label><input id="setPages" type="number" value="${esc(s.default_pages || '32')}" dir="ltr"></div>
+<div class="field"><label>מספר עמודים ברירת מחדל לגיליון</label><input id="setPages" type="number" value="${esc(s.default_pages_count || s.default_pages || '32')}" dir="ltr"></div>
 <div class="field"><label>% עמלה שמבשיל בחיוב (השאר בגבייה)</label><input id="setSplit" type="number" value="${esc(s.commission_split_billing || '50')}" dir="ltr"></div>
 <div class="field"><label>תקופת "לקוח חדש" (חודשים)</label><input id="setNewMonths" type="number" value="${esc(s.new_customer_months || '3')}" dir="ltr"></div>
 </div>
@@ -278,7 +278,9 @@ ${actions[l.action] || l.action} ${tableNames[l.table_name] || l.table_name} #${
 async function settingsSave() {
 const updates = [
 { key: 'paper_name', value: document.getElementById('setPaper').value.trim() },
-{ key: 'default_pages', value: document.getElementById('setPages').value },
+// כל הקוראים (issues, issue-expenses, צ'אטים) קוראים default_pages_count —
+// שמירה תחת default_pages בלבד הפכה את ההגדרה לחסרת השפעה
+{ key: 'default_pages_count', value: document.getElementById('setPages').value },
 { key: 'commission_split_billing', value: document.getElementById('setSplit').value },
 { key: 'new_customer_months', value: document.getElementById('setNewMonths').value },
 ];

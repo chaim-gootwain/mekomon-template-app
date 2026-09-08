@@ -299,7 +299,9 @@ async function submitAd(){
     let imgPath='';
     if(TYPE==='image' && IMG_FILE){
       if(IMG_FILE.size>10*1024*1024) throw new Error('התמונה גדולה מדי (עד 10MB)');
-      imgPath = 'classified/'+phone.replace(/\D/g,'')+'_'+Date.now()+'_'+IMG_FILE.name;
+      // מפתח אחסון חייב ASCII — שם תמונה עברי מפיל את ההעלאה אחרי שהלקוח כבר שילם
+      const _ie = (IMG_FILE.name.match(/\.([A-Za-z0-9]+)$/) || [,''])[1].toLowerCase();
+      imgPath = 'classified/'+phone.replace(/\D/g,'')+'_'+Date.now()+'_img'+(_ie ? '.'+_ie : '');
       const {error:upErr} = await db.storage.from('ad-files').upload(imgPath, IMG_FILE);
       if(upErr) throw new Error('העלאת התמונה נכשלה — נסו שוב או בחרו ללא תמונה');
     }
