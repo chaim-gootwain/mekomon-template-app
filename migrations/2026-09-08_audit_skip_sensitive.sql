@@ -2,7 +2,16 @@
 -- הפרוף הציבורי) ו-signature_data (חתימת לקוח) נרשמו עד עכשיו כערכים
 -- מלאים ב-audit_log — טבלה עם RLS שונה מהטבלה המקורית, כלומר הטוקן דלף
 -- אל מחוץ להגנה שלו. זהה לפונקציה שב-2026-08-30_audit_log.sql לאחר העדכון.
+-- תלות: טבלת audit_log (מיגרציית 2026-08-30_audit_log). במופע שבו יומן
+-- הביקורת לא הותקן — אין מה לעדכן, ולכן מדלגים בשקט במקום להיכשל.
 -- Idempotent — בטוח להריץ שוב. להריץ ידנית ב-SQL Editor של כל מופע.
+
+do $chk$
+begin
+  if to_regclass('public.audit_log') is null then
+    raise exception 'audit_log לא קיימת — מיגרציית audit_log טרם רצה במופע; דלג על הקובץ הזה (אין מה לעדכן)';
+  end if;
+end $chk$;
 
 create or replace function public.audit_track() returns trigger
 language plpgsql security definer set search_path = public
