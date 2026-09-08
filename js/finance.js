@@ -23,7 +23,7 @@ start.setDate(start.getDate() - start.getDay()); // תחילת השבוע הנו
 for (let w = 0; w < 8; w++) {
 const from = new Date(start); from.setDate(from.getDate() + w * 7);
 const to = new Date(from); to.setDate(to.getDate() + 6);
-const f = from.toISOString().slice(0, 10), t = to.toISOString().slice(0, 10);
+const f = localDay(from), t = localDay(to); // גבולות שבוע בשעון מקומי — toISOString הסיט יום לפני 02:00
 const inSum = flows.filter(x => x.direction === 'in' && x.flow_date >= f && x.flow_date <= t)
 .reduce((s, x) => s + Number(x.amount), 0);
 const outSum = flows.filter(x => x.direction === 'out' && x.flow_date >= f && x.flow_date <= t)

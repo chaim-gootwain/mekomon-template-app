@@ -161,10 +161,14 @@ async function alertsInit() {
   await alertsRefresh();
   if (window._alertsTimer) clearInterval(window._alertsTimer);
   window._alertsTimer = setInterval(alertsRefresh, 5 * 60 * 1000);
-  document.addEventListener('click', e => {
-    const bell = document.getElementById('alertsBell'), dd = document.getElementById('alertsDrop');
-    if (dd && !dd.classList.contains('hidden') && !dd.contains(e.target) && bell && !bell.contains(e.target)) dd.classList.add('hidden');
-  });
+  // מאזין אחד בלבד — alertsInit נקרא שוב בכל הדלקת המתג הראשי
+  if (!window._alertsDocClick) {
+    window._alertsDocClick = true;
+    document.addEventListener('click', e => {
+      const bell = document.getElementById('alertsBell'), dd = document.getElementById('alertsDrop');
+      if (dd && !dd.classList.contains('hidden') && !dd.contains(e.target) && bell && !bell.contains(e.target)) dd.classList.add('hidden');
+    });
+  }
 }
 
 /* ==================== כרטיס הגדרות ==================== */

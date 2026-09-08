@@ -132,7 +132,7 @@ function _mbLine(a, issMap) {
 
 /* הפקת חשבוניות חודשיות לחודש (YYYY-MM) — הפקה מרוכזת (משמש כגיבוי; הכפתור מפנה לאישור פרטני) */
 async function monthlyBillingRun(ym) {
-  ym = ym || new Date().toISOString().slice(0, 7);
+  ym = ym || thisMonth(); // חודש מקומי — UTC נתן את החודש הקודם בליל ה-1
   const monthly = mbList();
   if (!monthly.length) { toast('אין לקוחות בחיוב חודשי', true); return 0; }
   // קיבוץ לפי חודש הסגירה לדפוס (print_date), עם נפילה ל-publish_date בגיליונות ישנים
@@ -247,7 +247,7 @@ async function mbDownloadClips(ym, cid) {
 
 /* מסך אישור פרטני לחיוב החודשי — רשימת לקוחות, הפקה אחד-אחד (כמו בחיוב הגיליון) */
 async function monthlyBillingReview(ym) {
-  ym = ym || new Date().toISOString().slice(0, 7);
+  ym = ym || thisMonth(); // חודש מקומי — UTC נתן את החודש הקודם בליל ה-1
   const monthly = mbList();
   if (!monthly.length) { toast('אין לקוחות בחיוב חודשי', true); return; }
   // קיבוץ לפי חודש הסגירה לדפוס (print_date), עם נפילה ל-publish_date בגיליונות ישנים

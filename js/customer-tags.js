@@ -66,8 +66,15 @@ async function custBulkTag(mode) {
   _custTagPicker(title, [], mode === 'add' ? 'הוסף לכולם' : 'הסר מכולם', async (tags) => {
     if (!tags.length) return;
     const sel = (_customers || []).filter(c => _custSelected.has(c.id));
+    // תגיות טריות מהמסד — התגיות שבזיכרון נטענו בפתיחת המסך, וכתיבתן
+    // דורסת תגיות שנוספו בינתיים ממשתמש/טאב אחר
+    const freshTags = {};
+    try {
+      const fresh = await run(db.from('customers').select('id,tags').in('id', sel.map(c => c.id)));
+      (fresh || []).forEach(r => freshTags[r.id] = r.tags || []);
+    } catch (e) { }
     await Promise.all(sel.map(c => {
-      const cur = new Set(c.tags || []);
+      const cur = new Set(freshTags[c.id] || c.tags || []);
       if (mode === 'add') tags.forEach(t => cur.add(t)); else tags.forEach(t => cur.delete(t));
       const next = [...cur];
       c.tags = next;

@@ -19,6 +19,17 @@ async function pdfImportLoad(issueNum) {
 }
 async function pdfImportSave() {
   if (!_piState) return;
+  // מיזוג עם המצב העדכני במסד לפני שמירה — שני מנהלים שעובדים במקביל לא
+  // דורסים זה לזה סימוני "טופל" (דריסה החייתה פריטים שאושרו → מודעות כפולות)
+  try {
+    const fresh = await pdfImportLoad(_piState.issueNum);
+    if (fresh && Array.isArray(fresh.items) && fresh.items.length === _piState.obj.items.length) {
+      fresh.items.forEach((it, i) => {
+        const mine = _piState.obj.items[i];
+        if (it && it.done && mine && !mine.done) { mine.done = true; if (it.ad_id) mine.ad_id = it.ad_id; }
+      });
+    }
+  } catch (e) { }
   await run(db.from('settings').upsert({ key: _piKey(_piState.issueNum), value: JSON.stringify(_piState.obj) }));
   if (cache.settings) cache.settings[_piKey(_piState.issueNum)] = JSON.stringify(_piState.obj);
 }

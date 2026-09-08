@@ -23,6 +23,17 @@ async function aqLoad() {
 async function aqPersist() {
   if (!_aqState) return;
   try {
+    // מיזוג עם המצב במסד — שלא נדרוס "טופל" שסומן במקביל אצל מנהל אחר
+    const { data } = await db.from('settings').select('value').eq('key', AQ_KEY).single();
+    const fresh = data && data.value ? JSON.parse(data.value) : null;
+    if (fresh && Array.isArray(fresh.items) && fresh.items.length === (_aqState.items || []).length) {
+      fresh.items.forEach((it, i) => {
+        const mine = _aqState.items[i];
+        if (it && it.done && mine && !mine.done) { mine.done = true; if (it.approved) mine.approved = true; if (it.rejected) mine.rejected = true; if (it.ad_id) mine.ad_id = it.ad_id; }
+      });
+    }
+  } catch (e) { }
+  try {
     await db.from('settings').update({
       value: JSON.stringify({ issueId: _aqState.issueId, issueNumber: _aqState.issueNumber, items: _aqState.items }),
     }).eq('key', AQ_KEY);

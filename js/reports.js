@@ -208,7 +208,7 @@ const ads = await runAll((f, t) => db.from('ads').select('issue_id,price,discoun
 _repData = issues.map(i => {
 const iAds = ads.filter(a => a.issue_id === i.id && !['cancelled', 'rejected'].includes(a.status));
 const rev = iAds.reduce((s, a) => s + Number(a.price) - Number(a.discount), 0);
-return [i.issue_number, heDate(i.publish_date), iAds.length, rev, STATUS.issue[i.status][0]];
+return [i.issue_number, heDate(i.publish_date), iAds.length, rev, (STATUS.issue[i.status] || [i.status || ''])[0]];
 });
 reportShell('דו"ח גיליונות — 12 אחרונים', `
 <table class="data"><thead><tr><th>גיליון</th><th>תאריך</th><th>מודעות</th><th>הכנסה</th><th>סטטוס</th></tr></thead><tbody>
@@ -324,8 +324,8 @@ async function report_churn() {
 
 /* ---------- רווח והפסד: 12 חודשים ---------- */
 async function report_pnl() {
-  const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1);
-  const sinceM = since.toISOString().slice(0, 7);
+  const _n = new Date(); const since = new Date(_n.getFullYear(), _n.getMonth() - 11, 1);
+  const sinceM = localDay(since).slice(0, 7);
   const [ads, issues, expenses] = await Promise.all([
     runAll((f, t) => db.from('ads').select('issue_id,price,discount,status').order('id').range(f, t)),
     runAll((f, t) => db.from('issues').select('id,publish_date,print_date').order('id').range(f, t)),
@@ -366,8 +366,8 @@ async function report_pnl() {
 // קריאה בלבד: charges + payments. לכל לקוח — יתרת פתיחה, תנועות התקופה
 // (חובה/זכות) ויתרה רצה. יוצא כקובץ Excel (גיליון RTL) דרך SheetJS הטעון.
 function report_ledger() {
-  const d = new Date(); d.setMonth(d.getMonth() - 1);
-  const defMonth = d.toISOString().slice(0, 7);
+  const _dn = new Date(); const d = new Date(_dn.getFullYear(), _dn.getMonth() - 1, 1);
+  const defMonth = localDay(d).slice(0, 7);
   document.getElementById('reportArea').innerHTML = `
 <div class="card-pad">
 <b>📒 כרטסות לרו"ח — ייצוא חודשי</b>
@@ -400,10 +400,14 @@ async function _ledGather() {
   const range = _ledRange();
   if (!range) { toast('בחר חודש או טווח תאריכים', true); return null; }
   const [charges, payments] = await Promise.all([
-    runAll((f, t) => db.from('charges').select('id,customer_id,amount,status,issued_date,description,invoice_number').lte('issued_date', range.to).order('id').range(f, t)),
+    // כולל גם חיובים בלי issued_date — אחרת התשלומים שלהם מופיעים כזכות בלי חובה
+    runAll((f, t) => db.from('charges').select('id,customer_id,amount,status,issued_date,description,invoice_number').or('issued_date.is.null,issued_date.lte.' + range.to).order('id').range(f, t)),
     runAll((f, t) => db.from('payments').select('id,customer_id,charge_id,amount,method,paid_date,check_due_date').lte('paid_date', range.to).order('id').range(f, t)),
   ]);
   const dead = c => ['cancelled', 'lost'].includes(c.status);
+  // תשלום על חיוב מבוטל/אבוד לא נכנס לכרטסת — החיוב עצמו מוחרג, ובלעדי
+  // ההחרגה כאן נשלחת לרו"ח זכות בלי חובה מקבילה והיתרות מתעוותות
+  const deadIds = new Set(charges.filter(dead).map(c => c.id));
   const chargeCust = {}; charges.forEach(c => chargeCust[c.id] = c.customer_id);
   const byCust = {};
   const ent = (cid, e) => { (byCust[cid] = byCust[cid] || []).push(e); };
@@ -412,6 +416,7 @@ async function _ledGather() {
     ent(c.customer_id, { date: c.issued_date || '', kind: 'חיוב', desc: c.description || 'חיוב', ref: c.invoice_number || '', debit: Number(c.amount || 0), credit: 0 });
   });
   payments.forEach(p => {
+    if (p.charge_id && deadIds.has(p.charge_id)) return;
     const cid = p.customer_id || chargeCust[p.charge_id];
     if (!cid) return;
     const method = (typeof PAY_METHODS !== 'undefined' && PAY_METHODS[p.method]) ? PAY_METHODS[p.method] : (p.method || '');

@@ -200,6 +200,11 @@ function proofCardBlock(a) {
 if (!['admin', 'sales'].includes(profile.role)) return '';
 if (a.status !== 'proof') return '';
 const mgmt = !!a.proof_mgmt_at, cust = !!a.proof_cust_at;
+// מרוץ נדיר: הנהלה ולקוח אישרו בו-זמנית וכל צד ראה את השני כחסר — שני
+// האישורים רשומים אבל הסטטוס נתקע על proof. משלימים את ההעברה לוועדה.
+if (mgmt && cust) {
+  _proofFinalizeIfReady(a.id).then(done => { if (done) { toast('✓ שני האישורים היו רשומים — הועבר לוועדה'); openPage(currentPage); } }).catch(() => { });
+}
 const chip = ok => ok ? '<span class="pill green">✓ אושר</span>' : '<span class="pill amber">ממתין</span>';
 return `<div class="card card-pad" style="margin:12px 0;border-right:4px solid var(--brand)">
 <b>פרוף — סבב ${a.proof_round || 1}</b>
