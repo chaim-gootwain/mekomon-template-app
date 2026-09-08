@@ -59,10 +59,12 @@ Deno.serve(async (req)=>{
       detail: "חסר לקוח/גיליון"
     }, 400);
     const { data: cust } = await admin.from("customers").select("name,email").eq("id", customer_id).single();
-    if (!cust?.email) return json({
+    // מייל תקין ויחיד בלבד — כתובת עם CRLF/פסיק מזריקה כותרות ונמענים ל-SMTP
+    if (cust) cust.email = String(cust.email || "").trim();
+    if (!cust?.email || !/^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/.test(cust.email)) return json({
       ok: false,
       error: "no-email",
-      detail: "ללקוח אין כתובת מייל"
+      detail: "ללקוח אין כתובת מייל תקינה"
     }, 400);
     const { data: issue } = await admin.from("issues").select("issue_number,pdf_path").eq("id", issue_id).single();
     if (!issue?.pdf_path) return json({

@@ -46,7 +46,10 @@ Deno.serve(async (req)=>{
       ok: false,
       error: "customer not found"
     }, 404);
-    const _rcpt = to_email || cust.email || null;
+    // כתובת הנמען חייבת להיות מייל תקין ויחיד — גם נגד הזרקת כותרות/נמענים
+    // ל-SMTP (CRLF בתוך to_email מזריק RCPT TO נוספים דרך חיבור ה-Gmail)
+    const EMAIL_RE = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
+    const _rcpt = [to_email, cust.email].map((v)=>String(v || "").trim()).find((v)=>EMAIL_RE.test(v)) || null;
     const out = await PDFDocument.create();
     const usedByIssue = [];
     for (const iid of issue_ids){
@@ -149,10 +152,16 @@ Deno.serve(async (req)=>{
         let _invFname = null;
         try {
           if (invoice && (invoice.pdf_url || invoice.doc_uuid)) {
-            let _pu = invoice.pdf_url || null;
-            if (!_pu && invoice.doc_uuid) {
+            // לעולם לא מביאים URL כפי שהגיע מהבקשה — רק כתובת שכבר רשומה
+            // בטבלת documents. אחרת הפונקציה היא פרוקסי-SSRF: קורא מזין
+            // כתובת פנימית ומקבל את תוכנה כקובץ מצורף במייל.
+            let _pu = null;
+            if (invoice.doc_uuid) {
               const { data: _docRow } = await admin.from("documents").select("pdf_url").eq("doc_uuid", invoice.doc_uuid).single();
               _pu = _docRow && _docRow.pdf_url || null;
+            } else {
+              const { data: _docRows } = await admin.from("documents").select("pdf_url").eq("pdf_url", String(invoice.pdf_url)).limit(1);
+              _pu = _docRows && _docRows[0] && _docRows[0].pdf_url || null;
             }
             if (_pu) {
               const _pr = await fetch(_pu);

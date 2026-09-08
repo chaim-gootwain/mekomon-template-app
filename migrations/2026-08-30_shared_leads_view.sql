@@ -41,6 +41,9 @@ end if; end $do$;
 -- 3. Duplicates vs customers: open leads whose phone matches a customer.
 --    SECURITY DEFINER so it sees ALL customers regardless of the caller's
 --    RLS scope; exposes only (lead_id, customer_id, customer_name).
+--    Gated to active admin/sales — kept identical to the hardened version in
+--    2026-09-07_server_side_authz.sql so a re-run of THIS file never reverts
+--    the guard (emu_active_staff is created by 002_storage_buckets.sql).
 create or replace function public.lead_customer_duplicates()
 returns table(lead_id bigint, customer_id bigint, customer_name text)
 language sql stable security definer set search_path = public as $fn$
@@ -51,6 +54,7 @@ language sql stable security definer set search_path = public as $fn$
      = right(regexp_replace(coalesce(l.phone, ''), '\D', '', 'g'), 9)
   where l.status not in ('won', 'lost')
     and length(regexp_replace(coalesce(l.phone, ''), '\D', '', 'g')) >= 7
+    and public.emu_active_staff(array['admin','sales'])
   order by l.id, c.id
 $fn$;
 
