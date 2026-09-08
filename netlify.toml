@@ -7,3 +7,35 @@
   from = "/luach"
   to = "/portal/luach.html"
   status = 200
+
+# publish="." מפרסם את כל הריפו — חוסמים קבצים פנימיים (סכמת DB, סקריפטים)
+[[redirects]]
+  from = "/migrations/*"
+  to = "/index.html"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/supabase/*"
+  to = "/index.html"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/tests/*"
+  to = "/index.html"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/build.sh"
+  to = "/index.html"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/setup_instance.py"
+  to = "/index.html"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/SETUP.md"
+  to = "/index.html"
+  status = 404
+  force = true

@@ -352,7 +352,7 @@ ${canWrite ? `<div class="cc-toolbar">
 <div id="ccInvMenu" class="cc-menu hidden">
 <button class="btn" onclick="ccMenuClose();invIssueOrder(${id})">🧾 הפקת חשבונית</button>
 <button class="btn" onclick="ccMenuClose();invIssueReceiptDirect(${id})">🧾 חשבונית מס קבלה${debt > 0 ? ' <span class="pill red" style="font-size:.66rem">חוב פתוח</span>' : ''}</button>
-<button class="btn" onclick="ccMenuClose();window.openQuoteForm ? openQuoteForm({customer_id:${id}, recipient_name:'${esc(c.name).replace(/'/g, '&#39;')}'}) : toast('בטעינה')">📝 הצעת מחיר</button>
+<button class="btn" onclick="ccMenuClose();window.openQuoteForm ? openQuoteForm({customer_id:${id}, recipient_name:'${escJs(c.name)}'}) : toast('בטעינה')">📝 הצעת מחיר</button>
 <button class="btn" onclick="ccMenuClose();dealNew(${id})">💼 עסקה חדשה</button>
 <div class="cc-msep"></div>
 <button id="csBtn" class="btn" onclick="ccMenuClose();customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
@@ -367,7 +367,7 @@ ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href=
 ${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" onclick="ccMenuClose();ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>
 <button class="btn" onclick="ccMenuClose();customerAddNote(${id})">＋ הוסף הערה</button>
-${typeof auditShow === 'function' ? `<button class="btn" onclick="ccMenuClose();auditShow('customers', ${id}, '${esc(c.name).replace(/'/g, '&#39;')}')">🕘 היסטוריית שינויים</button>` : ''}
+${typeof auditShow === 'function' ? `<button class="btn" onclick="ccMenuClose();auditShow('customers', ${id}, '${escJs(c.name)}')">🕘 היסטוריית שינויים</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerStatusChange(${id})">🔄 שינוי סטטוס</button>
 <button class="btn" onclick="custPortalShow()">🔗 קישור פורטל</button>
 ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-danger-ghost" onclick="ccMenuClose();customerDelete(${id})">🗑 מחיקת לקוח</button>` : ''}
@@ -598,9 +598,11 @@ async function customersImport() {
   catch (e) { toast('לא הצלחתי לקרוא את הקובץ: ' + e.message, true); return; }
   if (!rows.length) { toast('הקובץ ריק או שאין שורת כותרות', true); return; }
 
-  const existing = await run(db.from('customers').select('name, phone'));
+  // runAll — קריאה בודדת מוגבלת ל-1000 שורות, ומעל 1000 לקוחות בדיקת
+  // הכפילויות פספסה קיימים והיבוא יצר אותם שוב
+  const existing = await runAll((f, t) => db.from('customers').select('id,name,phone').order('id').range(f, t));
   const knownPhones = new Set(existing.map(c => c.phone).filter(Boolean));
-  const knownNames = new Set(existing.map(c => c.name.trim()));
+  const knownNames = new Set(existing.map(c => (c.name || '').trim()).filter(Boolean));
 
   const F = _CI_FIELD_NAMES;
   const toInsert = [], skipped = [];

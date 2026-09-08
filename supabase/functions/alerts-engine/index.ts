@@ -29,6 +29,15 @@ function json(body, status = 200) {
   });
 }
 const BATCH = 200; // תקרת עיבוד לריצה אחת — נגד הצפה
+// השוואת סודות חסינת-תזמון — אורך שונה לא מקצר את הלולאה
+function timingSafeEqual(a, b) {
+  const enc = new TextEncoder();
+  const ab = enc.encode(String(a)), bb = enc.encode(String(b));
+  let diff = ab.length ^ bb.length;
+  const n = Math.max(ab.length, bb.length, 1);
+  for (let i = 0; i < n; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
 /* ---------- עזרי מנוע ---------- */ // הצבת {placeholder} מתוך ה-payload בתבנית ההודעה של הכלל
 function fillTemplate(tpl, vars) {
   return String(tpl || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_, k)=>vars[k] === undefined || vars[k] === null ? '' : String(vars[k]));
@@ -300,11 +309,16 @@ async function stepDeliver(svc, settings) {
     const ANON = Deno.env.get('SUPABASE_ANON_KEY');
     const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
     // ----- אימות הקורא -----
-    // מסלול 1: קריאה מתוזמנת (Scheduled Function / pg_cron) עם מפתח ה-anon בלבד.
+    // מסלול 1: קריאה מתוזמנת (Scheduled Function / pg_cron) — מזוהה בסוד ייעודי
+    //          בכותרת x-cron-secret (secret בשם CRON_SECRET). מפתח ה-anon לבדו
+    //          אינו אישור: הוא ציבורי ומוטמע בכל דפדפן, וכל גולש יכול להריץ
+    //          את המנוע איתו בלולאה. הקורא המתוזמן ממשיך לשלוח Authorization
+    //          עם ה-anon (בשביל שער ה-JWT של הפלטפורמה) ומוסיף את הכותרת.
     // מסלול 2: משתמש מחובר — חייב להיות מנהל פעיל (כמו admin-users).
     const authHeader = req.headers.get('Authorization') || '';
-    const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const isScheduledCall = !!ANON && bearer === ANON;
+    const CRON_SECRET = Deno.env.get('CRON_SECRET') || '';
+    const givenSecret = req.headers.get('x-cron-secret') || '';
+    const isScheduledCall = !!CRON_SECRET && timingSafeEqual(givenSecret, CRON_SECRET);
     if (!isScheduledCall) {
       const caller = createClient(SUPABASE_URL, ANON, {
         global: {

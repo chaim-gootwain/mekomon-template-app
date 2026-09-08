@@ -129,11 +129,11 @@ if (error || !data) { showInvalid(); return; }
 
 document.getElementById('custName').textContent = data.customer_name;
 document.getElementById('adSize').innerHTML =
-data.sizes.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+data.sizes.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
 document.getElementById('adsList').innerHTML = data.ads.length
 ? data.ads.map(a => `<li><span>${escapeHtml(a.title)}<br>
-<small style="color:var(--muted)">${a.created_at}${a.issue ? ' · ' + a.issue : ''}</small></span>
-<span class="pill">${a.status}</span></li>`).join('')
+<small style="color:var(--muted)">${escapeHtml(a.created_at)}${a.issue ? ' · ' + escapeHtml(a.issue) : ''}</small></span>
+<span class="pill">${escapeHtml(a.status)}</span></li>`).join('')
 : '<li style="color:var(--muted)">עדיין אין מודעות</li>';
 
 document.getElementById('loading').style.display = 'none';
@@ -207,7 +207,12 @@ let filePath = '', fileName = '';
 if (file) {
 if (file.size > 20 * 1024 * 1024) throw new Error('הקובץ גדול מדי (מקסימום 20MB)');
 fileName = file.name;
-filePath = `portal/${token}/${Date.now()}_${file.name}`;
+// מפתח אחסון חייב ASCII — שם קובץ עברי ("מודעה לפסח.pdf", המקרה הנפוץ אצלנו)
+// נופל על "Invalid key" וכל שליחת הטופס נכשלת; השם המקורי נשמר ב-p_file_name
+const _dot = fileName.lastIndexOf('.');
+const _ext = _dot > 0 ? fileName.slice(_dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+let _base = (_dot > 0 ? fileName.slice(0, _dot) : fileName).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^[._-]+|[._-]+$/g, '') || 'file';
+filePath = `portal/${token}/${Date.now()}_${_base}${_ext ? '.' + _ext : ''}`;
 const { error: upErr } = await db.storage.from('ad-files').upload(filePath, file);
 if (upErr) throw upErr;
 }

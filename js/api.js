@@ -67,11 +67,25 @@ db.from('issues').select('id,issue_number,publish_date,print_date,status').order
 db.from('settings').select('*').then(r => { (r.data || []).forEach(s => cache.settings[s.key] = s.value); }),
 ];
 if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
-jobs.push(db.from('customers').select('id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser').order('name').then(r => {
-  // נפילה בטוחה: אם עמודות חדשות עוד לא קיימות במופע — נטען בלעדיהן
-  if (r.error) return db.from('customers').select('id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms').order('name').then(r2 => cache.customers = r2.data || []);
-  cache.customers = r.data || [];
-}));
+// עימוד (runAll) — קריאה בודדת נחתכת ב-1000, ומעל 1000 לקוחות הבורר,
+// nameOf ובדיקות הכפילויות פשוט לא ראו את סוף הרשימה
+const _custCols = 'id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser';
+const _custColsOld = 'id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms';
+const _pageCust = async (cols) => {
+  const all = [];
+  for (let f = 0; f < 50000; f += 1000) {
+    const r = await db.from('customers').select(cols).order('name').order('id').range(f, f + 999);
+    if (r.error) throw r.error;
+    all.push(...(r.data || []));
+    if ((r.data || []).length < 1000) break;
+  }
+  return all;
+};
+jobs.push(
+  _pageCust(_custCols).then(rows => { cache.customers = rows; })
+    // נפילה בטוחה (ושקטה, כמו קודם): עמודות חדשות שעוד לא קיימות במופע
+    .catch(() => _pageCust(_custColsOld).then(rows => { cache.customers = rows; }).catch(() => { }))
+);
 jobs.push(db.from('agencies').select('*').order('name').then(r => cache.agencies = r.data || []));
 }
 if (['admin', 'sales', 'editor'].includes(role)) {
@@ -113,11 +127,18 @@ return `<span class="pill ${s[1]}">${esc(s[0])}</span>`;
 
 /* ---------- 4. עזרי תצוגה ---------- */
 function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+/* ערך לתוך מחרוזת JS שבתוך onclick: קודם escape ל-JS ואז esc ל-HTML.
+   esc לבד לא מספיק — הדפדפן מפענח &#39; חזרה לגרש לפני שה-JS מפורסר,
+   ושם כמו Mike's Pizza שובר את הקוד (או מריץ קוד זדוני) */
+function escJs(v) { return esc(String(v == null ? '' : v).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ')); }
 function money(v) { return v == null || v === '' ? '' : '₪' + Number(v).toLocaleString('he-IL', { maximumFractionDigits: 2 }); }
 function heDate(d) { if (!d) return ''; const s = String(d).slice(0, 10).split('-'); return `${s[2]}.${s[1]}.${s[0]}`; }
 function heDateTime(d) { if (!d) return ''; const dt = new Date(d); return dt.toLocaleDateString('he-IL') + ' ' + dt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }); }
 /* תאריך לפי שעון מקומי (ולא UTC) — בין חצות ל-03:00 UTC נתן את היום הקודם */
 function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+/* תאריך מקומי (YYYY-MM-DD) מתוך timestamp — slice(0,10) על ערך מהמסד נותן
+   את תאריך ה-UTC, וכניסת לילה (00:30) נרשמת ליום/חודש הקודם */
+function localDay(ts) { if (!ts) return ''; const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function thisMonth() { return today().slice(0, 7); }
 function monthEnd(ym) { const [y, m] = ym.split('-').map(Number); return ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0'); }
 
@@ -210,7 +231,9 @@ document.getElementById('modalBack').classList.add('open');
 
 function closeForm() { document.getElementById('modalBack').classList.remove('open'); }
 
+let _formBusy = false; // לחיצה כפולה על "שמירה" = רשומה כפולה (תשלום/חיוב/הוצאה)
 async function submitForm() {
+if (_formBusy) return;
 const rec = {};
 for (const f of _formFields) {
 if (f.type === 'section' || f.type === 'html') continue;
@@ -225,7 +248,9 @@ if (typeof v === 'string') v = v.trim();
 if (f.required && (v === null || v === '')) { toast('נא למלא: ' + f.label, true); return; }
 rec[f.name] = v;
 }
+_formBusy = true;
 try { await _formSave(rec); closeForm(); } catch (e) { /* השגיאה כבר הוצגה ב-run */ }
+finally { _formBusy = false; }
 }
 
 /* ---------- 6. טבלת נתונים גנרית ----------

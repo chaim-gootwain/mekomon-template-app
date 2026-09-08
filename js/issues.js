@@ -503,9 +503,12 @@ if (a.page_number === page) { _fpSelChip = null; _fpPaint(); return; }
 const cur = _pageFill(page);
 const frac = _adFraction(a);
 if (cur + frac > 1.01 && !confirm(`עמוד ${page} יתמלא ל-${Math.round((cur + frac) * 100)}% (מעל 100%). לשבץ בכל זאת?`)) return;
-a.page_number = page; a.status = 'placed';
+// מודעה שכבר פורסמה (וחויבה) נשארת published — placed מחזיר אותה
+// למאגר הפרסום ויוצר חיוב שני על אותה מודעה
+const patch = a.status === 'published' ? { page_number: page } : { page_number: page, status: 'placed' };
+a.page_number = page; if (patch.status) a.status = patch.status;
 _fpSelChip = null; _fpPaint();
-run(db.from('ads').update({ page_number: page, status: 'placed' }).eq('id', id))
+run(db.from('ads').update(patch).eq('id', id))
 .then(() => addInteraction('ad', id, `שובצה לעמוד ${page} בגיליון ${_fpIssue.issue_number}`))
 .catch(() => openFlatplan(_fpIssue.id));
 } else {
@@ -541,7 +544,7 @@ _fpPlace(s.kind, s.id, page);
 /* הסרת פריט מעמוד — עדכון מקומי + שמירה ברקע */
 function fpUnplace(kind, id) {
 if (!['admin', 'editor'].includes(profile.role)) return;
-if (kind === 'ad') { const a = _fpAds.find(x => x.id === id); if (a) { a.page_number = null; a.status = 'approved'; } run(db.from('ads').update({ page_number: null, status: 'approved' }).eq('id', id)).catch(() => openFlatplan(_fpIssue.id)); }
+if (kind === 'ad') { const a = _fpAds.find(x => x.id === id); const patch = (a && a.status === 'published') ? { page_number: null } : { page_number: null, status: 'approved' }; if (a) { a.page_number = null; if (patch.status) a.status = patch.status; } run(db.from('ads').update(patch).eq('id', id)).catch(() => openFlatplan(_fpIssue.id)); }
 else { const a = _fpArticles.find(x => x.id === id); if (a) { a.page_number = null; a.status = 'ready'; } run(db.from('articles').update({ page_number: null, status: 'ready' }).eq('id', id)).catch(() => openFlatplan(_fpIssue.id)); }
 _fpPaint();
 }
@@ -799,8 +802,13 @@ async function archiveUpload() {
 const file = document.getElementById('archFile').files[0];
 const issueId = Number(document.getElementById('archIssue').value);
 if (!file) return;
-const issue = cache.issues.find(i => i.id === issueId);
-const path = `issue_${issue ? issue.issue_number : issueId}.pdf`;
+// מספר הגיליון חייב להגיע מהרשומה עצמה — cache.issues מחזיק רק 30 גיליונות
+// אחרונים; נפילה ל-id יצרה שם קובץ שמתנגש עם issue_number של גיליון אחר
+// ודורסת (upsert) את ה-PDF שלו בארכיון
+let issue = cache.issues.find(i => i.id === issueId);
+if (!issue) { try { issue = await run(db.from('issues').select('id,issue_number').eq('id', issueId).single()); } catch (e) { } }
+if (!issue || !issue.issue_number) { toast('לא אותר מספר הגיליון — רענן ונסה שוב', true); return; }
+const path = `issue_${issue.issue_number}.pdf`;
 const { error } = await db.storage.from('issues-archive').upload(path, file, { upsert: true });
 if (error) { toast('שגיאה: ' + error.message, true); return; }
 await run(db.from('issues').update({ pdf_path: path }).eq('id', issueId));

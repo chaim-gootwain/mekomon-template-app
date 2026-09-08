@@ -30,6 +30,16 @@ function json(body, status = 200) {
   });
 }
 
+// השוואת סודות חסינת-תזמון — אורך שונה לא מקצר את הלולאה
+function timingSafeEqual(a, b) {
+  const enc = new TextEncoder();
+  const ab = enc.encode(String(a)), bb = enc.encode(String(b));
+  let diff = ab.length ^ bb.length;
+  const n = Math.max(ab.length, bb.length, 1);
+  for (let i = 0; i < n; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
+
 const DEFAULT_TIMES = 'רביעי 20:00, חמישי 13:00, חמישי 19:00';
 const HE_DAYS = {
   'ראשון': 0, 'שני': 1, 'שלישי': 2, 'רביעי': 3, 'חמישי': 4, 'שישי': 5, 'שבת': 6,
@@ -76,10 +86,14 @@ Deno.serve(async (req) => {
     const ANON = Deno.env.get('SUPABASE_ANON_KEY');
     const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // ----- אימות: קריאה מתוזמנת (anon) או מנהל מחובר -----
+    // ----- אימות: קריאה מתוזמנת (סוד ייעודי) או מנהל מחובר -----
+    // מפתח ה-anon לבדו אינו אישור — הוא ציבורי ומוטמע בכל דפדפן. הקורא
+    // המתוזמן שולח Authorization עם ה-anon (שער ה-JWT של הפלטפורמה) ומוסיף
+    // כותרת x-cron-secret עם ה-secret בשם CRON_SECRET.
     const authHeader = req.headers.get('Authorization') || '';
-    const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const isScheduledCall = !!ANON && bearer === ANON;
+    const CRON_SECRET = Deno.env.get('CRON_SECRET') || '';
+    const givenSecret = req.headers.get('x-cron-secret') || '';
+    const isScheduledCall = !!CRON_SECRET && timingSafeEqual(givenSecret, CRON_SECRET);
     if (!isScheduledCall) {
       const caller = createClient(SUPABASE_URL, ANON, {
         global: { headers: { Authorization: authHeader } }

@@ -81,7 +81,7 @@ async function _mgDo(gi) {
       await run(db.rpc('merge_customers', { p_keep: keepId, p_dup: d.id }));
     }
     toast(`✓ מוזגו ${dups.length} רשומות אל ${keep.name}`);
-    _customers = await run(db.from('customers').select('*').order('name'));
+    _customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
     await refreshCache();
     _mergeGroups = _mgScan();
     _mgDraw();

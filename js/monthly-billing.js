@@ -106,6 +106,22 @@ function _mbDocDate(ym) {
 let _mbCtx = null; // הקשר לרשימת האישור החודשית: {ym, issMap, ads, done}
 let _mbKind = null; // סוג המסמך שנבחר בתצוגה המקדימה החודשית
 let _mbClipsSent = new Set(); // מעקב: למי כבר נשלחו גזירי החודש (למניעת כפילות בפיצול קטגוריות)
+
+/* אילו טרנזקציות חודשיות כבר הופקו — נבדק מול כל סוגי המסמכים, כי הסוג
+   הוא חלק מה-transaction_id ובדיקה לפי סוג אחד מפספסת הפקה קודמת בסוג
+   אחר (proforma מול tax_invoice) → חשבונית חודשית כפולה */
+const _MB_KINDS = ['proforma', 'tax_invoice', 'invoice_receipt', 'receipt'];
+async function _mbDoneSet(ym) {
+  const done = new Set();
+  try {
+    const docs = await run(db.from('documents').select('transaction_id,status').ilike('transaction_id', 'emu-monthly-' + ym + '-cust%'));
+    (docs || []).forEach(d => { if (!['failed', 'cancelled'].includes(d.status)) done.add(d.transaction_id); });
+  } catch (e) { }
+  return done;
+}
+function _mbIsDone(done, ym, cid, cat) {
+  return _MB_KINDS.some(k => done.has(_mbTxn(ym, cid, k, cat)));
+}
 /* שורת פריט אחת למודעה בחשבונית החודשית */
 function _mbLine(a, issMap) {
   const iss = issMap[a.issue_id] || {};
@@ -127,6 +143,7 @@ async function monthlyBillingRun(ym) {
   const issMap = {}; issues.forEach(i => issMap[i.id] = i);
   const ads = await run(db.from('ads').select('*').in('issue_id', issues.map(i => i.id)).in('customer_id', monthly).not('status', 'in', '("cancelled","rejected")'));
   const lbl = (typeof _ibLabel === 'function') ? _ibLabel : (t => t || 'מודעה');
+  const done = await _mbDoneSet(ym); // לא מפיקים שוב למי שכבר הופק — בכל סוג מסמך
   const docDate = _mbDocDate(ym); // תאריך המסמך = סוף החודש (ואם שבת — יומיים קודם)
   let count = 0;
   const mkLine = a => { const iss = issMap[a.issue_id] || {}; const sz = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || ''; return { details: lbl(a.title) + (sz ? ' · ' + sz : '') + ' — גיליון ' + iss.issue_number + (a.page_number ? ' — עמוד ' + a.page_number : ''), amount: 1, price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) }; };
@@ -143,6 +160,7 @@ async function monthlyBillingRun(ym) {
     for (const gk of Object.keys(groups)) {
       const lines = groups[gk].map(mkLine).filter(it => it.price > 0);
       if (!lines.length) continue;
+      if (_mbIsDone(done, ym, cid, isCenter ? gk : '')) continue; // כבר חויב החודש
       const isSocial = gk === 'social';
       const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
       const items = [{ details: header, amount: 1, price: 0 }, ...lines];
@@ -239,8 +257,7 @@ async function monthlyBillingReview(ym) {
   if (!issues.length) { toast('אין גיליונות לחודש ' + ym, true); return; }
   const issMap = {}; issues.forEach(i => issMap[i.id] = i);
   const ads = await run(db.from('ads').select('*').in('issue_id', issues.map(i => i.id)).in('customer_id', monthly).not('status', 'in', '("cancelled","rejected")'));
-  const done = new Set();
-  try { const docs = await run(db.from('documents').select('transaction_id,status').ilike('transaction_id', 'emu-monthly-' + ym + '-cust%')); (docs || []).forEach(d => { if (!['failed', 'cancelled'].includes(d.status)) done.add(d.transaction_id); }); } catch (e) { }
+  const done = await _mbDoneSet(ym);
   _mbCtx = { ym, issMap, ads, done };
   _mbClipsSent = new Set();
   const rows = [];
@@ -257,7 +274,7 @@ async function monthlyBillingReview(ym) {
       if (!(total > 0)) continue;
       const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
       // "הופק?" — מזהים כל סוג מסמך (חשבון עסקה / חשבונית מס), כי המשתמש יכול לבחור סוג בבורר
-      const _isDone = ['proforma', 'tax_invoice', 'invoice_receipt', 'receipt'].some(k => done.has(_mbTxn(ym, cid, k, isCenter ? gk : '')));
+      const _isDone = _mbIsDone(done, ym, cid, isCenter ? gk : '');
       const _cRec = (cache.customers || []).find(c => c.id === cid) || {};
       rows.push({ cid, gk, isCenter, isSocial: gk === 'social', total, count: gAds.length, txn, done: _isDone, name: nameOf('customers', cid), email: (_cRec.email || '').trim() });
     }
@@ -328,6 +345,13 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
   const items = [{ details: header, amount: 1, price: 0 }, ...lines];
   const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
+  // בדיקה טרייה מול המסד ממש לפני ההפקה — גם בסוג מסמך אחר וגם ממכשיר אחר
+  const _doneNow = await _mbDoneSet(ym);
+  if (_mbIsDone(_doneNow, ym, cid, isCenter ? gk : '')) {
+    toast('ללקוח כבר הופקה חשבונית חודשית לחודש ' + ym, true);
+    monthlyBillingReview(ym);
+    return;
+  }
   document.getElementById('viewBack').classList.remove('open');
   await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
   // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד, גם בפיצול קטגוריות)

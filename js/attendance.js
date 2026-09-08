@@ -16,10 +16,14 @@ Pages.attendance = {
 render: async (el) => {
 const isAdmin = profile.role === 'admin';
 const month = _attMonth || thisMonth();
-const from = month + '-01', to = monthEnd(month);
+// גבולות החודש בשעון מקומי, מומרים ל-UTC לשאילתה — השוואה למחרוזת תאריך
+// גולמית פירשה את הגבולות כ-UTC וכניסות לילה זלגו לחודש השכן
+const [_ay, _am] = month.split('-').map(Number);
+const fromIso = new Date(_ay, _am - 1, 1).toISOString();
+const toIso = new Date(_ay, _am, 1).toISOString();
 
 const [rows, requests] = await Promise.all([
-run(db.from('attendance').select('*').gte('clock_in', from).lte('clock_in', to + 'T23:59:59').order('clock_in', { ascending: false })),
+run(db.from('attendance').select('*').gte('clock_in', fromIso).lt('clock_in', toIso).order('clock_in', { ascending: false })),
 run(db.from('attendance_requests').select('*').eq('status', 'pending').order('created_at')),
 ]);
 
@@ -31,7 +35,7 @@ const fmtH = h => { const m = Math.round(h * 60); return Math.floor(m / 60) + ':
 const byUser = {};
 rows.forEach(r => {
 const u = byUser[r.profile_id] = byUser[r.profile_id] || { days: new Set(), total: 0, open: false };
-u.days.add(String(r.clock_in).slice(0, 10));
+u.days.add(localDay(r.clock_in));
 u.total += hours(r);
 if (!r.clock_out) u.open = true;
 });
@@ -77,7 +81,7 @@ ${isAdmin ? `<div class="card card-pad" style="margin-bottom:16px">
 
 renderTable(document.getElementById('attTable'), rows, [
 ...(isAdmin ? [{ h: 'עובד', f: r => esc((cache.profiles.find(p => p.id === r.profile_id) || {}).full_name || '') }] : []),
-{ h: 'תאריך', f: r => heDate(String(r.clock_in).slice(0, 10)) },
+{ h: 'תאריך', f: r => heDate(localDay(r.clock_in)) },
 { h: 'כניסה', f: r => new Date(r.clock_in).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) },
 { h: 'יציאה', f: r => r.clock_out ? new Date(r.clock_out).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '<span class="pill green">פתוח</span>' },
 { h: 'שעות', f: r => r.clock_out ? fmtH(hours(r)) : '' },
@@ -113,7 +117,7 @@ openPage('attendance');
 async function attAdminFix(id) {
 const [r] = await run(db.from('attendance').select('*').eq('id', id).limit(1));
 if (!r) { toast('הרישום לא נמצא', true); return; }
-const workDate = String(r.clock_in).slice(0, 10);
+const workDate = localDay(r.clock_in);
 const t = v => v ? new Date(v).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
 const who = (cache.profiles.find(p => p.id === r.profile_id) || {}).full_name || '';
 openForm('תיקון שעות — ' + who, [
@@ -140,14 +144,15 @@ openPage('attendance');
 
 /* ייצוא חודשי להכנת שכר */
 async function attendanceExport(month) {
-const from = month + '-01', to = monthEnd(month);
-const rows = await run(db.from('attendance').select('*').gte('clock_in', from).lte('clock_in', to + 'T23:59:59').order('clock_in'));
+// אותם גבולות חודש מקומיים כמו במסך — שדוח השכר יתאים למה שרואים
+const [_ey, _em] = month.split('-').map(Number);
+const rows = await run(db.from('attendance').select('*').gte('clock_in', new Date(_ey, _em - 1, 1).toISOString()).lt('clock_in', new Date(_ey, _em, 1).toISOString()).order('clock_in'));
 exportCsv('נוכחות_' + month,
 ['עובד', 'תאריך', 'כניסה', 'יציאה', 'שעות', 'תיקון ידני'],
 rows.map(r => {
 const h = r.clock_out ? ((new Date(r.clock_out) - new Date(r.clock_in)) / 3600000).toFixed(2) : '';
 return [(cache.profiles.find(p => p.id === r.profile_id) || {}).full_name || '',
-String(r.clock_in).slice(0, 10),
+localDay(r.clock_in),
 new Date(r.clock_in).toLocaleTimeString('he-IL'),
 r.clock_out ? new Date(r.clock_out).toLocaleTimeString('he-IL') : '',
 h, r.manual ? 'כן' : ''];

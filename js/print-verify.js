@@ -260,9 +260,12 @@ async function _pvMove(adId) {
   const N = Number(to);
   if (!N || N < 1 || N > st.pageCount) { toast('מספר עמוד לא תקין', true); return; }
   const from = a.page_number;
-  await run(db.from('ads').update({ page_number: N, status: 'placed' }).eq('id', adId));
+  // מודעה שכבר פורסמה (וחויבה) נשארת published — הורדה ל-placed מחזירה
+  // אותה למאגר של publish_issue_ads ויוצרת חיוב שני על אותה מודעה
+  const patch = a.status === 'published' ? { page_number: N } : { page_number: N, status: 'placed' };
+  await run(db.from('ads').update(patch).eq('id', adId));
   st.changes.push({ t: 'moved', cust: nameOf('customers', a.customer_id), from, to: N });
-  a.page_number = N; a.status = 'placed';
+  a.page_number = N; if (patch.status) a.status = patch.status;
   toast('עודכן לעמוד ' + N);
   _pvRender();
 }
@@ -289,9 +292,11 @@ function _pvAddSearch(q) {
 async function _pvAddDo(adId) {
   const st = _pvState; if (!st) return; const a = st.ads.find(x => x.id === adId); if (!a) return;
   const from = a.page_number;
-  await run(db.from('ads').update({ page_number: st.page, status: 'placed' }).eq('id', adId));
+  // כמו ב-_pvMove: לא מורידים published ל-placed — מניעת חיוב כפול
+  const patch = a.status === 'published' ? { page_number: st.page } : { page_number: st.page, status: 'placed' };
+  await run(db.from('ads').update(patch).eq('id', adId));
   st.changes.push({ t: 'added', cust: nameOf('customers', a.customer_id), from, to: st.page });
-  a.page_number = st.page; a.status = 'placed';
+  a.page_number = st.page; if (patch.status) a.status = patch.status;
   toast('נוספה לעמוד ' + st.page);
   _pvRender();
 }
