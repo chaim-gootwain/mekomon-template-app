@@ -190,7 +190,8 @@ await run(db.from('payments').insert(rec));
 /* עדכון סטטוס החיוב לפי סך התשלומים — לוגיקה גלויה ופשוטה */
 const pays = await run(db.from('payments').select('amount').eq('charge_id', rec.charge_id));
 const paidSum = pays.reduce((s, p) => s + Number(p.amount), 0);
-const newStatus = paidSum >= Number(charge.amount) ? 'paid' : 'partial';
+// אפסילון נגד שברי אגורות של floating-point (427.55+427.55=855.0999…)
+const newStatus = paidSum >= Number(charge.amount) - 0.005 ? 'paid' : 'partial';
 await run(db.from('charges').update({ status: newStatus }).eq('id', rec.charge_id));
 
 toast(newStatus === 'paid' ? '✓ החיוב שולם במלואו' : 'נרשם תשלום חלקי');
@@ -226,7 +227,8 @@ el.innerHTML = `
 const [rows, payouts, charges] = await Promise.all([
 run(db.from('v_commissions').select('*').eq('month', month)),
 isAdmin ? run(db.from('commission_payouts').select('*').eq('month', month)) : [],
-run(db.from('charges').select('agent_id,amount,issued_date').gte('issued_date', month + '-01').lte('issued_date', monthEnd(month))),
+// חיובים מבוטלים/אבודים לא נספרים כמכירות — אחרת בונוס משולם על יעד שהושג בזכות חשבוניות שבוטלו
+run(db.from('charges').select('agent_id,amount,issued_date').gte('issued_date', month + '-01').lte('issued_date', monthEnd(month)).not('status', 'in', '("cancelled","lost")')),
 ]);
 
 /* סיכום לפי סוכן */
@@ -270,8 +272,14 @@ ${stat(money(total) || '₪0', 'סה"כ לתשלום', 'gold')}
 }
 };
 
+let _payoutBusy = false;
 async function payoutMark(agentId, month, amount) {
 if (!confirm(`לסמן שהעמלה שולמה לסוכן? (${money(amount)})\nהתשלום יירשם גם כהוצאה בתזרים.`)) return;
+if (_payoutBusy) return; // לחיצה כפולה = עמלה כפולה + הוצאה כפולה בתזרים
+_payoutBusy = true;
+try {
+const dup = await run(db.from('commission_payouts').select('id').eq('agent_id', agentId).eq('month', month).limit(1));
+if (dup && dup.length) { toast('העמלה לחודש זה כבר סומנה כשולמה', true); openPage('commissions'); return; }
 await run(db.from('commission_payouts').insert({ agent_id: agentId, month, amount, paid_at: today() }));
 /* רישום כהוצאה בתזרים */
 const cat = await run(db.from('expense_categories').select('id').eq('name', 'עמלות סוכנים').limit(1));
@@ -282,6 +290,7 @@ notes: 'עמלת ' + month,
 }));
 toast('נרשם התשלום + הוצאה בתזרים');
 openPage('commissions');
+} finally { _payoutBusy = false; }
 }
 
 /* ============================================================
@@ -297,7 +306,12 @@ async function paymentMarkBounced(paymentId, chargeId) {
   try {
     p = await run(db.from('payments').select('*').eq('id', paymentId).single());
   } catch (e) { toast('התשלום לא נמצא', true); return; }
-  if (p.bounced) { toast('התשלום כבר מסומן כחזר', true); return; }
+  if (p.bounced) {
+    // מסומן כבר? נוודא שתנועת הביטול באמת קיימת — אם ניסיון קודם נכשל
+    // באמצע, בלי ההשלמה הזו החוב נשאר "שולם" לנצח בלי דרך לתקן מה-UI
+    const rev = await run(db.from('payments').select('id').eq('customer_id', p.customer_id).ilike('notes', '%[bounce:' + paymentId + ']%').limit(1));
+    if (rev && rev.length) { toast('התשלום כבר מסומן כחזר', true); return; }
+  }
   if (!(Number(p.amount) > 0)) { toast('אי אפשר לסמן תנועת ביטול', true); return; }
   const custName = nameOf('customers', p.customer_id) || 'הלקוח';
   const reason = prompt(`סימון תשלום של ${money(p.amount)} מ-${custName} כצ'ק שחזר / הוראה שנדחתה.\nסיבה (לא חובה):`, '');
@@ -305,9 +319,11 @@ async function paymentMarkBounced(paymentId, chargeId) {
   const T = today();
 
   // 1) סימון התשלום המקורי — אם העמודות חסרות, עוצרים לפני שנוגעים בכסף
-  try {
-    await run(db.from('payments').update({ bounced: true, bounced_reason: reason || null, bounced_date: T }).eq('id', paymentId));
-  } catch (e) { toast('עמודות הסימון חסרות — יש להריץ את מיגרציית bounced_checks', true); return; }
+  if (!p.bounced) {
+    try {
+      await run(db.from('payments').update({ bounced: true, bounced_reason: reason || null, bounced_date: T }).eq('id', paymentId));
+    } catch (e) { toast('עמודות הסימון חסרות — יש להריץ את מיגרציית bounced_checks', true); return; }
+  }
 
   // 2) תנועת ביטול — מאזנת את התשלום כך שהיתרה חוזרת להיות פתוחה
   try {
@@ -316,7 +332,13 @@ async function paymentMarkBounced(paymentId, chargeId) {
       amount: -Number(p.amount), method: p.method, paid_date: T,
       notes: 'ביטול תשלום — צ\'ק/תשלום חזר' + (reason ? ' (' + reason + ')' : '') + ' [bounce:' + paymentId + ']'
     }));
-  } catch (e) { toast('יצירת תנועת הביטול נכשלה: ' + (e.message || e), true); return; }
+  } catch (e) {
+    // מבטלים את הסימון משלב 1 — אחרת התשלום נראה "טופל" בלי תנועת ביטול,
+    // היתרות ממשיכות לספור אותו כשולם ואי אפשר לנסות שוב
+    try { await run(db.from('payments').update({ bounced: false, bounced_reason: null, bounced_date: null }).eq('id', paymentId)); } catch (_) { }
+    toast('יצירת תנועת הביטול נכשלה: ' + (e.message || e) + ' — נסו שוב', true);
+    return;
+  }
 
   // 3) פתיחת החיוב מחדש לפי היתרה המעודכנת
   try {

@@ -189,7 +189,11 @@ async function wrSetStage(adId, stage, el) {
 async function wrInvoice(cid) { weeklyReviewClose(false); try { await invIssueOrder(cid); } catch (e) { } }
 
 /* סימון שולם: מעדכן את המודעות (deal_stage=paid + paid_date) וגם רושם תשלום בגבייה */
+let _wrPaying = false;
 async function wrMarkPaid() {
+  if (_wrPaying) return; // לחיצה כפולה = שתי שורות תשלום על אותו חיוב
+  _wrPaying = true;
+  try {
   const cur = _wrData[_wrIdx]; if (!cur) return;
   const date = document.getElementById('wrPayDate').value || today();
   const method = document.getElementById('wrPayMethod').value || 'transfer';
@@ -231,6 +235,7 @@ async function wrMarkPaid() {
   if (!_wrData.length) { _wrFinish(); return; }
   if (_wrIdx >= _wrData.length) _wrIdx = _wrData.length - 1;
   _wrRender();
+  } finally { _wrPaying = false; }
 }
 
 function _wrFinish() {

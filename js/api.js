@@ -210,7 +210,9 @@ document.getElementById('modalBack').classList.add('open');
 
 function closeForm() { document.getElementById('modalBack').classList.remove('open'); }
 
+let _formBusy = false; // לחיצה כפולה על "שמירה" = רשומה כפולה (תשלום/חיוב/הוצאה)
 async function submitForm() {
+if (_formBusy) return;
 const rec = {};
 for (const f of _formFields) {
 if (f.type === 'section' || f.type === 'html') continue;
@@ -225,7 +227,9 @@ if (typeof v === 'string') v = v.trim();
 if (f.required && (v === null || v === '')) { toast('נא למלא: ' + f.label, true); return; }
 rec[f.name] = v;
 }
+_formBusy = true;
 try { await _formSave(rec); closeForm(); } catch (e) { /* השגיאה כבר הוצגה ב-run */ }
+finally { _formBusy = false; }
 }
 
 /* ---------- 6. טבלת נתונים גנרית ----------

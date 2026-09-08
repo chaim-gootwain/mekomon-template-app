@@ -926,6 +926,13 @@ async function invChatNewDealApprove() {
         } catch (e) { icSayErr('לא הצלחתי ליצור גיליונות (' + esc(String(e && e.message || e)) + '). ' + (done.length ? 'הוקמו: ' + done.join(', ') : 'לא הוקם דבר') + '.'); if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והקם'; } return; }
       }
     }
+    // מחיר ליחידה לפני מע"מ — חוזים ומודעות נשמרים תמיד לפני מע"מ (חיוב
+    // הגיליונות מוסיף מע"מ בהפקה); בלי ההפחתה, עסקה שסוכמה "כולל מע"מ"
+    // מחויבת מע"מ פעמיים בכל פרסום
+    const _dealPct = invChatVatPct();
+    const unitNet = d.price_includes_vat
+      ? Math.round((Number(d.unit_price) || 0) / (1 + _dealPct / 100) * 100) / 100
+      : (Number(d.unit_price) || 0);
     // ----- שלב 2: חוזה (לא נוצר שוב אם כבר הוקם בניסיון קודם) -----
     const c = _customerRow(f.customer_id);
     let contractId = d._contractId || null;
@@ -933,7 +940,7 @@ async function invChatNewDealApprove() {
       const row = await run(db.from('contracts').insert({
         customer_id: f.customer_id, agent_id: (c && c.agent_id) || null,
         price_item_id: d.size_id, total_inserts: Number(d.count) || nums.length,
-        total_price: (Number(d.unit_price) || 0) * (Number(d.count) || nums.length),
+        total_price: unitNet * (Number(d.count) || nums.length),
         active: true, cadence: 'every', start_date: today(), created_by: profile.id,
         notes: 'נפתחה מצ׳אט החשבוניות',
       }).select().single(), 'שגיאה בפתיחת חוזה');
@@ -946,7 +953,7 @@ async function invChatNewDealApprove() {
       const missingSkipped = nums.length - targets.length; // גיליונות שלא קיימים בכלל
       let made = 0, failed = 0;
       for (const t of targets) {
-        const price = Number(d.unit_price) || 0;
+        const price = unitNet;
         const rec = {
           customer_id: f.customer_id, title: (c && c.name) || f.customer_name || 'לקוח',
           price_item_id: d.size_id, price: price,
