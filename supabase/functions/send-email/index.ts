@@ -93,7 +93,10 @@ Deno.serve(async (req)=>{
        denomailer מקודד נושא לא-ASCII ב-quoted-printable עם שבירות שורה בתוך
        ה-encoded-word — נושא ארוך שובר את בלוק הכותרות וכל המייל מגיע כטקסט גולמי.
        הרווח המוביל מונע מ-denomailer לזהות "=?" ולקודד שוב. */
-    const subjRaw = String(subject || "הודעה מ@@PAPER_NAME@@");
+    // הסרת CR/LF ותווי בקרה מהנושא — אלה ASCII ולכן בנתיב ה-ASCII למטה היו עוברים
+    // כמות שהם ומאפשרים הזרקת כותרות SMTP (Bcc / סיום DATA מוקדם). Base64 מנטרל
+    // אותם בנתיב הלא-ASCII, אבל כאן חובה לנקות במפורש.
+    const subjRaw = String(subject || "הודעה מ@@PAPER_NAME@@").replace(/[\x00-\x1f\x7f]+/g, " ").trim();
     const subjSafe = /[^\x00-\x7f]/.test(subjRaw)
       ? " =?UTF-8?B?" + btoa(String.fromCharCode.apply(null, Array.from(new TextEncoder().encode(subjRaw)))) + "?="
       : subjRaw;

@@ -112,7 +112,21 @@ Deno.serve(async (req)=>{
       ok: false,
       error: "issue-has-no-pdf"
     }, 400);
-    const { data: ads } = await admin.from("ads").select("customer_id").eq("issue_id", issue.id);
+    // תפיסה אטומית של הגיליון (רק בנתיב האוטומטי, לא בדיקה): מסמנים emailed_at
+    // מראש בתנאי שהוא עדיין null. ריצה מקבילה (cron + לחיצת אדמין) או ריצה שנייה
+    // אחרי קריסה תקבל 0 שורות ותצא — במקום לשלוח שוב לכל הרשימה.
+    if (!testTo && !issueIdIn) {
+      const { data: claimed } = await admin.from("issues").update({
+        emailed_at: new Date().toISOString()
+      }).eq("id", issue.id).is("emailed_at", null).select("id");
+      if (!claimed || !claimed.length) return json({
+        ok: true,
+        sent: 0,
+        note: "already-claimed"
+      });
+    }
+    // סינון מבוטלות/נדחות — לקוח שמודעתו בוטלה לא אמור לקבל את הגיליון (כמו ב-send-clip)
+    const { data: ads } = await admin.from("ads").select("customer_id").eq("issue_id", issue.id).not("status", "in", "(cancelled,rejected)");
     const custIds = [
       ...new Set((ads || []).map((a)=>a.customer_id).filter(Boolean))
     ];

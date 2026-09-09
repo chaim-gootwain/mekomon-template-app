@@ -247,6 +247,28 @@ function dealPlanHtml(ct) {
     </tbody></table></div>`;
 }
 
+/* רישום תשלום על תשלום #seq — אטומי דרך RPC (נעילת שורה במסד), עם נפילה
+   חיננית לקריאה-שינוי-כתיבה אם המיגרציה עוד לא רצה במופע. מחזיר true בהצלחה. */
+async function _dealApplyPayment(contractId, seq, amt) {
+  try {
+    const { error } = await db.rpc('record_contract_payment', { p_contract_id: contractId, p_seq: seq, p_amount: amt });
+    if (!error) return true;
+    // הפונקציה לא קיימת עדיין (המיגרציה לא רצה) — נופלים לנתיב הישן
+    const _missing = error.code === 'PGRST202' || error.code === '42883' || /record_contract_payment|function.*does not exist|schema cache/i.test(error.message || '');
+    if (!_missing) { toast('שגיאה: ' + error.message, true); return false; }
+  } catch (e) { /* נופלים לנתיב הישן */ }
+  // fallback (לא אטומי): קריאה טרייה ואז כתיבה של כל המערך
+  const ct2 = await run(db.from('contracts').select('payment_plan').eq('id', contractId).single());
+  const plan2 = Array.isArray(ct2.payment_plan) ? ct2.payment_plan : [];
+  const row2 = plan2.find(p => p.seq === seq);
+  if (!row2) { toast('שורה לא נמצאה', true); return false; }
+  row2.paid = Number(row2.paid || 0) + amt;
+  row2.status = row2.paid >= Number(row2.amount) ? 'paid' : 'partial';
+  const { error } = await db.from('contracts').update({ payment_plan: plan2 }).eq('id', contractId);
+  if (error) { toast('שגיאה: ' + error.message, true); return false; }
+  return true;
+}
+
 async function dealPay(contractId, seq) {
   const ct = await run(db.from('contracts').select('*').eq('id', contractId).single());
   const plan = Array.isArray(ct.payment_plan) ? ct.payment_plan : [];
@@ -257,18 +279,10 @@ async function dealPay(contractId, seq) {
   if (raw === null) return;
   const amt = Number(raw);
   if (!isFinite(amt) || amt <= 0) { toast('סכום לא תקין', true); return; }
-  // קריאה טרייה אחרי ה-prompt (שיכול להישאר פתוח דקות) — כתיבת ה-plan
-  // הישן הייתה מוחקת תשלום שנרשם בינתיים ממכשיר/משתמש אחר
-  const ct2 = await run(db.from('contracts').select('payment_plan').eq('id', contractId).single());
-  const plan2 = Array.isArray(ct2.payment_plan) ? ct2.payment_plan : [];
-  const row2 = plan2.find(p => p.seq === seq);
-  if (!row2) { toast('שורה לא נמצאה', true); return; }
-  row2.paid = Number(row2.paid || 0) + amt;
-  row2.status = row2.paid >= Number(row2.amount) ? 'paid' : 'partial';
-  const { error } = await db.from('contracts').update({ payment_plan: plan2 }).eq('id', contractId);
-  if (error) { toast('שגיאה: ' + error.message, true); return; }
+  // רישום אטומי (נגד דריסת עדכון מקביל אחרי prompt שנשאר פתוח דקות)
+  if (!await _dealApplyPayment(contractId, seq, amt)) return;
   await addInteraction('customer', ct.customer_id, `תשלום ${money(amt)} לעסקה (תשלום #${seq})`);
-  toast(row2.status === 'paid' ? '✓ התשלום הושלם' : 'נרשם תשלום חלקי');
+  toast('✓ נרשם תשלום ' + money(amt));
   openCustomerCard(ct.customer_id);
 }
 
@@ -302,15 +316,8 @@ async function dealPayInvoice(contractId, seq) {
   if (raw === null) return;
   const amt = Number(raw);
   if (!isFinite(amt) || amt <= 0) { toast('סכום לא תקין', true); return; }
-  // כמו ב-dealPay: קריאה טרייה אחרי ה-prompt נגד דריסת עדכון מקביל
-  const ct2 = await run(db.from('contracts').select('payment_plan').eq('id', contractId).single());
-  const plan2 = Array.isArray(ct2.payment_plan) ? ct2.payment_plan : [];
-  const row2 = plan2.find(p => p.seq === seq);
-  if (!row2) { toast('שורה לא נמצאה', true); return; }
-  row2.paid = Number(row2.paid || 0) + amt;
-  row2.status = row2.paid >= Number(row2.amount) ? 'paid' : 'partial';
-  const { error } = await db.from('contracts').update({ payment_plan: plan2 }).eq('id', contractId);
-  if (error) { toast('שגיאה: ' + error.message, true); return; }
+  // רישום אטומי (כמו ב-dealPay) נגד דריסת עדכון מקביל
+  if (!await _dealApplyPayment(contractId, seq, amt)) return;
   try { await addInteraction('customer', ct.customer_id, `תשלום ${money(amt)} לחוזה (תשלום #${seq}) — הופקה חשבונית מס קבלה`); } catch (e) { }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === ct.customer_id))
     || (cache.customers || []).find(x => x.id === ct.customer_id)
