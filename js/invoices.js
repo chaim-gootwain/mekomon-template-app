@@ -204,6 +204,9 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
     vatInc: (opts.vatInc != null ? opts.vatInc : (isPayment ? true : false)), method: 'cash', date: '',
     docDate: today(),
     openCharges: [],
+    // transaction_id יציב לכל פתיחת מודאל: ניסיון חוזר מאותו מודאל שולח את אותו
+    // מזהה, ו-EZcount + ezcount-doc מזהים כפילות במקום להפיק מסמך מס שני
+    txn: 'emu-inv-' + c.id + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
   };
   // תשלום ללא שיוך למסמך-אב — טוענים את החוב הפתוח כדי להציג למה התשלום ייזקף
   if (isPayment && !opts.parentUuid) {
@@ -372,7 +375,7 @@ async function invSubmit() {
     });
   if (!items.length) { toast('הוסף לפחות שורה אחת עם תיאור ומחיר', true); return; }
   const cid = s.cid;
-  const body = { customer_id: cid, doc_kind: s.kind, items, vat_included: !!s.vatInc };
+  const body = { customer_id: cid, doc_kind: s.kind, items, vat_included: !!s.vatInc, transaction_id: s.txn ? s.txn + '-' + s.kind : undefined };
   // חשבונית על שם הסוכנות (פיצ'ר #7) — דריסת שם/ח.פ במסמך בלבד; החוב נשאר על הלקוח
   if (s.agency && s.billTo === 'agency') {
     body.bill_to_name = s.agency.invoice_name || s.agency.name;
@@ -445,6 +448,8 @@ async function invCredit(docId) {
   if (!confirm('לבטל את "' + (DOC_KIND_HE[d.doc_kind] || d.doc_kind) + ' ' + num + '" ע"י הפקת חשבונית זיכוי?')) return;
   const parentUuid = (d.raw && d.raw.doc_uuid) || d.doc_uuid || null;
   const body = {
+    // transaction_id נגזר מהמסמך המקורי — זיכוי שני לאותו מסמך מזוהה ככפילות
+    transaction_id: 'emu-credit-' + (num || d.id),
     customer_id: d.customer_id, doc_kind: 'credit', credit_ref: num || null, vat_included: true,
     items: [{ details: 'ביטול / זיכוי — ' + (DOC_KIND_HE[d.doc_kind] || '') + ' ' + num, amount: 1, price: (Number(d.total) || Number(d.raw && d.raw.calculatedData && d.raw.calculatedData.price_total) || 0) }],
     comment: 'זיכוי למסמך ' + num,

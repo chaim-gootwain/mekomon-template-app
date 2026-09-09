@@ -111,6 +111,25 @@ Deno.serve(async (req)=>{
       paymentArr.push(p);
     }
     const txn = txnIn || "emu-" + customer_id + "-" + (charge_id || "x") + "-" + doc_kind + "-" + Date.now();
+    // Idempotency: מסמך שכבר הופק/ממתין עם אותו transaction_id — מחזירים אותו
+    // במקום לקרוא ל-EZcount שוב. ניסיון חוזר אחרי תשובה שאבדה ברשת היה מפיק
+    // חשבונית מס כפולה שתיקונה מחייב זיכוי.
+    if (txnIn) {
+      const { data: existing } = await admin.from("documents").select("*").eq("transaction_id", txn).in("status", [
+        "issued",
+        "pending_allocation"
+      ]).order("id", {
+        ascending: false
+      }).limit(1);
+      const ex = existing && existing[0];
+      if (ex) return json({
+        ok: ex.status === "issued",
+        status: ex.status,
+        document: ex,
+        duplicate: true,
+        error: ex.status === "issued" ? null : ex.error || null
+      });
+    }
     const payload = {
       api_key: apiKey,
       developer_email: devEmail,
@@ -198,7 +217,17 @@ Deno.serve(async (req)=>{
       docRow.status = "failed";
       docRow.error = raw?.errMsg || "EZcount error " + (raw?.errNum ?? resp.status);
     }
-    const { data: inserted } = await admin.from("documents").insert(docRow).select("*").single();
+    let { data: inserted, error: insErr } = await admin.from("documents").insert(docRow).select("*").single();
+    if (!inserted && insErr) {
+      // אינדקס ייחודי על transaction_id: בקשה מקבילה כבר רשמה מסמך לאותו מזהה — מחזירים אותו
+      const { data: ex2 } = await admin.from("documents").select("*").eq("transaction_id", txn).in("status", [
+        "issued",
+        "pending_allocation"
+      ]).order("id", {
+        ascending: false
+      }).limit(1);
+      if (ex2 && ex2[0]) inserted = ex2[0];
+    }
     if (success) {
       try {
         await admin.from("interactions").insert({

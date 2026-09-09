@@ -543,11 +543,20 @@ function invChatEzcountBody(f) {
   }
   return body;
 }
+/* transaction_id יציב לבקשת הצ'אט הנוכחית — "נסה שוב" אחרי כשל רשת שולח את
+   אותו מזהה, ו-EZcount + הבדיקה ב-ezcount-doc מחזירים את המסמך הקיים במקום
+   להפיק חשבונית מס שנייה */
+function _icTxn(kindKey) {
+  if (!_icState) return undefined;
+  if (!_icState.txnBase) _icState.txnBase = _icState.reqId ? 'r' + _icState.reqId : 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  return 'emu-chat-' + _icState.txnBase + '-' + kindKey;
+}
 async function invChatApprove() {
   const f = _icState.fields;
   if (!f.line_items.some(l => Number(l.unit_price) > 0)) { toast('חסר מחיר — השלם לפני הפקה', true); return; }
   if (!f.customer_id && !(f.customer_name && f.customer_name.trim())) { toast('חסר לקוח', true); return; }
   const body = invChatEzcountBody(f);
+  body.transaction_id = _icTxn(body.doc_kind);
   if (body.payment && !invChatApplyCheck(f, body.payment)) return;
   const btn = document.getElementById('icApprove');
   if (btn) { btn.disabled = true; btn.textContent = 'מפיק...'; }
@@ -730,6 +739,8 @@ async function invChatPayApprove() {
     pay_date: dstr,
     payment,
     parent: p.uuid,
+    // מזהה יציב הכולל את מסמך המקור — מס-קבלה כפולה לאותו חשבון עסקה נחסמת
+    transaction_id: _icTxn('pay-' + (p.docNumber || p.uuid || '')),
   };
   const r = await invChatFn('ezcount-doc', body);
   icSetBusy(false);
@@ -986,6 +997,8 @@ async function invChatNewDealApprove() {
         items: [{ details: label, amount: Number(d.count) || nums.length, price: Number(d.unit_price) || 0 }],
         vat_included: !!d.price_includes_vat, doc_date: today(),
         comment: 'גיליון ' + (nums[0] + (nums.length > 1 ? '-' + nums[nums.length - 1] : '')),
+        // "נסה שוב חשבון עסקה" מאותה בקשה שולח את אותו מזהה — לא יופק מסמך כפול
+        transaction_id: _icTxn('proforma'),
       };
       const r = await invChatFn('ezcount-doc', body);
       const doc = r.data && r.data.document;
