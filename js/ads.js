@@ -226,7 +226,9 @@ async function adRoute(id, action, askNote = false) {
 let note = '';
 if (askNote) {
 const labels = { to_graphics: 'הנחיה לגרפיקאית:', reject: 'סיבת הדחייה:', cancel: 'סיבת הביטול:' };
-note = prompt(labels[action] || 'הערה:') || '';
+const _r = prompt(labels[action] || 'הערה:');
+if (_r === null) return; // ביטול הפרומפט (Escape/Cancel) — לא מבצעים את הפעולה כלל
+note = _r || '';
 if (['reject', 'cancel'].includes(action) && !note) return; // דחייה/ביטול מחייבים סיבה
 }
 try {
@@ -344,7 +346,9 @@ wrap.appendChild(div);
 };
 
 async function committeeDecide(id, approve) {
-const note = prompt(approve ? 'הערה (לא חובה):' : 'סיבת הדחייה (חובה):') || '';
+const _r = prompt(approve ? 'הערה (לא חובה):' : 'סיבת הדחייה (חובה):');
+if (_r === null) return; // ביטול הפרומפט — לא מאשרים/דוחים בטעות
+const note = _r || '';
 if (!approve && !note) return;
 await run(db.rpc('route_ad', { p_ad_id: id, p_action: approve ? 'committee_approve' : 'committee_reject', p_note: note }));
 toast(approve ? 'אושר' : 'נדחה');
