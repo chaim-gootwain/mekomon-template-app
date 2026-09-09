@@ -31,13 +31,18 @@ function _icTagIn(notes, tag) {
 }
 function _icHasDocTag(notes, ref) { return _icTagIn(notes, '#doc:' + ref); }
 
+/* שיעור המע"מ מההגדרות (אחוזים) — ברירת מחדל 18. מסמכי הזמנה נשמרים עם
+   total=null, כך שהחישוב מהשורות הוא הנתיב הראשי (לא גיבוי); מע"מ מקובע 18%
+   כאן היה מנפח את החוב בכרטסת לעומת המסמך במופע עם שיעור מע"מ אחר. */
+function _icVatRate() { const v = Number((cache.settings || {}).vat_rate); return Number.isFinite(v) && v > 0 ? v : 18; }
+
 /* סכום המסמך כולל מע"מ (מעדיפים את total מהמסמך; אחרת מחשבים מהשורות) */
 function _icDocTotal(doc, body) {
   const t = Number(doc && doc.total);
   if (Number.isFinite(t) && t > 0) return t;
   const items = (body && body.items) || [];
   let sum = 0; items.forEach(it => sum += (Number(it.amount) || 1) * (Number(it.price) || 0));
-  if (body && !body.vat_included) sum = sum * 1.18; // גיבוי בלבד אם אין total מהמסמך (מע"מ 18%)
+  if (body && !body.vat_included) sum = sum * (1 + _icVatRate() / 100); // מע"מ לפי ההגדרות
   return Math.round(sum * 100) / 100;
 }
 

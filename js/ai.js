@@ -104,13 +104,18 @@ function aiPanelHtml(list) {
   }).join('');
 }
 
-/* מיפוי שדה-הצעה -> עמודת ליד + המרה מתאימה */
+/* מיפוי שדה-הצעה -> עמודת ליד + המרה מתאימה.
+   whitelist מחייב: field מגיע מ-JSON שהמודל הפיק (call_analysis.suggestions),
+   וה-UI מציג רק label — בלי הגבלה, תמליל שיחה מוזרק יכול להפיק הצעה שדורסת
+   כל עמודה בליד (phone/status/agent_id). מתירים רק את השדות ש-buildSuggestions
+   באמת מייצר. */
+const AI_ALLOWED_FIELDS = ['temperature', 'est_value', 'objection'];
 function aiApplyToLead(leadId, field, value) {
+  if (!AI_ALLOWED_FIELDS.includes(field)) return Promise.resolve({ data: null, error: null });
   const upd = {};
   if (field === 'temperature') upd.temperature = value === 'חם' ? 'hot' : value === 'קר' ? 'cold' : 'warm';
   else if (field === 'est_value') upd.est_value = Number(String(value).replace(/\D/g, '')) || null;
   else if (field === 'objection') upd.objection = value;
-  else upd[field] = value;
   return db.from('leads').update(upd).eq('id', leadId);
 }
 
