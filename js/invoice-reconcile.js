@@ -11,7 +11,6 @@
 
 let _invRecItems = null;        // הפריטים הממתינים לטיפול
 const _invRecSkip = new Set();  // דילוגים לשיחה הנוכחית (docId)
-const _invRecBusy = new Set();  // docId בטיפול כרגע — מונע לחיצה כפולה = חוב כפול
 
 /* טעינת החשבוניות שאין להן חוב + סכום מ-raw */
 async function _invRecLoad() {
@@ -82,17 +81,12 @@ function invRecSkip(docId) {
 }
 
 async function invRecMark(docId, mode) {
-  if (_invRecBusy.has(docId)) return; // לחיצה כפולה — כבר בטיפול
   const it = (_invRecItems || []).find(i => i.docId === docId);
   if (!it) return;
-  _invRecBusy.add(docId);
   try {
-    // התאמת תג מדויקת (כמו ב-_invRecLoad): '#doc:123' לא ייחשב קיים בגלל '#doc:1234'.
-    // ilike גולמי היה מזהה התנגשות קידומת ומשמיט חוב אמיתי לצמיתות.
-    const dupC = (await db.from('charges').select('id,notes,invoice_number').eq('customer_id', it.cust).ilike('notes', '%#doc:' + it.num + '%').limit(20)).data;
-    const dupP = (await db.from('payments').select('id,notes').eq('customer_id', it.cust).ilike('notes', '%#doc:' + it.num + '%').limit(20)).data;
-    const hasDup = (dupC || []).some(r => _icHasDocTag(r.notes, it.num)) || (dupP || []).some(r => _icHasDocTag(r.notes, it.num));
-    if (hasDup) {
+    const dupC = (await db.from('charges').select('id').eq('customer_id', it.cust).ilike('notes', '%#doc:' + it.num + '%').limit(1)).data;
+    const dupP = (await db.from('payments').select('id').eq('customer_id', it.cust).ilike('notes', '%#doc:' + it.num + '%').limit(1)).data;
+    if ((dupC && dupC.length) || (dupP && dupP.length)) {
       toast('כבר קיים רישום לחשבונית ' + it.num);
     } else {
       const cust = (cache.customers || []).find(x => x.id === it.cust) || {};
@@ -123,7 +117,6 @@ async function invRecMark(docId, mode) {
       toast(mode === 'paid' ? ('✓ ' + it.name + ' — סומן כשולם') : ('✓ ' + it.name + ' — נוצר חוב פתוח'));
     }
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); return; }
-  finally { _invRecBusy.delete(docId); }
   _invRecItems = (_invRecItems || []).filter(i => i.docId !== docId);
   _invRecRender();
 }
