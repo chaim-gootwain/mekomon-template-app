@@ -194,7 +194,7 @@ const txt = 'שלום, מצורפת הצעת מחיר מ' + paper + ' לצפיי
 let wa = '';
 if (q.recipient_phone) { let ph = String(q.recipient_phone).replace(/\D/g, ''); if (ph.startsWith('0')) ph = '972' + ph.slice(1); wa = `<a class="btn" style="background:#25d366;color:#fff;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(txt)}">💬 וואטסאפ</a>`; }
 let mail = '';
-if (q.recipient_email) { mail = `<a class="btn btn-ghost" style="text-decoration:none" href="mailto:${esc(q.recipient_email)}?subject=${encodeURIComponent('הצעת מחיר לחתימה — ' + paper)}&body=${encodeURIComponent(txt)}">✉️ מייל</a>`; }
+if (q.recipient_email) { mail = `<a class="btn btn-ghost" style="text-decoration:none" href="mailto:${q.recipient_email}?subject=${encodeURIComponent('הצעת מחיר לחתימה — ' + paper)}&body=${encodeURIComponent(txt)}">✉️ מייל</a>`; }
 document.getElementById('qShareOv')?.remove();
 const ov = document.createElement('div');
 ov.id = 'qShareOv';
