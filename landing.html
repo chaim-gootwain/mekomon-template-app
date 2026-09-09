@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a68">
+  <title>פרסום ב@@PAPER_NAME@@ | העסק שלך. בכל בית בעמנואל.</title>
+  <meta name="description" content="פרסום מקומי שמגיע מדי שבוע לכל בתי עמנואל, בדפוס ובדיגיטל.">
+  <script>document.documentElement.classList.add('js')</script>
+  <style>
+    :root {
+      --ink: #10224d;
+      --blue: #163b91;
+      --blue-deep: #0c245e;
+      --red: #d52b3f;
+      --paper: #fffdf9;
+      --mist: #f2f5fb;
+      --line: #dfe6f3;
+      --muted: #5d6982;
+      --shadow: 0 24px 70px rgba(16, 34, 77, .14);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Segoe UI", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .scroll-progress { position: fixed; z-index: 100; top: 0; right: 0; width: 100%; height: 4px; pointer-events: none; }
+    .scroll-progress span { display: block; width: 100%; height: 100%; background: repeating-linear-gradient(90deg, var(--red) 0 38px, #ff8b98 38px 42px, var(--blue) 42px 84px, #8ca5e3 84px 88px); transform: scaleX(0); transform-origin: right center; box-shadow: 0 1px 9px rgba(213,43,63,.45); }
+
+    .chapter-rail { position: fixed; z-index: 55; left: 23px; top: 50%; translate: 0 -50%; display: flex; flex-direction: column; align-items: center; gap: 11px; color: var(--blue); pointer-events: none; }
+    .chapter-count { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 11px; font-weight: 950; }
+    .chapter-count i { display: block; width: 1px; height: 38px; background: linear-gradient(var(--red), var(--blue)); }
+    .chapter-name { min-height: 95px; padding: 10px 7px; border: 1px solid rgba(22,59,145,.14); border-radius: 999px; background: rgba(255,255,255,.82); writing-mode: vertical-rl; rotate: 180deg; backdrop-filter: blur(10px); font-size: 11px; font-weight: 900; letter-spacing: .06em; transition: opacity .25s ease, translate .25s ease; }
+    .chapter-name.switching { opacity: 0; translate: 0 7px; }
+
+    .chapter-wipe { position: fixed; z-index: 95; inset: 0; overflow: hidden; pointer-events: none; visibility: hidden; }
+    .chapter-wipe.playing { visibility: visible; }
+    .wipe-sheet { position: absolute; inset: -8%; background: linear-gradient(135deg, #0b225b 0%, #173f99 62%, #244fb0 100%); transform: translateX(115%) skewX(-7deg); }
+    .wipe-ink { position: absolute; z-index: 2; top: 0; bottom: 0; width: 22px; right: -30px; background: var(--red); box-shadow: 0 0 45px rgba(213,43,63,.7); }
+    .wipe-label { position: absolute; z-index: 3; inset: 0; display: grid; place-content: center; gap: 6px; color: #fff; text-align: center; opacity: 0; transform: translateY(20px); }
+    .wipe-label small { color: #ff9daa; font-size: 14px; font-weight: 950; letter-spacing: .16em; }
+    .wipe-label strong { font-size: clamp(36px, 6vw, 74px); line-height: 1; letter-spacing: -.055em; }
+    .chapter-wipe.playing .wipe-sheet { animation: sheet-wipe 1.12s cubic-bezier(.7,0,.2,1) both; }
+    .chapter-wipe.playing .wipe-ink { animation: ink-wipe 1.12s cubic-bezier(.7,0,.2,1) both; }
+    .chapter-wipe.playing .wipe-label { animation: label-wipe 1.12s ease both; }
+
+    a { color: inherit; }
+    .wrap { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+
+    .site-header {
+      position: absolute;
+      inset: 0 0 auto;
+      z-index: 10;
+      padding: 24px 0;
+    }
+
+    .header-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { display: inline-flex; align-items: center; text-decoration: none; }
+    .brand-logo { display: block; width: 224px; height: 62px; object-fit: cover; object-position: center; }
+    .header-link { font-size: 15px; font-weight: 800; text-decoration: none; padding: 12px 18px; border: 1px solid rgba(16,34,77,.16); border-radius: 999px; background: rgba(255,255,255,.72); backdrop-filter: blur(10px); }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 790px;
+      display: grid;
+      align-items: center;
+      padding: 130px 0 86px;
+      background:
+        radial-gradient(circle at 12% 28%, rgba(213,43,63,.13), transparent 27%),
+        radial-gradient(circle at 72% 8%, rgba(43,86,177,.13), transparent 30%),
+        linear-gradient(180deg, #f8faff 0%, #fffdf9 72%);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 440px;
+      height: 440px;
+      left: -210px;
+      bottom: -250px;
+      border: 90px solid rgba(22,59,145,.06);
+      border-radius: 50%;
+    }
+
+    .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1.12fr .88fr; align-items: center; gap: 72px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--blue); font-size: 15px; font-weight: 900; letter-spacing: .03em; margin-bottom: 22px; }
+    .eyebrow::before { content: ""; width: 34px; height: 4px; border-radius: 99px; background: var(--red); }
+
+    h1 { margin: 0; max-width: 720px; font-size: clamp(54px, 6.4vw, 92px); line-height: .98; letter-spacing: -.065em; font-weight: 950; }
+    .hero-line { display: block; color: var(--ink); }
+    .hero-line-blue { color: var(--blue); }
+    .hero-copy { max-width: 690px; margin: 28px 0 0; color: var(--muted); font-size: clamp(18px, 2vw, 23px); line-height: 1.65; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 34px; }
+    .button { display: inline-flex; justify-content: center; align-items: center; min-height: 56px; padding: 0 27px; border-radius: 15px; font-size: 17px; font-weight: 900; text-decoration: none; transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
+    .button:hover { transform: translateY(-2px); }
+    .button-primary { color: #fff; background: var(--red); box-shadow: 0 14px 32px rgba(213,43,63,.25); }
+    .button-secondary { color: var(--blue); background: #fff; border: 1px solid var(--line); }
+    .micro-proof { display: flex; flex-wrap: wrap; gap: 19px; margin: 28px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 14px; font-weight: 700; }
+    .micro-proof li::before { content: "✓"; color: var(--red); margin-left: 7px; font-weight: 950; }
+
+    .proof-card {
+      position: relative;
+      min-height: 448px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 48px;
+      color: #fff;
+      background: linear-gradient(145deg, var(--blue) 0%, var(--blue-deep) 100%);
+      border-radius: 38px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .proof-card::before { content: "”"; position: absolute; top: -48px; left: 16px; font-family: Georgia, serif; font-size: 240px; line-height: 1; color: rgba(255,255,255,.075); }
+    .proof-kicker { position: relative; z-index: 1; color: #dbe5ff; font-size: 15px; font-weight: 800; }
+    .proof-number { position: relative; z-index: 1; margin: 12px 0 0; font-size: clamp(74px, 8vw, 116px); line-height: .9; font-weight: 950; letter-spacing: -.06em; }
+    .proof-label { position: relative; z-index: 1; margin-top: 15px; font-size: 25px; line-height: 1.28; font-weight: 900; }
+    .proof-rule { position: relative; z-index: 1; height: 1px; margin: 28px 0 24px; background: rgba(255,255,255,.22); }
+    .proof-quote { position: relative; z-index: 1; margin: 0; color: #fff; font-size: 18px; line-height: 1.6; font-weight: 650; }
+    .proof-quote strong { color: #ffb5be; }
+
+    .stats { position: relative; z-index: 2; margin-top: -58px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border: 1px solid var(--line); border-radius: 26px; box-shadow: 0 20px 60px rgba(16,34,77,.11); overflow: hidden; }
+    .stat { padding: 28px 24px; text-align: center; }
+    .stat + .stat { border-right: 1px solid var(--line); }
+    .stat strong { display: block; color: var(--blue); font-size: 29px; letter-spacing: -.04em; }
+    .stat span { display: block; margin-top: 6px; color: var(--muted); font-size: 14px; font-weight: 700; }
+
+    section.content-section { position: relative; isolation: isolate; padding: 118px 0; overflow-x: hidden; overflow-x: clip; }
+    section.content-section[data-chapter]::after { content: attr(data-chapter-index); position: absolute; z-index: -1; left: clamp(18px, 4vw, 70px); top: 34px; color: var(--blue); opacity: 0; font-size: clamp(120px, 17vw, 250px); line-height: .8; font-weight: 950; letter-spacing: -.09em; transform: translateX(-90px) rotate(-5deg); filter: blur(8px); transition: opacity .9s ease .18s, transform 1.15s cubic-bezier(.16,.8,.22,1) .18s, filter .8s ease .18s; pointer-events: none; }
+    section.content-section[data-chapter].visible::after { opacity: .035; transform: translateX(0) rotate(0); filter: blur(0); }
+    .section-kicker { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; color: var(--red); font-size: 14px; font-weight: 950; letter-spacing: .04em; }
+    .section-kicker::before { content: ""; width: 25px; height: 3px; border-radius: 99px; background: currentColor; }
+    h2 { margin: 0; font-size: clamp(38px, 5vw, 65px); line-height: 1.05; letter-spacing: -.055em; font-weight: 950; }
+    .section-intro { max-width: 680px; margin: 22px 0 0; color: var(--muted); font-size: 19px; line-height: 1.75; }
+
+    .pain { margin-top: 40px; }
+    .pain-shell { position: relative; display: grid; grid-template-columns: 1fr .88fr; gap: 70px; align-items: center; padding: 76px; color: #fff; background: var(--ink); border-radius: 40px; overflow: hidden; }
+    .pain-shell::after { content: ""; position: absolute; left: -120px; bottom: -150px; width: 340px; height: 340px; border-radius: 50%; background: rgba(213,43,63,.2); filter: blur(4px); }
+    .pain h2 { max-width: 680px; }
+    .pain p { color: #cbd5ed; }
+    .pain-list { position: relative; z-index: 1; display: grid; gap: 12px; }
+    .pain-item { display: flex; align-items: center; gap: 14px; padding: 17px 18px; border: 1px solid rgba(255,255,255,.12); border-radius: 16px; background: rgba(255,255,255,.055); font-size: 16px; font-weight: 750; }
+    .pain-x { display: inline-grid; place-items: center; flex: 0 0 30px; height: 30px; border-radius: 50%; color: #fff; background: var(--red); font-size: 13px; font-weight: 950; }
+
+    .why { background: var(--mist); }
+    .section-heading-row { display: flex; justify-content: space-between; align-items: end; gap: 40px; }
+    .section-heading-row .section-intro { max-width: 420px; margin: 0; }
+    .reason-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 50px; }
+    .reason-card { min-height: 320px; display: flex; flex-direction: column; padding: 34px; background: #fff; border: 1px solid var(--line); border-radius: 25px; box-shadow: 0 12px 34px rgba(16,34,77,.055); }
+    .reason-no { color: var(--red); font-size: 13px; font-weight: 950; letter-spacing: .12em; }
+    .reason-card h3 { margin: auto 0 13px; font-size: 27px; letter-spacing: -.035em; }
+    .reason-card p { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.7; }
+
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); align-items: stretch; margin-top: 20px; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; background: #fff; }
+    .flow-step { position: relative; padding: 24px 20px; color: var(--blue); text-align: center; font-weight: 900; }
+    .flow-step + .flow-step { border-right: 1px solid var(--line); }
+    .flow-step:not(:last-child)::after { content: "←"; position: absolute; left: -12px; top: 50%; translate: 0 -50%; display: grid; place-items: center; width: 24px; height: 24px; color: var(--red); background: #fff; font-size: 14px; z-index: 1; }
+
+    .stories { position: relative; }
+    .stories::before { content: ""; position: absolute; right: 0; top: 130px; width: 8px; height: 190px; background: var(--red); border-radius: 5px 0 0 5px; }
+    .story-grid { display: grid; grid-template-columns: 1.1fr .9fr .9fr; gap: 18px; margin-top: 48px; }
+    .story { position: relative; display: flex; flex-direction: column; min-height: 310px; padding: 34px; border-radius: 25px; border: 1px solid var(--line); background: #fff; }
+    .story.featured { color: #fff; background: linear-gradient(145deg, #173e96, #0c245e); border: 0; }
+    .story-mark { color: var(--red); font-family: Georgia, serif; font-size: 64px; line-height: .65; }
+    .featured .story-mark { color: #ff8290; }
+    .story blockquote { margin: auto 0 24px; font-size: 20px; line-height: 1.65; font-weight: 770; }
+    .story cite { color: var(--muted); font-size: 14px; font-style: normal; font-weight: 800; }
+    .featured cite { color: #cbd5ed; }
+
+    .offers { background: #fff8f6; }
+    .offer-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 48px; counter-reset: offers; }
+    .offer { counter-increment: offers; padding: 30px 25px; background: #fff; border: 1px solid #f1dce0; border-radius: 22px; }
+    .offer::before { content: "0" counter(offers); display: block; margin-bottom: 58px; color: var(--red); font-size: 13px; font-weight: 950; }
+    .offer h3 { margin: 0 0 10px; color: var(--blue); font-size: 22px; }
+    .offer p { margin: 0; color: var(--muted); line-height: 1.65; }
+    .offer-note { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 22px; padding: 19px 22px; color: #fff; background: var(--red); border-radius: 16px; font-weight: 850; }
+    .offer-note strong { font-size: 22px; }
+
+    .sample-shell { display: grid; grid-template-columns: .82fr 1.18fr; align-items: center; gap: 62px; padding: 66px; border: 1px solid var(--line); border-radius: 36px; background: linear-gradient(135deg, #f3f6fd, #fff); }
+    .issue-card { position: relative; min-height: 365px; padding: 36px; color: #fff; background: var(--blue); border-radius: 8px 30px 30px 8px; box-shadow: -20px 22px 0 #dce4f7, var(--shadow); overflow: hidden; }
+    .issue-card::before { content: "@@PAPER_NAME@@"; position: absolute; left: -20px; bottom: 48px; color: rgba(255,255,255,.07); font-size: 76px; font-weight: 950; rotate: -90deg; }
+    .issue-card .issue-label { color: #d8e3ff; font-size: 13px; font-weight: 900; }
+    .issue-card strong { display: block; margin-top: 54px; max-width: 260px; font-size: 46px; line-height: 1.02; letter-spacing: -.055em; }
+    .issue-card span { position: absolute; right: 36px; bottom: 34px; color: #ffb5be; font-size: 16px; font-weight: 900; }
+
+    .process { background: var(--mist); }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 50px; }
+    .step { position: relative; padding: 34px; background: #fff; border-radius: 24px; border: 1px solid var(--line); }
+    .step-num { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 55px; color: #fff; background: var(--blue); border-radius: 15px; font-size: 18px; font-weight: 950; }
+    .step h3 { margin: 0 0 10px; font-size: 24px; }
+    .step p { margin: 0; color: var(--muted); line-height: 1.65; }
+    .deadline { display: grid; grid-template-columns: auto 1fr 1fr; align-items: center; gap: 28px; margin-top: 20px; padding: 27px 30px; color: #fff; background: var(--ink); border-radius: 20px; }
+    .deadline-title { color: #ff9daa; font-weight: 950; }
+    .deadline div:not(:first-child) { border-right: 1px solid rgba(255,255,255,.18); padding-right: 28px; }
+    .deadline strong { display: block; font-size: 18px; }
+    .deadline span { display: block; margin-top: 4px; color: #cbd5ed; font-size: 13px; }
+
+    .faq-grid { display: grid; grid-template-columns: .75fr 1.25fr; gap: 70px; align-items: start; }
+    .faq-list { border-top: 1px solid var(--line); }
+    details { border-bottom: 1px solid var(--line); }
+    summary { position: relative; padding: 23px 0 23px 42px; cursor: pointer; list-style: none; font-size: 18px; font-weight: 850; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; position: absolute; left: 0; top: 19px; display: grid; place-items: center; width: 30px; height: 30px; color: var(--blue); border: 1px solid var(--line); border-radius: 50%; }
+    details[open] summary::after { content: "−"; }
+    details p { margin: -5px 0 24px; max-width: 650px; color: var(--muted); line-height: 1.7; }
+
+    .contact { padding: 110px 0; color: #fff; background: linear-gradient(145deg, var(--blue-deep), var(--blue)); }
+    .contact-grid { display: grid; grid-template-columns: 1fr .9fr; gap: 72px; align-items: center; }
+    .contact h2 { max-width: 650px; }
+    .contact-copy { max-width: 560px; margin: 22px 0 30px; color: #dbe5ff; font-size: 19px; line-height: 1.7; }
+    .contact-points { display: grid; gap: 11px; padding: 0; list-style: none; color: #eef3ff; font-weight: 750; }
+    .contact-points li::before { content: "✓"; margin-left: 9px; color: #ff94a1; }
+
+    .lead-form { padding: 34px; color: var(--ink); background: #fff; border-radius: 27px; box-shadow: var(--shadow); }
+    .lead-form h3 { margin: 0 0 8px; font-size: 26px; }
+    .form-note { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+    .field { margin-top: 15px; }
+    .field label { display: block; margin-bottom: 7px; font-size: 14px; font-weight: 850; }
+    .field input { width: 100%; height: 52px; padding: 0 15px; color: var(--ink); background: #f8faff; border: 1px solid var(--line); border-radius: 12px; font: inherit; outline: none; }
+    .field input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(22,59,145,.1); }
+    .submit { width: 100%; margin-top: 20px; border: 0; cursor: pointer; }
+    .form-privacy { margin: 12px 0 0; color: var(--muted); text-align: center; font-size: 12px; }
+    .whatsapp-link { display: flex; align-items: center; justify-content: center; gap: 9px; margin-top: 13px; color: var(--blue); font-weight: 900; text-decoration: none; }
+
+    footer { padding: 30px 0 90px; color: var(--muted); background: #fff; font-size: 13px; }
+    .footer-inner { display: flex; justify-content: space-between; gap: 20px; }
+    .mobile-bar { display: none; }
+
+    @media (hover: hover) {
+      .reason-card, .story, .offer, .step { transition: translate .28s ease, box-shadow .28s ease, border-color .28s ease; }
+      .reason-card:hover, .story:hover, .offer:hover, .step:hover { translate: 0 -7px; border-color: rgba(22,59,145,.25); box-shadow: 0 22px 55px rgba(16,34,77,.12); }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .js .reveal { opacity: 0; translate: 0 30px; transition: opacity .75s cubic-bezier(.2,.72,.22,1), translate .75s cubic-bezier(.2,.72,.22,1); }
+      .js .reveal.visible { opacity: 1; translate: 0 0; }
+      .js .motion-item { opacity: 0; transform: perspective(1100px) translateY(52px) rotateX(7deg) rotateY(var(--tilt, 2deg)); transform-origin: 90% 0; filter: blur(3px); transition: opacity .72s cubic-bezier(.16,.8,.22,1), transform .9s cubic-bezier(.16,.8,.22,1), filter .72s ease, background-position .8s ease; transition-delay: var(--delay, 0ms); }
+      .js .motion-item.visible { opacity: 1; transform: perspective(1100px) translateY(0) rotateX(0) rotateY(0); filter: blur(0); }
+      .js .flow-step { background-image: linear-gradient(90deg, transparent 50%, rgba(22,59,145,.055) 50%); background-size: 200% 100%; background-position: 100% 0; }
+      .js .flow-step.visible { background-position: 0 0; }
+      .js .ink-reveal { position: relative; width: fit-content; max-width: 100%; clip-path: inset(0 100% 0 0); filter: blur(7px); transition: clip-path 1s cubic-bezier(.16,.8,.22,1), filter .7s ease; }
+      .js .ink-reveal.visible { clip-path: inset(0 0 0 0); filter: blur(0); }
+      .js .ink-reveal::after { content: ""; position: absolute; z-index: 2; top: -.06em; bottom: -.06em; right: 0; width: 7px; border-radius: 99px; background: linear-gradient(var(--red), var(--blue)); opacity: 0; }
+      .js .ink-reveal.visible::after { animation: ink-run 1s cubic-bezier(.16,.8,.22,1) both; }
+      .hero-line { animation: headline-print .92s cubic-bezier(.16,.8,.22,1) both; animation-delay: var(--line-delay, 0ms); }
+      .hero-grid { will-change: transform, opacity; }
+      .proof-card { animation: paper-arrive 1.05s cubic-bezier(.16,.8,.22,1) .42s both; }
+      .proof-card { will-change: transform; transition: transform .12s linear; }
+      .proof-number.counting, .stat strong.counting { color: #ffabb5; }
+    }
+
+    @keyframes headline-print {
+      0% { opacity: 0; transform: translateY(42px) skewY(2deg); clip-path: inset(100% 0 0 0); filter: blur(6px); }
+      100% { opacity: 1; transform: translateY(0) skewY(0); clip-path: inset(0); filter: blur(0); }
+    }
+
+    @keyframes paper-arrive {
+      0% { opacity: 0; transform: translate(-55px, 34px) rotate(-4deg) scale(.95); }
+      65% { opacity: 1; transform: translate(7px, -5px) rotate(.6deg) scale(1.01); }
+      100% { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
+    }
+
+    @keyframes ink-run {
+      0% { opacity: 0; right: 0; transform: scaleY(.3); }
+      18% { opacity: 1; transform: scaleY(1); }
+      88% { opacity: 1; right: calc(100% - 7px); transform: scaleY(1); }
+      100% { opacity: 0; right: calc(100% - 7px); transform: scaleY(.25); }
+    }
+
+    @keyframes sheet-wipe {
+      0% { transform: translateX(115%) skewX(-7deg); }
+      38% { transform: translateX(0) skewX(-7deg); }
+      62% { transform: translateX(0) skewX(-7deg); }
+      100% { transform: translateX(-115%) skewX(-7deg); }
+    }
+
+    @keyframes ink-wipe {
+      0% { right: -30px; opacity: 0; }
+      18% { opacity: 1; }
+      45% { right: calc(100% + 20px); opacity: 1; }
+      46% { right: auto; left: -30px; }
+      62% { opacity: 1; }
+      100% { left: calc(100% + 20px); opacity: 0; }
+    }
+
+    @keyframes label-wipe {
+      0%, 30% { opacity: 0; transform: translateY(22px); }
+      43%, 62% { opacity: 1; transform: translateY(0); }
+      76%, 100% { opacity: 0; transform: translateY(-20px); }
+    }
+
+    @media (max-width: 860px) {
+      .chapter-rail { display: none; }
+      .hero { min-height: auto; padding-bottom: 110px; }
+      .hero-grid { grid-template-columns: 1fr; gap: 42px; }
+      .proof-card { min-height: 360px; padding: 34px; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .stat:nth-child(3) { border-right: 0; border-top: 1px solid var(--line); }
+      .stat:nth-child(4) { border-top: 1px solid var(--line); }
+      section.content-section { padding: 88px 0; }
+      .pain-shell, .sample-shell, .contact-grid, .faq-grid { grid-template-columns: 1fr; }
+      .pain-shell { padding: 52px; gap: 38px; }
+      .section-heading-row { display: block; }
+      .section-heading-row .section-intro { margin-top: 18px; }
+      .reason-grid, .steps { grid-template-columns: 1fr; }
+      .reason-card { min-height: 245px; }
+      .story-grid { grid-template-columns: 1fr 1fr; }
+      .story.featured { grid-column: 1 / -1; }
+      .offer-grid { grid-template-columns: repeat(2, 1fr); }
+      .sample-shell { gap: 45px; }
+      .issue-card { max-width: 460px; width: 100%; margin-inline: auto; }
+      .deadline { grid-template-columns: 1fr 1fr; }
+      .deadline-title { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 560px) {
+      .wrap { width: min(100% - 26px, 1180px); }
+      .site-header { padding-top: 16px; }
+      .header-link { padding: 10px 13px; font-size: 13px; }
+      .brand-logo { width: 172px; height: 50px; }
+      .hero { padding-top: 116px; }
+      h1 { font-size: clamp(49px, 16vw, 70px); }
+      .hero-copy { font-size: 18px; }
+      .hero-actions { display: grid; }
+      .button { width: 100%; }
+      .micro-proof { display: grid; gap: 10px; }
+      .proof-card { border-radius: 26px; }
+      .stats { margin-top: -74px; }
+      .stat { padding: 22px 10px; }
+      .stat strong { font-size: 23px; }
+      section.content-section { padding: 72px 0; }
+      h2 { font-size: 39px; }
+      .section-intro { font-size: 17px; }
+      .pain-shell { padding: 34px 24px; border-radius: 28px; }
+      .flow { grid-template-columns: 1fr; }
+      .flow-step + .flow-step { border-right: 0; border-top: 1px solid var(--line); }
+      .flow-step:not(:last-child)::after { content: "↓"; left: 50%; top: auto; bottom: -12px; translate: -50% 0; }
+      .story-grid, .offer-grid { grid-template-columns: 1fr; }
+      .story.featured { grid-column: auto; }
+      .story { min-height: 275px; padding: 28px; }
+      .offer::before { margin-bottom: 28px; }
+      .offer-note { align-items: start; flex-direction: column; }
+      .sample-shell { padding: 34px 22px; border-radius: 26px; }
+      .issue-card { min-height: 320px; }
+      .steps { gap: 12px; }
+      .step-num { margin-bottom: 32px; }
+      .deadline { grid-template-columns: 1fr; gap: 17px; }
+      .deadline-title { grid-column: auto; }
+      .deadline div:not(:first-child) { border-right: 0; border-top: 1px solid rgba(255,255,255,.18); padding: 16px 0 0; }
+      .contact { padding: 74px 0 100px; }
+      .contact-grid { gap: 42px; }
+      .lead-form { padding: 25px 20px; }
+      .footer-inner { flex-direction: column; }
+      .mobile-bar { position: fixed; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; z-index: 50; bottom: 0; right: 0; left: 0; padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.94); border-top: 1px solid var(--line); backdrop-filter: blur(14px); }
+      .mobile-bar a { display: grid; place-items: center; min-height: 46px; border-radius: 12px; text-decoration: none; font-size: 14px; font-weight: 900; }
+      .mobile-form { color: #fff; background: var(--red); }
+      .mobile-whatsapp { color: var(--blue); border: 1px solid var(--line); background: #fff; }
+      .wipe-label strong { font-size: 38px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .chapter-wipe { display: none; }
+      section.content-section[data-chapter]::after { opacity: .03; transform: none; filter: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scroll-progress" aria-hidden="true"><span></span></div>
+  <aside class="chapter-rail" aria-hidden="true">
+    <div class="chapter-count"><span class="chapter-current">01</span><i></i><span>08</span></div>
+    <div class="chapter-name">פתיחה</div>
+  </aside>
+  <div class="chapter-wipe" aria-hidden="true">
+    <div class="wipe-sheet"></div>
+    <div class="wipe-ink"></div>
+    <div class="wipe-label"><small>פרק <span>02</span></small><strong>האתגר</strong></div>
+  </div>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#top" aria-label="@@PAPER_NAME@@">
+        <img class="brand-logo" src="assets/logo.png" alt="@@PAPER_NAME@@">
+      </a>
+      <a class="header-link" href="#contact">דברו איתנו</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" data-chapter="פתיחה" data-chapter-index="01">
+      <div class="wrap hero-grid">
+        <div>
+          <div class="eyebrow">העיתון שמחבר עסקים לקהילה</div>
+          <h1><span class="hero-line" style="--line-delay:100ms">העסק שלך.</span><span class="hero-line hero-line-blue" style="--line-delay:240ms">בכל בית בעמנואל.</span></h1>
+          <p class="hero-copy">1,500 עותקים שמגיעים מדי שבוע לכל בתי עמנואל, לצד מאות קוראים בדיגיטל — בתוך עיתון שהקהילה באמת קוראת.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#contact">בואו נדבר על העסק שלכם</a>
+            <a class="button button-secondary" href="#sample">לצפייה בגיליון לדוגמה</a>
+          </div>
+          <ul class="micro-proof" aria-label="יתרונות מרכזיים">
+            <li>ייעוץ ראשוני ללא התחייבות</li>
+            <li>מענה בתוך 24 שעות</li>
+            <li>אפשרות לעיצוב המודעה</li>
+          </ul>
+        </div>
+
+        <aside class="proof-card" aria-label="נתון הפצה מרכזי">
+          <div>
+            <div class="proof-kicker">הפצה מודפסת מדי שבוע</div>
+            <div class="proof-number" data-count="1500" data-format="comma">1,500</div>
+            <div class="proof-label">עותקים. מבית לבית.<br>בכל עמנואל.</div>
+          </div>
+          <div>
+            <div class="proof-rule"></div>
+            <p class="proof-quote">לא עוד מודעה שנעלמת בקבוצה. פרסום בתוך עיתון שהתושבים <strong>מחכים לו</strong>.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="@@PAPER_NAME@@ במספרים">
+      <div class="wrap stats-grid">
+        <div class="stat"><strong data-count="1500" data-format="comma">1,500</strong><span>עותקים מודפסים</span></div>
+        <div class="stat"><strong>כל בית</strong><span>בעמנואל</span></div>
+        <div class="stat"><strong data-count="500" data-prefix="כ־">כ־500</strong><span>הפצות בדיגיטל</span></div>
+        <div class="stat"><strong>מעל עשור</strong><span>של אמון קהילתי</span></div>
+      </div>
+    </section>
+
+    <section class="content-section pain reveal" data-chapter="האתגר" data-chapter-index="02">
+      <div class="wrap pain-shell">
+        <div>
+          <div class="section-kicker">הכאב שכל בעל עסק מכיר</div>
+          <h2>פרסמתם. השקעתם. אבל הלקוחות לא הגיעו?</h2>
+          <p class="section-intro">העליתם סטטוסים, שלחתם הודעות ואולי אפילו חילקתם פליירים — אבל בסוף נשארתם בלי תשובה ברורה: מי ראה, מי זכר ומי באמת הגיע?</p>
+        </div>
+        <div class="pain-list" aria-label="בעיות בפרסום רגיל">
+          <div class="pain-item"><span class="pain-x">×</span>המודעה נעלמת בתוך שטף ההודעות</div>
+          <div class="pain-item"><span class="pain-x">×</span>הכסף יוצא, אבל קשה לזהות תוצאה</div>
+          <div class="pain-item"><span class="pain-x">×</span>המסר מגיע לאנשים הלא נכונים</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section why reveal" data-chapter="למה זה עובד" data-chapter-index="03">
+      <div class="wrap">
+        <div class="section-heading-row">
+          <div>
+            <div class="section-kicker">למה זה עובד</div>
+            <h2>כשהקהילה מחכה לעיתון,<br>גם המודעה שלכם מקבלת תשומת לב.</h2>
+          </div>
+          <p class="section-intro">„@@PAPER_NAME@@” הוא לא לוח מודעות. הוא חלק מהשבוע של התושבים — ולכן הפרסום נכנס לתוך תוכן שהם בוחרים לקרוא.</p>
+        </div>
+
+        <div class="reason-grid">
+          <article class="reason-card">
+            <div class="reason-no">01</div>
+            <h3>תוכן קהילתי אהוב</h3>
+            <p>כתבות מהיישוב, מכתבים למערכת, מדורי שעשועים וטורים מתחלפים שמחזירים את הקוראים בכל שבוע.</p>
+          </article>
+          <article class="reason-card">
+            <div class="reason-no">02</div>
+            <h3>הפצה לכל בית</h3>
+            <p>1,500 עותקים מודפסים מחולקים מבית לבית, לצד הפצה במייל ובקבוצות המקומיות.</p>
+          </article>
+          <article class="reason-card">
+            <div class="reason-no">03</div>
+            <h3>אמון של מעל עשור</h3>
+            <p>עיתון מוכר שמלווה את הקהילה שנים, ויוצר סביבה שבה גם העסק שלכם מקבל אמון ותשומת לב.</p>
+          </article>
+        </div>
+
+        <div class="flow" aria-label="איך תוכן קהילתי הופך לפרסום אפקטיבי">
+          <div class="flow-step">תוכן שאוהבים</div>
+          <div class="flow-step">מחכים לעיתון</div>
+          <div class="flow-step">קוראים בתשומת לב</div>
+          <div class="flow-step">פונים לעסקים</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section stories reveal" data-chapter="תוצאות מהשטח" data-chapter-index="04">
+      <div class="wrap">
+        <div class="section-kicker">מהשטח</div>
+        <h2>לא רק קוראים.<br>גם פועלים.</h2>
+        <p class="section-intro">מאחורי המספרים נמצאים עסקים שפגשו לקוחות חדשים בעקבות הפרסום בעיתון.</p>
+
+        <div class="story-grid">
+          <article class="story featured">
+            <div class="story-mark">”</div>
+            <blockquote>פרסמתי בכמה מקומות. בכל פעם שלקוחות הגיעו ושאלתי איך שמעו עליי — הם אמרו: מהעיתון.</blockquote>
+            <cite>בעלת עסק שפרסמה ב„@@PAPER_NAME@@”</cite>
+          </article>
+          <article class="story">
+            <div class="story-mark">”</div>
+            <blockquote>עסק הציע מנת פלאפל חינם למביאי המודעה. בתוך שעתיים כבר לא נשאר מה לתת.</blockquote>
+            <cite>מקרה הצלחה מקמפיין מקומי</cite>
+          </article>
+          <article class="story">
+            <div class="story-mark">”</div>
+            <blockquote>עברנו ליישוב חדש והעיתון סגר לנו את כל הפינות — מצאנו בו את בעלי המקצוע והשירותים שחיפשנו.</blockquote>
+            <cite>קוראים חדשים בעמנואל</cite>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section offers reveal" data-chapter="אפשרויות פרסום" data-chapter-index="05">
+      <div class="wrap">
+        <div class="section-kicker">אפשרויות פרסום</div>
+        <h2>יש מקום לעסק שלכם.</h2>
+        <p class="section-intro">בוחרים יחד את צורת הפרסום שמתאימה למטרה, לתקופה ולתקציב שלכם. את המחיר המדויק תקבלו בשיחה אישית.</p>
+
+        <div class="offer-grid">
+          <article class="offer"><h3>מודעה בעיתון</h3><p>ממגוון גדלים ומיקומים, בהתאם למסר ולנראות שהעסק צריך.</p></article>
+          <article class="offer"><h3>כתבת תדמית</h3><p>מספרים את הסיפור של העסק ויוצרים היכרות עמוקה יותר עם הקוראים.</p></article>
+          <article class="offer"><h3>מיקום בולט</h3><p>נוכחות חזקה באזורים מרכזיים בעיתון, כולל אפשרויות חשיפה מיוחדות.</p></article>
+          <article class="offer"><h3>קמפיין מתמשך</h3><p>רצף פרסומים שבונה זכירות, עם הנחות שיכולות להגיע עד 30%.</p></article>
+        </div>
+        <div class="offer-note"><span>צריכים עיצוב למודעה?</span><strong>אפשר לקבל עיצוב בתשלום סמלי.</strong></div>
+      </div>
+    </section>
+
+    <section class="content-section reveal" id="sample" data-chapter="גיליון לדוגמה" data-chapter-index="06">
+      <div class="wrap sample-shell">
+        <div class="issue-card" aria-hidden="true">
+          <div class="issue-label">גיליון לדוגמה</div>
+          <strong>העיתון שהקהילה קוראת.</strong>
+          <span>גיליון 301</span>
+        </div>
+        <div>
+          <div class="section-kicker">להכיר לפני שמפרסמים</div>
+          <h2>רוצים לראות איפה העסק שלכם יכול להופיע?</h2>
+          <p class="section-intro">פתחו גיליון מלא והתרשמו מהתוכן, הקהילה, המפרסמים והנוכחות שהעסק שלכם יכול לקבל.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="sample-issue.pdf" target="_blank" rel="noopener">לצפייה בגיליון לדוגמה</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section process reveal" data-chapter="איך מתחילים" data-chapter-index="07">
+      <div class="wrap">
+        <div class="section-kicker">פשוט להתחיל</div>
+        <h2>מתחילים לפרסם<br>בשלושה צעדים.</h2>
+
+        <div class="steps">
+          <article class="step"><div class="step-num">1</div><h3>מדברים</h3><p>משאירים פרטים או שולחים הודעה ומספרים לנו בקצרה על העסק.</p></article>
+          <article class="step"><div class="step-num">2</div><h3>מתאימים</h3><p>בוחרים יחד את סוג הפרסום, המיקום והתקופה שמתאימים לכם.</p></article>
+          <article class="step"><div class="step-num">3</div><h3>מפרסמים</h3><p>שולחים מודעה מוכנה, או נעזרים בשירות העיצוב שלנו במידת הצורך.</p></article>
+        </div>
+
+        <div class="deadline" aria-label="מועדי סגירת הגיליון">
+          <div class="deadline-title">לגיליון הקרוב</div>
+          <div><strong>מודעה מוכנה — חמישי עד 17:00</strong><span>להעברת קובץ מוכן לדפוס</span></div>
+          <div><strong>מודעה לעיצוב — חמישי עד 12:00</strong><span>כדי שנספיק להכין אותה בזמן</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section reveal">
+      <div class="wrap faq-grid">
+        <div>
+          <div class="section-kicker">שאלות נפוצות</div>
+          <h2>כל מה שחשוב לדעת.</h2>
+          <p class="section-intro">לא מצאתם תשובה? שלחו הודעה ונחזור אליכם בתוך 24 שעות.</p>
+        </div>
+        <div class="faq-list">
+          <details><summary>האם הפרסום מתאים גם לעסק מחוץ לעמנואל?</summary><p>בהחלט. הדף מיועד לכל עסק שרוצה להגיע בצורה ממוקדת לתושבי עמנואל, גם אם העסק עצמו נמצא מחוץ לעיר.</p></details>
+          <details><summary>כמה עולה לפרסם?</summary><p>המחיר תלוי בגודל המודעה, במיקום ובמשך הקמפיין. בשיחה קצרה נתאים אפשרות ונשלח הצעה אישית, ללא התחייבות.</p></details>
+          <details><summary>אפשר לקבל עזרה בעיצוב?</summary><p>כן. אפשר להעביר מודעה מוכנה, או לקבל שירות עיצוב בתשלום סמלי. במידת הצורך ניתן לסייע גם בכתיבת כתבת תדמית.</p></details>
+          <details><summary>האם יש הנחה לפרסום קבוע?</summary><p>כן. בפרסום למספר גיליונות או לתקופה ממושכת ניתן לקבל הנחה של עד 30%, בהתאם לחבילה.</p></details>
+          <details><summary>מתי העיתון מופץ?</summary><p>העיתון יורד לדפוס ביום חמישי ומחולק מבית לבית במוצאי שבת, לצד ההפצה הדיגיטלית.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="contact" id="contact" data-chapter="בואו נדבר" data-chapter-index="08">
+      <div class="wrap contact-grid">
+        <div>
+          <div class="section-kicker" style="color:#ff9daa">בואו נתחיל</div>
+          <h2>זה הזמן להכניס את העסק שלכם לכל בית בעמנואל.</h2>
+          <p class="contact-copy">ספרו לנו מי אתם. נחזור אליכם בתוך 24 שעות עם ייעוץ ראשוני והצעת פרסום שמתאימה לעסק — ללא התחייבות.</p>
+          <ul class="contact-points">
+            <li>ייעוץ ראשוני ללא עלות</li>
+            <li>התאמה אישית לעסק ולתקופה</li>
+            <li>אפשרות לעיצוב המודעה</li>
+          </ul>
+        </div>
+
+        <form class="lead-form" name="advertiser-lead" method="POST" data-netlify="true" action="landing-thanks.html">
+          <input type="hidden" name="form-name" value="advertiser-lead">
+          <h3>בואו נדבר על העסק שלכם</h3>
+          <p class="form-note">שלושה פרטים קצרים, ואנחנו ממשיכים מכאן.</p>
+          <div class="field"><label for="name">שם</label><input id="name" name="name" autocomplete="name" required></div>
+          <div class="field"><label for="business">שם העסק</label><input id="business" name="business" autocomplete="organization" required></div>
+          <div class="field"><label for="phone">מספר טלפון</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required></div>
+          <button class="button button-primary submit" type="submit">בואו נדבר על העסק שלכם</button>
+          <p class="form-privacy">הפרטים ישמשו רק כדי לחזור אליכם בנושא הפרסום.</p>
+          <a class="whatsapp-link" href="https://wa.me/972583221232?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%90%D7%A9%D7%9E%D7%97%20%D7%9C%D7%A9%D7%9E%D7%95%D7%A2%20%D7%A2%D7%9C%20%D7%90%D7%A4%D7%A9%D7%A8%D7%95%D7%99%D7%95%D7%AA%20%D7%94%D7%A4%D7%A8%D7%A1%D7%95%D7%9D%20%D7%91%D7%A2%D7%9E%D7%A0%D7%95%D7%90%D7%9C%20%D7%A9%D7%9C%D7%99" target="_blank" rel="noopener">מעדיפים וואטסאפ? שלחו הודעה</a>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <span>© @@PAPER_NAME@@ — העסק שלך. בכל בית בעמנואל.</span>
+      <span>העיתון המקומי שמחבר עסקים לקהילה</span>
+    </div>
+  </footer>
+
+  <div class="mobile-bar" aria-label="יצירת קשר מהירה">
+    <a class="mobile-form" href="#contact">השאירו פרטים</a>
+    <a class="mobile-whatsapp" href="https://wa.me/972583221232?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%90%D7%A9%D7%9E%D7%97%20%D7%9C%D7%A9%D7%9E%D7%95%D7%A2%20%D7%A2%D7%9C%20%D7%90%D7%A4%D7%A9%D7%A8%D7%95%D7%99%D7%95%D7%AA%20%D7%94%D7%A4%D7%A8%D7%A1%D7%95%D7%9D" target="_blank" rel="noopener">שלחו וואטסאפ</a>
+  </div>
+
+  <script>
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -7% 0px' });
+
+    document.querySelectorAll('.reveal').forEach((element) => revealObserver.observe(element));
+
+    document.querySelectorAll('h2').forEach((heading) => {
+      heading.classList.add('ink-reveal');
+      revealObserver.observe(heading);
+    });
+
+    const motionGroups = [
+      '.reason-grid .reason-card',
+      '.flow .flow-step',
+      '.story-grid .story',
+      '.offer-grid .offer',
+      '.steps .step'
+    ];
+
+    motionGroups.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((element, index) => {
+        element.classList.add('motion-item');
+        element.style.setProperty('--delay', `${index * 105}ms`);
+        element.style.setProperty('--tilt', `${index % 2 === 0 ? 2.4 : -2.4}deg`);
+        revealObserver.observe(element);
+      });
+    });
+
+    const chapterName = document.querySelector('.chapter-name');
+    const chapterCurrent = document.querySelector('.chapter-current');
+    const chapterWipe = document.querySelector('.chapter-wipe');
+    const wipeIndex = chapterWipe.querySelector('.wipe-label small span');
+    const wipeName = chapterWipe.querySelector('.wipe-label strong');
+    let chapterTimer;
+    let wipeTimer;
+    let activeChapter = null;
+
+    const playChapterWipe = (name, index) => {
+      if (reducedMotion) return;
+      wipeIndex.textContent = index;
+      wipeName.textContent = name;
+      chapterWipe.classList.remove('playing');
+      void chapterWipe.offsetWidth;
+      chapterWipe.classList.add('playing');
+      clearTimeout(wipeTimer);
+      wipeTimer = setTimeout(() => chapterWipe.classList.remove('playing'), 1160);
+    };
+
+    const chapterObserver = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+
+      if (!visible) return;
+      const nextName = visible.target.dataset.chapter;
+      const nextIndex = visible.target.dataset.chapterIndex;
+      if (activeChapter === nextName) return;
+
+      if (activeChapter !== null) playChapterWipe(nextName, nextIndex);
+      activeChapter = nextName;
+
+      chapterName.classList.add('switching');
+      clearTimeout(chapterTimer);
+      chapterTimer = setTimeout(() => {
+        chapterName.textContent = nextName;
+        chapterCurrent.textContent = nextIndex;
+        chapterName.classList.remove('switching');
+      }, 180);
+    }, { rootMargin: '-34% 0px -48% 0px', threshold: [0, .2, .5, .8] });
+
+    document.querySelectorAll('[data-chapter]').forEach((section) => chapterObserver.observe(section));
+
+    if (!reducedMotion && matchMedia('(pointer:fine)').matches) {
+      document.querySelectorAll('.button').forEach((button) => {
+        button.addEventListener('pointermove', (event) => {
+          const box = button.getBoundingClientRect();
+          const x = (event.clientX - box.left - box.width / 2) * .09;
+          const y = (event.clientY - box.top - box.height / 2) * .12;
+          button.style.transform = `translate(${x}px, ${y}px)`;
+        });
+        button.addEventListener('pointerleave', () => {
+          button.style.transform = '';
+        });
+      });
+    }
+
+    const countObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const element = entry.target;
+        const target = Number(element.dataset.count);
+        const prefix = element.dataset.prefix || '';
+        const formatter = element.dataset.format === 'comma'
+          ? new Intl.NumberFormat('he-IL')
+          : { format: (value) => String(value) };
+
+        if (reducedMotion) {
+          element.textContent = `${prefix}${formatter.format(target)}`;
+          countObserver.unobserve(element);
+          return;
+        }
+
+        const duration = 1150;
+        const started = performance.now();
+        element.classList.add('counting');
+
+        const tick = (now) => {
+          const progress = Math.min((now - started) / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 4);
+          element.textContent = `${prefix}${formatter.format(Math.round(target * eased))}`;
+          if (progress < 1) requestAnimationFrame(tick);
+          else element.classList.remove('counting');
+        };
+
+        requestAnimationFrame(tick);
+        countObserver.unobserve(element);
+      });
+    }, { threshold: .55 });
+
+    document.querySelectorAll('[data-count]').forEach((element) => countObserver.observe(element));
+
+    const progressBar = document.querySelector('.scroll-progress span');
+    const proofCard = document.querySelector('.proof-card');
+    const heroGrid = document.querySelector('.hero-grid');
+    let ticking = false;
+    let heroMotionReady = reducedMotion;
+    if (!reducedMotion) setTimeout(() => { heroMotionReady = true; }, 1250);
+
+    const updateScrollEffects = () => {
+      const maxScroll = document.documentElement.scrollHeight - innerHeight;
+      const ratio = maxScroll > 0 ? scrollY / maxScroll : 0;
+      progressBar.style.transform = `scaleX(${ratio})`;
+
+      if (!reducedMotion && heroGrid && scrollY < innerHeight * 1.15) {
+        const heroRatio = Math.min(scrollY / (innerHeight * .9), 1);
+        heroGrid.style.transform = `translateY(${heroRatio * 72}px) scale(${1 - heroRatio * .065})`;
+        heroGrid.style.opacity = String(1 - heroRatio * .62);
+      }
+
+      if (!reducedMotion && heroMotionReady && proofCard && scrollY < innerHeight) {
+        const offset = Math.min(scrollY * .055, 34);
+        proofCard.style.transform = `translateY(${offset}px)`;
+      }
+      ticking = false;
+    };
+
+    addEventListener('scroll', () => {
+      if (!ticking) {
+        requestAnimationFrame(updateScrollEffects);
+        ticking = true;
+      }
+    }, { passive: true });
+
+    updateScrollEffects();
+  </script>
+</body>
+</html>
