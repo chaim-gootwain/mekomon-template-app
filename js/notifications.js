@@ -67,7 +67,9 @@ async function notifBuild() {
   const _payBy = {};
   try {
     if (_overdue.length) {
-      const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', _overdue.map(c => c.id)));
+      // runAllIn: קריאה בודדת נחתכת ב-1000 שורות ו-.in ארוך שובר את ה-URL —
+      // קיזוז חלקי חסר ניפח את סכום התזכורת (וגם את המייל שנשלח ללקוח)
+      const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', _overdue.map(c => c.id));
       (pays || []).forEach(p => { _payBy[p.charge_id] = (_payBy[p.charge_id] || 0) + Number(p.amount || 0); });
     }
   } catch (e) { }

@@ -67,7 +67,7 @@ runAll((f, t) => db.from('charges').select('amount,issued_date,agent_id,status')
 runAll((f, t) => db.from('payments').select('amount,paid_date').gte('paid_date', since.toISOString().slice(0, 10)).order('id').range(f, t)),
 ]);
 const months = {};
-charges.filter(c => !['cancelled'].includes(c.status)).forEach(c => {
+charges.filter(c => !['cancelled', 'lost'].includes(c.status)).forEach(c => {
 const m = c.issued_date.slice(0, 7);
 months[m] = months[m] || { billed: 0, collected: 0 };
 months[m].billed += Number(c.amount);
@@ -514,7 +514,9 @@ function report_weekly() {
 async function reportWeeklyRun(shiftDays) {
   const fEl = document.getElementById('rwFrom'), tEl = document.getElementById('rwTo');
   if (shiftDays) {
-    const sh = d => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + shiftDays); return x.toISOString().slice(0, 10); };
+    // רכיבים מקומיים ולא toISOString: חצות מקומי מומר ל-UTC של היום הקודם
+    // (ישראל UTC+2/3) והזזת "שבוע" הייתה נוחתת יום מוקדם מדי ומצטברת עם כל לחיצה
+    const sh = d => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + shiftDays); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
     fEl.value = sh(fEl.value); tEl.value = sh(tEl.value);
   }
   const from = fEl.value, to = tEl.value;

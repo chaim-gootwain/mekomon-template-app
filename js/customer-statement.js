@@ -54,6 +54,9 @@ async function _csGather(customerId) {
   const chargeDesc = {}; charges.forEach(c => chargeDesc[c.id] = c.description || '');
 
   // יומן: חיוב = חובה, תשלום = זכות. חיובים מבוטלים לא נספרים ביתרה.
+  // תשלום ששייך לחיוב מת (בוטל/אבוד) מוחרג גם הוא — אחרת החיוב יורד מהיתרה
+  // אבל התשלום נשאר כזכות והכרטסת מציגה "יתרת זכות" כוזבת (כאילו העיתון חייב ללקוח).
+  const _deadCharge = new Set(charges.filter(c => CS_DEAD.includes(c.status)).map(c => c.id));
   const entries = [];
   charges.forEach(c => {
     entries.push({
@@ -66,7 +69,7 @@ async function _csGather(customerId) {
     const base = _csPayMethod(p.method);
     const forWhat = p.charge_id && chargeDesc[p.charge_id] ? ' — ' + chargeDesc[p.charge_id] : '';
     entries.push({
-      date: p.paid_date || '', type: 'payment', dead: false,
+      date: p.paid_date || '', type: 'payment', dead: !!(p.charge_id && _deadCharge.has(p.charge_id)),
       desc: 'תשלום (' + base + ')' + forWhat + (p.check_due_date ? ' · פירעון ' + _csDate(p.check_due_date) : ''),
       ref: '', status: '', debit: 0, credit: Number(p.amount || 0)
     });
