@@ -704,7 +704,10 @@ function fuClear(id) { fuUnmark(id); delete _fuSnooze[id]; } // בעריכת מ�
 function startFollowupScheduler() {
   if (_fuTimer) return;                       // כבר פועל
   checkTimedFollowups();                       // בדיקה מיידית בכניסה
-  _fuTimer = setInterval(checkTimedFollowups, 45000); // בדיקה כל 45 שניות
+  // בדיקה כל 3 דקות (היה 45 שניות). כל בדיקה יורה שאילתה למסד, ולסירוגין
+  // כל 45 שניות זה עומס רקע מתמשך על מכונת ה-DB הקטנה שגוזל מהמעבד. תזכורת
+  // מעקב שמופיעה עד 3 דקות אחרי השעה עדיין בזמן — הרווח בביצועים שווה זאת.
+  _fuTimer = setInterval(checkTimedFollowups, 180000);
 }
 
 async function checkTimedFollowups() {

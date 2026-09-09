@@ -67,9 +67,14 @@ buildShell();
 show('app');
 await refreshCache();
 await updateClockButton();
-if (typeof notifInit === 'function') notifInit();
-if (typeof alertsInit === 'function') alertsInit();
 openPage('dash');
+// התראות ופעמון ההודעות נדחים — כל אחד יורה שאילתה משלו, ואם הם רצים יחד עם
+// טעינת המטמון והדשבורד הם מעמיסים על רגע הכניסה. דחייה קצרה נותנת לדשבורד
+// להיטען קודם, ומורידה את "סופת השאילתות" הראשונית מול המסד.
+setTimeout(() => {
+  try { if (typeof notifInit === 'function') notifInit(); } catch (e) { }
+  try { if (typeof alertsInit === 'function') alertsInit(); } catch (e) { }
+}, 2500);
 setTimeout(async () => {
   try { if (typeof pdfImportCheckPending === 'function' && await pdfImportCheckPending()) return; } catch (e) { }
   try { if (typeof invReconcileCheckPending === 'function' && await invReconcileCheckPending()) return; } catch (e) { }
