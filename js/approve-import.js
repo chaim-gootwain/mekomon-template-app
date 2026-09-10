@@ -111,7 +111,10 @@ function _aqMoveAfter(id) {
   if (i >= 0) { const [it] = _aqState.items.splice(i, 1); _aqState.items.push(it); }
 }
 
+let _aqBusy = false; // לחיצה כפולה על "אשר" = לקוח כפול + מודעה כפולה
 async function aqApprove(item) {
+  if (_aqBusy) return;
+  _aqBusy = true;
   const g = id => (document.getElementById(id) || {}).value;
   const title = (g('aqTitle') || '').trim() || item.title;
   const page = Number(g('aqPage')) || null;
@@ -141,6 +144,7 @@ async function aqApprove(item) {
     toast('אושר ✓');
     aqShowNext();
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+  finally { _aqBusy = false; }
 }
 
 function aqClose() { const ov = document.getElementById('aqOverlay'); if (ov) ov.remove(); }

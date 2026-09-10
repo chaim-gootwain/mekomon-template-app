@@ -174,7 +174,9 @@ async function _piSystemCust() {
   return ins.data.id;
 }
 
+let _piBusy = false; // לחיצה כפולה על "הזן" = לקוח כפול + מודעה כפולה
 async function piSubmit() {
+  if (_piBusy) return;
   if (!_piState) return;
   const s = _piState.selCust;
   const isSystem = document.getElementById('piSystem') && document.getElementById('piSystem').checked;
@@ -187,6 +189,7 @@ async function piSubmit() {
     const _rawPrice = (document.getElementById('piPrice').value || '').trim();
     const _finalPrice = _rawPrice === '' ? (priceItem ? Number(priceItem.price) : 0) : Number(_rawPrice);
   let custId = s ? s.id : null;
+  _piBusy = true;
   try {
     if (s && s.isNew) {
       const ins = await db.from('customers').insert({ name: s.name }).select('id,name,agent_id,phone').single();
@@ -210,6 +213,7 @@ async function piSubmit() {
     toast('✓ הוזנה: ' + (title || s.name));
     _piNext();
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
+  finally { _piBusy = false; }
 }
 
 async function piSkip() {
