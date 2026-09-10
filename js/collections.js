@@ -164,9 +164,11 @@ async function collRenderAging(el) {
   const ids = open.map(c => c.id);
   const paid = {};
   try {
-    const pays = await run(db.from('payments').select('charge_id,amount').in('charge_id', ids));
+    // runAllIn: .in ארוך שובר URL ונחתך ב-1000 — קיזוז חסר ניפח את החוב.
+    // כשל כבר לא נבלע בשקט (היה מציג את מלוא החיוב בלי התשלומים).
+    const pays = await runAllIn((f, t) => db.from('payments').select('charge_id,amount').order('id').range(f, t), 'charge_id', ids);
     pays.forEach(p => { paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount); });
-  } catch (e) { }
+  } catch (e) { toast('טעינת התשלומים לדו"ח הגיל נכשלה — לא מוצג כדי לא להטעות', true); return; }
   const byCust = {};
   const T = today();
   for (const c of open) {

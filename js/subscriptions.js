@@ -232,7 +232,9 @@ if (!issue) return 0;
 const contracts = await run(db.from('contracts').select('*').eq('active', true));
 const existing = await run(db.from('ads').select('contract_id').eq('issue_id', issueId).not('contract_id', 'is', null));
 const existingSet = new Set(existing.map(a => a.contract_id));
-const allAds = await run(db.from('ads').select('contract_id,status').not('contract_id', 'is', null));
+// runAll (עוצר אחרי עמוד אחד מתחת ל-1000 — ניטרלי לביצועים): קריאה בודדת
+// נחתכת ב-1000 ואז ספירת הניצול חסרה → מודעות נוצרות ומחויבות מעבר לחבילה ששולמה
+const allAds = await runAll((f, t) => db.from('ads').select('contract_id,status').not('contract_id', 'is', null).order('id').range(f, t));
 const used = {};
 allAds.forEach(a => { if (!['cancelled', 'rejected'].includes(a.status)) used[a.contract_id] = (used[a.contract_id] || 0) + 1; });
 let created = 0;
@@ -331,7 +333,8 @@ const upcoming = openIssues.find(i => (i.publish_date || '') >= T) || openIssues
 const contracts = await run(db.from('contracts').select('*').eq('active', true));
 const existing = await run(db.from('ads').select('contract_id').eq('issue_id', upcoming.id).not('contract_id', 'is', null));
 const existingSet = new Set(existing.map(a => a.contract_id));
-const allAds = await run(db.from('ads').select('contract_id,status').not('contract_id', 'is', null));
+// runAll — ספירת ניצול חבילה לא תיחתך ב-1000 (אחרת התראת "עוד תשלום" שגויה)
+const allAds = await runAll((f, t) => db.from('ads').select('contract_id,status').not('contract_id', 'is', null).order('id').range(f, t));
 const used = {};
 allAds.forEach(a => { if (!['cancelled', 'rejected'].includes(a.status)) used[a.contract_id] = (used[a.contract_id] || 0) + 1; });
 const items = contracts.filter(c =>
