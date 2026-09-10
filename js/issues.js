@@ -468,19 +468,25 @@ if (!src) { toast('לא נמצא', true); return; }
 if (btn) { btn.disabled = true; btn.textContent = '...'; }
 try {
 await _fpCopyAd(src);
+// מסמנים שהלקוח כבר נוסף בסשן הזה — אחרת "הוסף הכל" (שמסתמך על _fpAds
+// שלא מתעדכן כאן) יעתיק אותו שוב וייווצרו שתי מודעות זהות
+window._fpPrev.added = window._fpPrev.added || new Set();
+if (src.customer_id) window._fpPrev.added.add(src.customer_id);
 if (btn) { const td = btn.closest('td'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; }
 toast('✓ נוסף: ' + (nameOf('customers', src.customer_id) || src.title));
 } catch (e) { toast('שגיאה: ' + (e.message || e), true); if (btn) { btn.disabled = false; btn.textContent = '➕ הוסף'; } }
 };
 window.fpAddAllPrev = async function (btn) {
 if (!window._fpPrev) return;
+const _added = window._fpPrev.added || new Set();
 const curCust = new Set((_fpAds || []).map(a => a.customer_id));
-const toAdd = window._fpPrev.ads.filter(a => !(a.customer_id && curCust.has(a.customer_id)));
+const toAdd = window._fpPrev.ads.filter(a => !(a.customer_id && (curCust.has(a.customer_id) || _added.has(a.customer_id))));
 if (!toAdd.length) { toast('אין חדשים להוספה'); return; }
 if (!confirm('להוסיף ' + toAdd.length + ' מודעות מגיליון ' + window._fpPrev.prevNum + ' לגיליון הנוכחי?')) return;
 if (btn) { btn.disabled = true; btn.textContent = 'מוסיף...'; }
 let ok = 0;
-for (const a of toAdd) { try { await _fpCopyAd(a); ok++; const td = document.querySelector('#fpp-row-' + a.id + ' td:last-child'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; } catch (e) { console.error('copy', e); } }
+window._fpPrev.added = window._fpPrev.added || new Set();
+for (const a of toAdd) { try { await _fpCopyAd(a); ok++; if (a.customer_id) window._fpPrev.added.add(a.customer_id); const td = document.querySelector('#fpp-row-' + a.id + ' td:last-child'); if (td) td.innerHTML = '<span class="pill green">✓ נוסף</span>'; } catch (e) { console.error('copy', e); } }
 toast('✓ נוספו ' + ok + ' מודעות');
 if (btn) { btn.textContent = '✓ נוספו ' + ok; }
 };
