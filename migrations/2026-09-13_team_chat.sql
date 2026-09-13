@@ -5,8 +5,8 @@
 --    וערוץ אישי לכל סוכן מול המנהל ('dm:<agent_id>').
 -- 2. team_message_reads — "עד מתי קראתי" לכל משתמש בכל ערוץ
 --    (שורה אחת לערוץ למשתמש — זול בהרבה מ-jsonb על כל הודעה).
--- RLS: מנהל קורא וכותב בכל הערוצים; משתמש מכירות רק בערוץ
--- הקבוצתי ובערוץ האישי של הסוכן המקושר אליו (my_agent_id()).
+-- RLS: מנהל קורא וכותב בכל הערוצים; מכירות/עורך/גרפיקה בערוץ
+-- הקבוצתי, ומכירות גם בערוץ האישי של הסוכן המקושר אליו (my_agent_id()).
 -- הרצה: Supabase Dashboard → SQL Editor → הדבק והרץ את כל הקובץ,
 -- בכל מופע בנפרד. בטוח להרצה חוזרת (idempotent).
 -- ============================================================
@@ -70,7 +70,7 @@ comment on table public.team_message_reads is
 
 -- ---------- 3. RLS ----------
 -- הרשאת ערוץ (כמו בשאר הטבלאות — my_role/my_agent_id/emu_is_admin מהסכימה):
--- מנהל: הכל. מכירות: הערוץ הקבוצתי + הערוץ האישי של הסוכן שלו בלבד.
+-- מנהל: הכל. מכירות/עורך/גרפיקה: הערוץ הקבוצתי; מכירות גם בערוץ האישי שלו.
 alter table public.team_messages enable row level security;
 
 drop policy if exists team_messages_select on public.team_messages;
@@ -78,8 +78,9 @@ create policy team_messages_select on public.team_messages
   for select to authenticated
   using (
     public.emu_is_admin()
+    or ( public.my_role() in ('sales', 'editor', 'graphics') and channel = 'group' )
     or ( public.my_role() = 'sales'
-         and (channel = 'group' or channel = 'dm:' || public.my_agent_id()::text) )
+         and channel = 'dm:' || public.my_agent_id()::text )
   );
 
 drop policy if exists team_messages_insert on public.team_messages;
@@ -89,8 +90,9 @@ create policy team_messages_insert on public.team_messages
     sender_user = auth.uid()
     and (
       public.emu_is_admin()
+      or ( public.my_role() in ('sales', 'editor', 'graphics') and channel = 'group' )
       or ( public.my_role() = 'sales'
-           and (channel = 'group' or channel = 'dm:' || public.my_agent_id()::text) )
+           and channel = 'dm:' || public.my_agent_id()::text )
     )
   );
 -- אין update/delete בשלב 1 — הודעה שנשלחה נשארת כפי שהיא.

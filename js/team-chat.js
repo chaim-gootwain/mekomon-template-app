@@ -2,9 +2,10 @@
    team-chat.js — צ'אט צוות פנימי (שלב 1)
    ------------------------------------------------------------
    תקשורת פנימית בתוך המערכת, ללא וואטסאפ/מייל:
-   - ערוץ קבוצתי אחד לכל הצוות (מנהל + מכירות)
+   - ערוץ קבוצתי אחד לכל הצוות (מנהל, מכירות, עורך וגרפיקה)
    - ערוץ אישי בין המנהל לכל סוכן (dm:<agent_id>)
-   - מנהל רואה: קבוצה + ערוץ לכל סוכן מקושר; סוכן רואה: קבוצה + מנהל
+   - מנהל רואה: קבוצה + ערוץ לכל סוכן מקושר; סוכן רואה: קבוצה + מנהל;
+     עורך/גרפיקה רואים את הקבוצה בלבד
    - רענון בפולינג פשוט כל ~10 שניות (בלי Supabase Realtime בשלב זה)
    - באדג' "לא נקרא" על לשונית התפריט ועל כל ערוץ ברשימה
    - "נקרא" נשמר בטבלת team_message_reads (שורה לערוץ למשתמש)
@@ -21,7 +22,7 @@ let _tcTick = 0;         // מונה טיקים — באדג' מתרענן גם 
 let _tcUnread = {};      // channel -> כמות לא-נקראו
 let _tcBusy = false;     // שליחה בתהליך
 
-function tcAllowed() { return profile && ['admin', 'sales'].includes(profile.role); }
+function tcAllowed() { return profile && ['admin', 'sales', 'editor', 'graphics'].includes(profile.role); }
 
 /* הערוץ האישי שלי (לסוכן): לפי רשומת הסוכן המקושרת למשתמש */
 function tcMyDmChannel() {
@@ -36,18 +37,27 @@ function tcChannels() {
     // ערוץ לכל סוכן שמקושר למשתמש אמיתי — לסוכן בלי משתמש אין למי לענות
     (cache.agents || []).filter(a => a.profile_id)
       .forEach(a => out.push({ id: 'dm:' + a.id, name: a.name, icon: '👤' }));
-  } else {
+  } else if (profile.role === 'sales') {
     const dm = tcMyDmChannel();
     if (dm) out.push({ id: dm, name: 'מנהל', icon: '👤' });
   }
+  // עורך/גרפיקה: הערוץ הקבוצתי בלבד (ערוץ אישי הוא מנהל↔סוכן)
   return out;
 }
 
+let _tcProfiles = []; // גיבוי שמות: cache.profiles לא נטען לתפקיד גרפיקה
 function tcSenderName(uid) {
   if (!uid) return 'משתמש';
   if (uid === profile.id) return 'אני';
-  const p = (cache.profiles || []).find(x => x.id === uid);
+  const p = (cache.profiles || []).find(x => x.id === uid) || _tcProfiles.find(x => x.id === uid);
   return p ? (p.full_name || 'משתמש') : 'משתמש';
+}
+async function tcLoadProfiles() {
+  if ((cache.profiles || []).length || _tcProfiles.length) return;
+  try {
+    const r = await db.from('profiles').select('id,full_name');
+    _tcProfiles = r.data || [];
+  } catch (e) { /* RLS חוסם — יוצג "משתמש" */ }
 }
 
 /* ---------- עיצוב ---------- */
@@ -242,6 +252,7 @@ function teamChatInit() {
   if (!tcAllowed()) return;
   if (_tcTimer) clearInterval(_tcTimer);
   _tcTimer = setInterval(tcPollTick, 10 * 1000);
+  tcLoadProfiles();
   tcRefreshUnread();
 }
 
@@ -249,7 +260,7 @@ function teamChatInit() {
 (function () {
   // שורה סטטית ב-NAV — buildShell כבר מסנן לפי תפקיד ויוצר badge-team-chat
   if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'team-chat')) {
-    const item = { id: 'team-chat', title: 'צ\'אט צוות', icon: '💬', roles: ['admin', 'sales'], group: '' };
+    const item = { id: 'team-chat', title: 'צ\'אט צוות', icon: '💬', roles: ['admin', 'sales', 'editor', 'graphics'], group: '' };
     const idx = NAV.findIndex(n => n.id === 'dash');
     if (idx >= 0) NAV.splice(idx + 1, 0, item); else NAV.push(item);
   }
