@@ -209,7 +209,7 @@ function alertsSettingsCard() {
 
 async function alertsSettingsMount() {
   alertsMorningMount();
-  const box = document.getElementById('alertsRulesBox'); if (!box) return;
+  const box = document.getElementById('alertsRulesBox'); if (!box) return; if(!profile||profile.role!=='admin'){ box.innerHTML=''; return; }
   try {
     _alertsRules = await run(db.from('alert_rules').select('*').order('id'));
   } catch (e) { box.innerHTML = '<p class="muted">טבלאות ההתראות עוד לא קיימות — יש להריץ את המיגרציה alerts_engine.</p>'; return; }
