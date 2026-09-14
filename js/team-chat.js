@@ -47,7 +47,7 @@ function tcChannels() {
 
 let _tcProfiles = []; // גיבוי שמות: cache.profiles לא נטען לתפקיד גרפיקה
 function tcSenderName(uid) {
-  if (!uid) return 'משתמש';
+  if (!uid) return 'מערכת'; // הודעת מערכת (למשל ברכת הבוקר) — אין שולח
   if (uid === profile.id) return 'אני';
   const p = (cache.profiles || []).find(x => x.id === uid) || _tcProfiles.find(x => x.id === uid);
   return p ? (p.full_name || 'משתמש') : 'משתמש';
@@ -78,6 +78,7 @@ function tcEnsureStyles() {
   .tc-msg{max-width:80%;border-radius:14px;padding:8px 12px;font-size:.93rem;line-height:1.45}
   .tc-mine{align-self:flex-start;background:var(--brand);color:#fff;border-bottom-right-radius:4px}
   .tc-other{align-self:flex-end;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
+  .tc-sys{align-self:center;background:#fffbe8;border:1px solid #f3e2ac;text-align:center;max-width:90%}
   .tc-msg .who{font-size:.72rem;font-weight:700;opacity:.85;margin-bottom:2px}
   .tc-msg .when{font-size:.68rem;opacity:.65;margin-top:3px;text-align:left}
   .tc-inputrow{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
@@ -97,8 +98,9 @@ async function tcRefreshUnread() {
     const lr = {};
     (reads.data || []).forEach(r => lr[r.channel] = r.last_read_at);
     const counts = await Promise.all(chans.map(async c => {
+      // sender_user null = הודעת מערכת — נספרת כלא-נקראה (neq לבדו מפיל nulls)
       let q = db.from('team_messages').select('id', { count: 'exact', head: true })
-        .eq('channel', c.id).neq('sender_user', profile.id);
+        .eq('channel', c.id).or('sender_user.is.null,sender_user.neq.' + profile.id);
       if (lr[c.id]) q = q.gt('created_at', lr[c.id]);
       const r = await q;
       return r.error ? 0 : (r.count || 0);
@@ -152,8 +154,9 @@ async function tcLoadThread(scrollDown) {
   const showWho = _tcChannel === 'group' || profile.role === 'admin';
   log.innerHTML = msgs.length ? msgs.map(m => {
     const mine = m.sender_user === profile.id;
-    return `<div class="tc-msg ${mine ? 'tc-mine' : 'tc-other'}">
-      ${(!mine && showWho) ? `<div class="who">${esc(tcSenderName(m.sender_user))}</div>` : ''}
+    const sys = !m.sender_user; // הודעת מערכת (ברכת הבוקר וכד') — בועה ממורכזת
+    return `<div class="tc-msg ${sys ? 'tc-sys' : mine ? 'tc-mine' : 'tc-other'}">
+      ${sys ? '<div class="who">🌅 מערכת</div>' : (!mine && showWho) ? `<div class="who">${esc(tcSenderName(m.sender_user))}</div>` : ''}
       <div>${esc(m.body).replace(/\n/g, '<br>')}</div>
       <div class="when">${heDateTime(m.created_at)}</div>
     </div>`;

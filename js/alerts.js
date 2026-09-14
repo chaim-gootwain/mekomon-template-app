@@ -298,8 +298,9 @@ async function alertsRunNow() {
 
 /* ==================== ברכת בוקר יומית לצוות ==================== */
 // כרטיס הגדרות (מנהל): מתג morning_greeting_enabled + עריכת מאגר ההודעות
-// + "שלח בדיקה". הברכה עצמה נוצרת בשרת (alerts_scan_morning — pg_cron
-// ב-05:00 UTC, עם fallback בריצת הכניסה של המנוע) לכל משתמש פעיל.
+// + תצוגה מקדימה. הברכה עצמה נוצרת בשרת (alerts_scan_morning — pg_cron
+// ב-05:00 UTC, עם fallback בריצת הכניסה של המנוע) כהודעת מערכת בערוץ
+// הקבוצתי של צ'אט הצוות (team_messages, sender_user=null).
 
 let _morningMsgs = [];
 
@@ -308,7 +309,7 @@ function alertsMorningCard() {
   return `
 <div class="card card-pad">
 <b>ברכת בוקר יומית לצוות 🌅</b>
-<p class="muted" style="font-size:.82rem">כל בוקר (בסביבות 08:00) כל משתמש פעיל מקבל "בוקר טוב" בפעמון ההתראות — הודעה מתחלפת מהמאגר למטה. דורש שהתראות המערכת (בכרטיס למעלה) יהיו פעילות. אפשר לכתוב <b>{city}</b> בתוך הודעה — יוחלף בשם העיר של העסק (שדה "עיר / יישוב" בהגדרות הכלליות).</p>
+<p class="muted" style="font-size:.82rem">כל בוקר (בסביבות 08:00) מתפרסמת ברכת "בוקר טוב" בערוץ הקבוצתי של צ'אט הצוות — כל הצוות רואה אותה והבאדג' על הלשונית נדלק. ההודעה מתחלפת מהמאגר למטה. אפשר לכתוב <b>{city}</b> בתוך הודעה — יוחלף בשם העיר של העסק (שדה "עיר / יישוב" בהגדרות הכלליות).</p>
 <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
 <input type="checkbox" id="setMorning" ${on ? 'checked' : ''} onchange="alertsMorningToggle(this.checked)" style="width:18px;height:18px">
 ברכת בוקר פעילה
@@ -317,7 +318,7 @@ function alertsMorningCard() {
 <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
 <input id="morningNewMsg" type="text" placeholder="הודעת בוקר חדשה..." style="flex:1;min-width:220px">
 <button class="btn btn-sm" onclick="alertsMorningAdd()">➕ הוספה</button>
-<button class="btn btn-sm btn-ghost" onclick="alertsMorningTest()">👁 שלח בדיקה אליי</button>
+<button class="btn btn-sm btn-ghost" onclick="alertsMorningTest()">👁 תצוגה מקדימה</button>
 </div>
 </div>`;
 }
@@ -345,8 +346,7 @@ function alertsMorningRender() {
 async function alertsMorningToggle(on) {
   await run(db.from('settings').upsert({ key: 'morning_greeting_enabled', value: on ? '1' : '0' }));
   cache.settings.morning_greeting_enabled = on ? '1' : '0';
-  if (!on) { toast('ברכת הבוקר כובתה'); return; }
-  toast(alertsOn() ? 'ברכת הבוקר הופעלה — תישלח מחר בבוקר' : 'נשמר. שים לב: התראות המערכת כבויות — הברכה לא תישלח עד שידלקו');
+  toast(on ? 'ברכת הבוקר הופעלה — תתפרסם בצ\'אט הצוות מחר בבוקר' : 'ברכת הבוקר כובתה');
 }
 
 async function alertsMorningAdd() {
@@ -373,12 +373,13 @@ async function alertsMorningDelete(id) {
   toast('ההודעה הוסרה');
 }
 
+// תצוגה מקדימה: מציגה את נוסח היום (אחרי הצבת {city}) — לא מפרסמת
+// לצ'אט, כי הודעה בערוץ הקבוצתי גלויה מיד לכל הצוות.
 async function alertsMorningTest() {
   try {
     const { data, error } = await db.rpc('alerts_morning_test');
     if (error) throw error;
-    toast('נשלחה ברכת בדיקה לפעמון שלך 📣');
-    alertsRefresh();
+    toast('הברכה של היום: ' + data);
     return data;
-  } catch (e) { toast('הבדיקה נכשלה — ' + ((e && e.message) || 'ודא שהמיגרציה הורצה'), true); return null; }
+  } catch (e) { toast('התצוגה נכשלה — ' + ((e && e.message) || 'ודא שהמיגרציה הורצה'), true); return null; }
 }
