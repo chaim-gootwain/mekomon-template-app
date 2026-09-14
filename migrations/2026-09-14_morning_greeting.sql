@@ -10,7 +10,10 @@
 --      היום: התראת מנהל). RLS מעודכן: כל משתמש פעיל רואה ומעדכן את
 --      ההתראות *שלו*; התראות ללא נמען נשארות מנהל בלבד.
 --   2. טבלת morning_messages — מאגר הודעות קטן וניתן לעריכה + זריעה.
---   3. מתג settings.morning_greeting_enabled (ברירת מחדל '0' — כבוי).
+--      הודעה יכולה להכיל {city} — מוחלף בשם העיר של המופע
+--      (settings.paper_city, נערך במסך ההגדרות ליד שם העיתון).
+--   3. מתגים: settings.morning_greeting_enabled (ברירת מחדל '0' — כבוי)
+--      ו-settings.paper_city (ריק — עד שממלאים בהגדרות).
 --   4. סורק alerts_scan_morning(): פעם בבוקר (לפי תאריך ישראל) יוצר
 --      אירוע good_morning + התראת inapp לכל משתמש פעיל, עם רוטציית
 --      הודעה לפי יום-בשנה. dedup: good_morning:<user>:<date>.
@@ -107,18 +110,22 @@ select v.msg from (values
   ('בוקר טוב 🌅 יום חדש, הזדמנויות חדשות. בוא נפתח אותו בשיחה אחת טובה.'),
   ('בוקר טוב! כל "לא" מקרב אותך ל"כן" הבא. קדימה, אנחנו איתך.'),
   ('בוקר טוב ☕ שלוש שיחות לפני 10:00 — וכבר פתחת את היום בניצחון.'),
-  ('בוקר טוב! העסקים בעמנואל מחכים שתגיע אליהם. אתה הקול שלהם בכל בית.'),
+  ('בוקר טוב! העסקים ב{city} מחכים שתגיע אליהם. אתה הקול שלהם בכל בית.'),
   ('בוקר טוב 💪 היום לא מתחילים חזק — היום מתחילים ומתחזקים תוך כדי. יאללה.'),
   ('בוקר טוב! לקוח מרוצה מביא עוד לקוח. תעשה היום אחד מאושר.'),
   ('בוקר טוב 🎯 מטרה אחת ברורה להיום עדיפה על עשר משאלות. מה שלך?'),
-  ('בוקר טוב! אתה חלק מהעיתון הכי גדול בעמנואל. תמכור בגאווה.')
+  ('בוקר טוב! אתה חלק מהעיתון הכי גדול ב{city}. תמכור בגאווה.')
 ) as v(msg)
 where not exists (select 1 from public.morning_messages);
 
--- ==================== 3. מתג ====================
+-- ==================== 3. מתגים ====================
 -- כבוי כברירת מחדל — חיים מדליק מההגדרות כשמוכן. דורש גם את המתג
 -- הראשי alerts_enabled='1' (בלעדיו אין פעמון בכלל).
 insert into public.settings (key, value) values ('morning_greeting_enabled', '0')
+  on conflict (key) do nothing;
+-- שם העיר/היישוב של המופע — משתנה פר עסק, נערך במסך ההגדרות (ליד שם
+-- העיתון). מציב את {city} בהודעות הבוקר; ריק → "עיר שלנו".
+insert into public.settings (key, value) values ('paper_city', '')
   on conflict (key) do nothing;
 
 -- ==================== 4. הסורק — יצרן הברכה ====================
@@ -133,6 +140,7 @@ declare
   v_now_il   timestamp;  -- שעון קיר ישראל (Postgres מטפל בשעון קיץ)
   v_today    date;
   v_msg      text;
+  v_city     text;
   v_active   integer;
   v_event_id bigint;
   v_count    integer := 0;
@@ -167,6 +175,10 @@ begin
   from (select m.text, row_number() over (order by m.id) - 1 as rn
         from morning_messages m where m.active) t
   where t.rn = extract(doy from v_today)::int % v_active;
+
+  -- {city} → שם העיר של המופע (משתנה פר עסק, מוגדר בהגדרות)
+  v_city := coalesce(nullif(btrim((select value from settings where key = 'paper_city')), ''), 'עיר שלנו');
+  v_msg  := replace(v_msg, '{city}', v_city);
 
   insert into alert_events (event_type, payload, source)
   values ('good_morning',
@@ -231,6 +243,7 @@ as $fn$
 declare
   v_uid    uuid := auth.uid();
   v_msg    text;
+  v_city   text;
   v_active integer;
   v_id     bigint;
 begin
@@ -247,6 +260,9 @@ begin
   from (select m.text, row_number() over (order by m.id) - 1 as rn
         from morning_messages m where m.active) t
   where t.rn = extract(doy from (now() at time zone 'Asia/Jerusalem')::date)::int % v_active;
+
+  v_city := coalesce(nullif(btrim((select value from settings where key = 'paper_city')), ''), 'עיר שלנו');
+  v_msg  := replace(v_msg, '{city}', v_city);
 
   insert into alerts (title, body, severity, status, user_id)
   values (v_msg, '(בדיקה — כך תיראה ברכת הבוקר)', 'info', 'new', v_uid)

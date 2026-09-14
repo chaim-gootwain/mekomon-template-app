@@ -308,7 +308,7 @@ function alertsMorningCard() {
   return `
 <div class="card card-pad">
 <b>ברכת בוקר יומית לצוות 🌅</b>
-<p class="muted" style="font-size:.82rem">כל בוקר (בסביבות 08:00) כל משתמש פעיל מקבל "בוקר טוב" בפעמון ההתראות — הודעה מתחלפת מהמאגר למטה. דורש שהתראות המערכת (בכרטיס למעלה) יהיו פעילות.</p>
+<p class="muted" style="font-size:.82rem">כל בוקר (בסביבות 08:00) כל משתמש פעיל מקבל "בוקר טוב" בפעמון ההתראות — הודעה מתחלפת מהמאגר למטה. דורש שהתראות המערכת (בכרטיס למעלה) יהיו פעילות. אפשר לכתוב <b>{city}</b> בתוך הודעה — יוחלף בשם העיר של העסק (שדה "עיר / יישוב" בהגדרות הכלליות).</p>
 <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
 <input type="checkbox" id="setMorning" ${on ? 'checked' : ''} onchange="alertsMorningToggle(this.checked)" style="width:18px;height:18px">
 ברכת בוקר פעילה
