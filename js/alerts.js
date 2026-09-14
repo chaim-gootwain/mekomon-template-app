@@ -17,7 +17,8 @@ const ALERTS_EVENT_NAMES = {
   issue_deadline: 'דדליין מודעות לגיליון',
   payment_failed: 'תשלום שנכשל',
   check_bounced: "צ'ק שחזר",
-  agent_deal_closed: 'סוכן סגר עסקה (בוט הזנה)'
+  agent_deal_closed: 'סוכן סגר עסקה (בוט הזנה)',
+  good_morning: 'ברכת בוקר יומית לצוות'
 };
 const ALERTS_CHANNEL_NAMES = { inapp: 'מערכת', email: 'מייל', whatsapp: 'וואטסאפ' };
 const ALERTS_SEV_ICONS = { info: 'ℹ️', warning: '⚠️', critical: '🚨' };
@@ -203,10 +204,11 @@ function alertsSettingsCard() {
 <div style="display:flex;gap:8px;margin-top:10px">
 <button class="btn btn-sm btn-ghost" onclick="alertsRunNow()">▶ הרץ סריקה עכשיו</button>
 </div>
-</div>`;
+</div>` + alertsMorningCard();
 }
 
 async function alertsSettingsMount() {
+  alertsMorningMount();
   const box = document.getElementById('alertsRulesBox'); if (!box) return;
   try {
     _alertsRules = await run(db.from('alert_rules').select('*').order('id'));
@@ -292,4 +294,91 @@ async function alertsRunNow() {
   if (!res) { toast(alertsOn() ? 'ההרצה נכשלה — בדוק שה-Edge Function פרוסה' : 'יש להפעיל קודם את המתג הראשי', true); return; }
   toast(`הסתיים: ${res.events_created ?? 0} אירועים, ${res.alerts_created ?? 0} התראות חדשות, ${res.suppressed ?? 0} נבלמו`);
   alertsRefresh();
+}
+
+/* ==================== ברכת בוקר יומית לצוות ==================== */
+// כרטיס הגדרות (מנהל): מתג morning_greeting_enabled + עריכת מאגר ההודעות
+// + "שלח בדיקה". הברכה עצמה נוצרת בשרת (alerts_scan_morning — pg_cron
+// ב-05:00 UTC, עם fallback בריצת הכניסה של המנוע) לכל משתמש פעיל.
+
+let _morningMsgs = [];
+
+function alertsMorningCard() {
+  const on = String((cache.settings || {}).morning_greeting_enabled || '0') === '1';
+  return `
+<div class="card card-pad">
+<b>ברכת בוקר יומית לצוות 🌅</b>
+<p class="muted" style="font-size:.82rem">כל בוקר (בסביבות 08:00) כל משתמש פעיל מקבל "בוקר טוב" בפעמון ההתראות — הודעה מתחלפת מהמאגר למטה. דורש שהתראות המערכת (בכרטיס למעלה) יהיו פעילות. אפשר לכתוב <b>{city}</b> בתוך הודעה — יוחלף בשם העיר של העסק (שדה "עיר / יישוב" בהגדרות הכלליות).</p>
+<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+<input type="checkbox" id="setMorning" ${on ? 'checked' : ''} onchange="alertsMorningToggle(this.checked)" style="width:18px;height:18px">
+ברכת בוקר פעילה
+</label>
+<div id="morningMsgsBox" style="margin-top:10px"><div class="empty">טוען הודעות...</div></div>
+<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+<input id="morningNewMsg" type="text" placeholder="הודעת בוקר חדשה..." style="flex:1;min-width:220px">
+<button class="btn btn-sm" onclick="alertsMorningAdd()">➕ הוספה</button>
+<button class="btn btn-sm btn-ghost" onclick="alertsMorningTest()">👁 שלח בדיקה אליי</button>
+</div>
+</div>`;
+}
+
+async function alertsMorningMount() {
+  const box = document.getElementById('morningMsgsBox'); if (!box) return;
+  try {
+    _morningMsgs = await run(db.from('morning_messages').select('*').order('id'));
+  } catch (e) { box.innerHTML = '<p class="muted">טבלת ההודעות עוד לא קיימת — יש להריץ את המיגרציה morning_greeting.</p>'; return; }
+  alertsMorningRender();
+}
+
+function alertsMorningRender() {
+  const box = document.getElementById('morningMsgsBox'); if (!box) return;
+  box.innerHTML = (_morningMsgs || []).length ? _morningMsgs.map(m => `
+    <div class="notif-item" style="display:flex;gap:10px;align-items:center;border:1px solid #eef1f7;border-radius:10px;margin-bottom:6px;${m.active ? '' : 'opacity:.55'}">
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer;flex:1" title="פעיל ברוטציה">
+        <input type="checkbox" ${m.active ? 'checked' : ''} onchange="alertsMorningToggleMsg(${m.id}, this.checked)" style="width:16px;height:16px">
+        <span>${esc(m.text)}</span>
+      </label>
+      <button class="btn btn-sm btn-ghost" onclick="alertsMorningDelete(${m.id})" title="הסרה מהמאגר">✕</button>
+    </div>`).join('') : '<p class="muted">המאגר ריק — הוסף הודעה כדי שתהיה ברכה.</p>';
+}
+
+async function alertsMorningToggle(on) {
+  await run(db.from('settings').upsert({ key: 'morning_greeting_enabled', value: on ? '1' : '0' }));
+  cache.settings.morning_greeting_enabled = on ? '1' : '0';
+  if (!on) { toast('ברכת הבוקר כובתה'); return; }
+  toast(alertsOn() ? 'ברכת הבוקר הופעלה — תישלח מחר בבוקר' : 'נשמר. שים לב: התראות המערכת כבויות — הברכה לא תישלח עד שידלקו');
+}
+
+async function alertsMorningAdd() {
+  const el = document.getElementById('morningNewMsg');
+  const t = String(el?.value || '').trim();
+  if (!t) { toast('כתוב הודעה קודם', true); return; }
+  const row = await run(db.from('morning_messages').insert({ text: t }).select().single());
+  _morningMsgs.push(row);
+  el.value = '';
+  alertsMorningRender();
+  toast('ההודעה נוספה למאגר');
+}
+
+async function alertsMorningToggleMsg(id, on) {
+  await run(db.from('morning_messages').update({ active: on }).eq('id', id));
+  const m = (_morningMsgs || []).find(x => x.id === id); if (m) m.active = on;
+  alertsMorningRender();
+}
+
+async function alertsMorningDelete(id) {
+  await run(db.from('morning_messages').delete().eq('id', id));
+  _morningMsgs = (_morningMsgs || []).filter(x => x.id !== id);
+  alertsMorningRender();
+  toast('ההודעה הוסרה');
+}
+
+async function alertsMorningTest() {
+  try {
+    const { data, error } = await db.rpc('alerts_morning_test');
+    if (error) throw error;
+    toast('נשלחה ברכת בדיקה לפעמון שלך 📣');
+    alertsRefresh();
+    return data;
+  } catch (e) { toast('הבדיקה נכשלה — ' + ((e && e.message) || 'ודא שהמיגרציה הורצה'), true); return null; }
 }
