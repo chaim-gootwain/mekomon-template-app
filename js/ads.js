@@ -253,7 +253,10 @@ openPage('ads');
 });
 }
 
-async function adEdit(id) {
+// onDone (אופציונלי): מה לעשות אחרי שמירה — לחזרה למסך שממנו נקראה העריכה
+// (כרטיס לקוח / חיוב הגיליון) במקום קפיצה לדף המודעות. השינוי משתקף בכל
+// המקומות כי כולם קוראים מחדש את המודעה מהמסד (price/discount/title/לקוח/גיליון).
+async function adEdit(id, onDone) {
 // אם המטמון המקומי ריק (הכרטיס נפתח שלא מדף המודעות) — נטען מהמסד,
 // אחרת הטופס ייפתח ריק ושמירה תרוקן את המודעה
 let a = _ads.find(x => x.id === id);
@@ -272,8 +275,10 @@ openForm('עריכת מודעה', [
 { name: 'notes', label: 'הערות', type: 'textarea' },
 ], a, async (rec) => {
 await run(db.from('ads').update(rec).eq('id', id));
+try { await refreshCache(); } catch (e) { }
 toast('נשמר');
-openPage('ads');
+if (typeof onDone === 'function') { try { await onDone(); } catch (e) { openPage('ads'); } }
+else { openPage('ads'); }
 });
 }
 

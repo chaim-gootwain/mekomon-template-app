@@ -114,21 +114,37 @@ async function issueBillingOpen(issueId) {
 async function issueBillingPreview(issueId, customerId) {
   const issue = (cache.issues || []).find(i => i.id === issueId);
   const ads = await run(db.from('ads').select('*').eq('issue_id', issueId).eq('customer_id', customerId).not('status', 'in', '("cancelled","rejected")'));
-  const items = _ibItems(ads, issue);
-  if (!items.length) { toast('אין מודעות עם מחיר לחיוב', true); return; }
+  if (!ads.length) { toast('אין מודעות ללקוח זה בגיליון', true); return; }
+  const items = _ibItems(ads, issue); // כותרת הגיליון + שורות המודעות עם מחיר (>0)
+  const priced = items.length > 0;
   const total = items.reduce((s, it) => s + it.amount * it.price, 0);
   const docKind = _ibDocKind(customerId);
   _ibKind = docKind; // ברירת מחדל לסוג המסמך לפי הלקוח
   // ברירות מחדל לתאריכים: תאריך המסמך = תאריך הגיליון (יעד הדפוס), תאריך התשלום = היום
   _ibDates = { doc: (issue.print_date || issue.publish_date || today()).slice(0, 10), pay: today() };
+  // עריכה ישירה של שורת מודעה מהתצוגה המקדימה — מחיר/הנחה/גודל/תיאור. אחרי
+  // שמירה התצוגה נפתחת מחדש והשינוי כבר מוטמע במודעה (ולכן גם בפלטפלן,
+  // בכרטיס הלקוח, בחוב וברשומת החשבונית שתופק מכאן).
+  const _ibCanEdit = (typeof profile !== 'undefined' && ['admin', 'sales'].includes(profile.role) && typeof adEdit === 'function');
+  const _ibEdCell = (adId) => _ibCanEdit
+    ? `<td style="text-align:left"><button class="btn btn-sm btn-ghost" title="עריכת המודעה (מחיר, גודל, תיאור)" onclick="adEdit(${adId}, function(){ issueBillingPreview(${issueId}, ${customerId}); })">✎ עריכה</button></td>`
+    : '<td></td>';
+  const _ibHdr = _ibItems(ads, issue)[0]; // שורת כותרת הגיליון (מחיר 0)
+  const hdrRow = `<tr><td>${esc(_ibHdr ? _ibHdr.details : 'גיליון ' + issue.issue_number)}</td><td></td><td></td><td></td></tr>`;
+  const adRows = ads.map(a => {
+    const p = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
+    const lbl = _ibLabel(a.title) + (_ibSize(a) ? ' · ' + _ibSize(a) : '') + (a.page_number ? ' — עמוד ' + a.page_number : '');
+    return `<tr${p > 0 ? '' : ' style="opacity:.6"'}><td>${esc(lbl)}</td><td>1</td><td>${p > 0 ? money(p) : '<span class="muted">— ללא מחיר —</span>'}</td>${_ibEdCell(a.id)}</tr>`;
+  }).join('');
   document.getElementById('viewModal').innerHTML = `
     <h3>תצוגה מקדימה — ${esc(nameOf('customers', customerId))}</h3>
     <p class="muted" style="font-size:.85rem">גיליון ${issue.issue_number}</p>
     <div class="table-wrap" style="margin-top:8px"><table class="data">
-      <thead><tr><th>פירוט</th><th>כמות</th><th>מחיר</th></tr></thead><tbody>
-      ${items.map(it => `<tr><td>${esc(it.details)}</td><td>${it.amount}</td><td>${money(it.price)}</td></tr>`).join('')}
+      <thead><tr><th>פירוט</th><th>כמות</th><th>מחיר</th><th></th></tr></thead><tbody>
+      ${hdrRow}${adRows}
     </tbody></table></div>
     <div class="inv-total" style="margin-top:10px;font-weight:800">סה"כ (לפני מע"מ): ${money(total)}</div>
+    ${!priced ? '<p class="muted" style="color:var(--danger,#b91c1c);font-size:.82rem;margin:6px 0 0">אין מודעה עם מחיר לחיוב — יש לערוך מודעה ולהזין מחיר לפני ההפקה.</p>' : ''}
     <div class="field" style="margin-top:12px"><label>סוג מסמך</label>
       <select onchange="_ibKind=this.value">
         <option value="proforma" ${docKind === 'proforma' ? 'selected' : ''}>חשבון עסקה</option>
@@ -142,7 +158,7 @@ async function issueBillingPreview(issueId, customerId) {
     </div>
     <p class="muted" style="font-size:.78rem;margin:4px 0 0">תאריך המסמך חל על החשבונית ועל רישום החוב · תאריך התשלום חל על "שולם".</p>
     <div class="m-actions" style="margin-top:12px">
-      <button class="btn" onclick="issueBillingIssue(${issueId}, ${customerId})">הפק ושלח ←</button>
+      <button class="btn" ${priced ? '' : 'disabled style="opacity:.5;cursor:not-allowed"'} onclick="${priced ? `issueBillingIssue(${issueId}, ${customerId})` : ''}">הפק ושלח ←</button>
       <button class="btn btn-ghost" onclick="issueBillingPaidMenu(${issueId}, ${customerId})">💰 שולם</button>
       <button class="btn btn-ghost" onclick="issueBillingOpen(${issueId})">→ חזרה לרשימה</button>
     </div>`;

@@ -493,7 +493,12 @@ function custAdsGroupedHtml(ads, custId) {
       const inv = (!['cancelled', 'rejected'].includes(a.status) && canInv)
         ? (['invoiced', 'paid'].includes(a.deal_stage) ? '<span class="cc-ab-inv" title="חשבונית כבר הופקה">🧾</span>' : `<button class="cc-ab-invbtn" title="הפק חשבונית למודעה זו" onclick="event.stopPropagation(); invIssueFromAd(${a.id})">🧾</button>`)
         : '';
-      return `<div class="cc-ab-ad${off}">${stat}<span class="cc-ab-nm">${esc(label) || esc(a.title) || '—'}</span><span class="cc-ab-pr">${money(a.price - a.discount)}</span>${inv}</div>`;
+      // עריכת המודעה ישירות מהכרטיס — מחיר/הנחה/גודל/תיאור/לקוח/גיליון. אחרי
+      // שמירה הכרטיס נפתח מחדש עם הערכים המעודכנים (וכך גם החוב/החשבונית).
+      const ed = (canEdit && typeof adEdit === 'function')
+        ? `<button class="cc-ab-edbtn" title="עריכת המודעה (מחיר, גודל, תיאור)" onclick="event.stopPropagation(); adEdit(${a.id}, function(){ openCustomerCard(${custId}); })">✎</button>`
+        : '';
+      return `<div class="cc-ab-ad${off}">${stat}<span class="cc-ab-nm">${esc(label) || esc(a.title) || '—'}</span><span class="cc-ab-pr">${money(a.price - a.discount)}</span>${ed}${inv}</div>`;
     }).join('');
     return `<div class="cc-ab-grp${hid}">${head}${rows}</div>`;
   }).join('');
@@ -779,6 +784,8 @@ st.textContent = `
 .cc-ab-invbtn{border:1px solid var(--line,#e6e8ef);background:#fff;border-radius:7px;padding:1px 6px;font-size:12px;cursor:pointer;line-height:1.4}
 .cc-ab-invbtn:hover{background:#eef0fb}
 .cc-ab-inv{font-size:12px;opacity:.55}
+.cc-ab-edbtn{border:1px solid var(--line,#e6e8ef);background:#fff;border-radius:7px;padding:1px 6px;font-size:12px;cursor:pointer;line-height:1.4;color:var(--brand)}
+.cc-ab-edbtn:hover{background:#eef0fb}
 .cc-ab-more{width:100%;background:none;border:0;border-top:1px solid var(--line,#e6e8ef);color:var(--brand);font-weight:700;font-size:12px;padding:9px;cursor:pointer;margin-top:4px}
 .cc-ab-more:hover{background:#f7f9ff}
 `;
