@@ -97,16 +97,24 @@ async function tcRefreshUnread() {
       .select('channel,last_read_at').eq('user_id', profile.id);
     const lr = {};
     (reads.data || []).forEach(r => lr[r.channel] = r.last_read_at);
-    const counts = await Promise.all(chans.map(async c => {
-      // sender_user null = הודעת מערכת — נספרת כלא-נקראה (neq לבדו מפיל nulls)
-      let q = db.from('team_messages').select('id', { count: 'exact', head: true })
-        .eq('channel', c.id).or('sender_user.is.null,sender_user.neq.' + profile.id);
-      if (lr[c.id]) q = q.gt('created_at', lr[c.id]);
-      const r = await q;
-      return r.error ? 0 : (r.count || 0);
-    }));
+    // שאילתה אחת לכל הערוצים במקום ספירה נפרדת פר ערוץ — ה-RLS כבר מסנן
+    // לערוצים שמותר לראות, והספירה נעשית כאן בצד הלקוח. חוסך N שאילתות בכל טיק.
+    let q = db.from('team_messages').select('channel,sender_user,created_at')
+      .order('created_at', { ascending: false }).limit(300);
+    // כשלכל הערוצים יש חותמת "נקרא" אפשר לצמצם את המשיכה מהמוקדמת שבהן;
+    // ערוץ בלי חותמת מחייב את כל ההיסטוריה (עד תקרת ה-300 — הבאדג' ממילא ויזואלי)
+    const stamps = chans.map(c => lr[c.id]);
+    if (stamps.length && stamps.every(Boolean)) q = q.gt('created_at', stamps.sort()[0]);
+    const r = await q;
+    if (r.error) return;
     _tcUnread = {};
-    chans.forEach((c, i) => _tcUnread[c.id] = counts[i]);
+    chans.forEach(c => _tcUnread[c.id] = 0);
+    (r.data || []).forEach(m => {
+      if (m.sender_user === profile.id) return;           // שלי — לא "לא נקרא"
+      if (!(m.channel in _tcUnread)) return;               // ערוץ שלא ברשימה שלי
+      if (lr[m.channel] && m.created_at <= lr[m.channel]) return;
+      _tcUnread[m.channel]++;
+    });
     tcPaintBadges();
   } catch (e) { /* רשת/הרשאות — ננסה בטיק הבא */ }
 }
@@ -238,14 +246,20 @@ Pages['team-chat'] = {
 };
 
 /* ---------- פולינג ---------- */
-/* כל 10 שניות: כשהדף פתוח — רענון השרשור + הבאדג'ים וסימון "נקרא";
-   כשהדף סגור — רק הבאדג' בתפריט, אחת לדקה (כל טיק שישי) כדי לא להעמיס */
+/* ריסון עומס על המסד (חבילת nano): טיק כל 30 שניות (היה 10). כשהדף פתוח —
+   רענון השרשור + הבאדג'ים; "נקרא" נכתב רק כשבאמת יש חדש (לא כתיבה עיוורת
+   בכל טיק). כשהדף סגור — רק הבאדג' בתפריט, אחת ל-3 דקות (כל טיק שישי).
+   טאב ברקע לא שולח שאילתות בכלל — רוב היום הטאבים ברקע, וזה היה עיקר העומס. */
 function tcPollTick() {
   if (!tcAllowed()) return;
+  if (document.hidden) return; // טאב ברקע — אפס שאילתות; רענון מיידי בחזרה (ראה מאזין)
   _tcTick++;
   if (typeof currentPage !== 'undefined' && currentPage === 'team-chat') {
     tcLoadThread(false);
-    tcRefreshUnread().then(() => { if (_tcChannel && currentPage === 'team-chat') tcMarkRead(_tcChannel); });
+    tcRefreshUnread().then(() => {
+      // כתיבת "נקרא" רק אם הצטברו לא-נקראו בערוץ הפתוח — חוסך upsert בכל טיק
+      if (_tcChannel && currentPage === 'team-chat' && _tcUnread[_tcChannel] > 0) tcMarkRead(_tcChannel);
+    });
   } else if (_tcTick % 6 === 0) {
     tcRefreshUnread();
   }
@@ -254,7 +268,17 @@ function tcPollTick() {
 function teamChatInit() {
   if (!tcAllowed()) return;
   if (_tcTimer) clearInterval(_tcTimer);
-  _tcTimer = setInterval(tcPollTick, 10 * 1000);
+  _tcTimer = setInterval(tcPollTick, 30 * 1000);
+  if (!teamChatInit._visBound) {
+    teamChatInit._visBound = true;
+    // חזרה לטאב אחרי רקע — רענון מיידי במקום להמתין לטיק הבא
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && _tcTimer && tcAllowed()) {
+        if (typeof currentPage !== 'undefined' && currentPage === 'team-chat') tcLoadThread(false);
+        tcRefreshUnread();
+      }
+    });
+  }
   tcLoadProfiles();
   tcRefreshUnread();
 }
