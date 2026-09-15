@@ -243,12 +243,15 @@ let _custClips = []; // הגזירים של הדוח האחרון — להורד
 let _custClipsName = '';
 
 /* שליפת הפרסומים + קובץ הגזיר פר מודעה — משמש גם את הדוח וגם את
-   הצ'אט התפעולי (data-entry-chat, נטען אחרי הקובץ הזה בבאנדל) */
+   הצ'אט התפעולי (data-entry-chat, נטען אחרי הקובץ הזה בבאנדל).
+   מודעה בלי קובץ ב-ad_files אבל עם מספר עמוד ו-PDF שהועלה לגיליון —
+   הגזיר נחתך מה-PDF של הגיליון (proofOf, עם _apBuild של ad-proof.js). */
 async function custPubsFetch(id, fromIss, toIss) {
-if (!_custIssues.length) _custIssues = await runAll((f, t) => db.from('issues').select('id,issue_number,publish_date').order('issue_number', { ascending: false }).order('id').range(f, t));
+if (!_custIssues.length) _custIssues = await runAll((f, t) => db.from('issues').select('id,issue_number,publish_date,pdf_path').order('issue_number', { ascending: false }).order('id').range(f, t));
 const allAds = await runAll((f, t) => db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).order('id').range(f, t));
 // מספר גיליון פר מודעה — לסינון הטווח ולשמות הקבצים ב-ZIP
-const issNum = {}; _custIssues.forEach(i => issNum[i.id] = i.issue_number);
+const issNum = {}, issPdf = {};
+_custIssues.forEach(i => { issNum[i.id] = i.issue_number; issPdf[i.id] = i.pdf_path || null; });
 const ranged = fromIss || toIss;
 const ads = allAds.filter(a => {
 if (!ranged) return true;
@@ -264,8 +267,19 @@ const cur = clipOf[f.ad_id];
 if (!cur || (f.kind === 'design' && cur.kind !== 'design')
 || ((f.kind === 'design') === (cur.kind === 'design') && String(f.created_at) > String(cur.created_at))) clipOf[f.ad_id] = f;
 });
+// נפילה אחורה: חיתוך מה-PDF של הגיליון (מודעות שהוזנו בלי קובץ)
+const proofOf = {}, proofIssues = new Set();
+if (typeof _apBuild === 'function') ads.forEach(a => {
+if (clipOf[a.id] || !a.page_number || !a.issue_id || !issPdf[a.issue_id]) return;
+if (['cancelled', 'rejected'].includes(a.status)) return;
+proofOf[a.id] = true;
+proofIssues.add(a.issue_id);
+});
 const clips = ads.filter(a => clipOf[a.id]).map(a => ({ ad: a, file: clipOf[a.id], issue: issNum[a.issue_id] }));
-return { ads, clipOf, issNum, clips, ranged };
+// גזיר-גיליון אחד פר גיליון — _apBuild חותך את כל עמודי הלקוח בגיליון יחד
+proofIssues.forEach(iid => clips.push({ proofIssueId: iid, customerId: id, issue: issNum[iid] }));
+clips.sort((a, b) => (b.issue || 0) - (a.issue || 0));
+return { ads, clipOf, proofOf, issNum, clips, ranged };
 }
 
 async function reportCustomerRun() {
@@ -279,7 +293,7 @@ custPubsFetch(id, fromIss, toIss),
 runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)),
 runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)),
 ]);
-const { ads, clipOf, issNum, ranged } = pubs;
+const { ads, clipOf, proofOf, issNum, ranged } = pubs;
 _custClips = pubs.clips;
 _custClipsName = nameOf('customers', id) || ('לקוח_' + id);
 const billed = charges.filter(c => !['cancelled', 'lost'].includes(c.status)).reduce((s, c) => s + Number(c.amount), 0);
@@ -296,7 +310,8 @@ ${_custClips.length ? `<div style="margin-bottom:10px"><button class="btn btn-sm
 <table class="data"><thead><tr><th>תאריך</th><th>מודעה</th><th>גיליון</th><th>סכום</th><th>סטטוס</th><th>גזיר</th></tr></thead><tbody>
 ${ads.map(a => `<tr><td>${heDate(a.created_at)}</td><td>${esc(a.title)}</td>
 <td>${issNum[a.issue_id] != null ? 'גיליון ' + issNum[a.issue_id] : ''}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)}</td>
-<td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎 ${clipOf[a.id].kind === 'design' ? 'עיצוב' : 'חומר גלם'}</button>` : '—'}</td></tr>`).join('')
+<td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎 ${clipOf[a.id].kind === 'design' ? 'עיצוב' : 'חומר גלם'}</button>`
+: proofOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adProofOpen(${a.issue_id}, ${a.customer_id})">🗞️ מהגיליון</button>` : '—'}</td></tr>`).join('')
 || `<tr><td colspan="6">אין מודעות${ranged ? ' בטווח הגיליונות שנבחר' : ''}</td></tr>`}
 </tbody></table>`;
 }
@@ -313,16 +328,26 @@ const entries = []; const used = {}; const errs = [];
 for (let i = 0; i < list.length; i++) {
 const c = list[i];
 if (btn) btn.textContent = `מוריד ${i + 1}/${list.length}...`;
+let bytes, base;
+if (c.file) {
 const { data, error } = await db.storage.from('ad-files').download(c.file.storage_path);
 if (error || !data) { errs.push(c.ad.title || c.file.file_name || ''); continue; }
+bytes = new Uint8Array(await data.arrayBuffer());
 const extM = String(c.file.file_name || c.file.storage_path).match(/\.[A-Za-z0-9]{1,6}$/);
-let name = (c.issue != null ? 'גיליון_' + c.issue + '_' : '') + String(c.ad.title || 'מודעה').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) + (extM ? extM[0] : '');
+base = String(c.ad.title || 'מודעה').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) + (extM ? extM[0] : '');
+} else if (c.proofIssueId && typeof _apBuild === 'function') {
+// גזיר מה-PDF של הגיליון — חיתוך עמודי הלקוח (ad-proof.js)
+try { bytes = (await _apBuild(c.proofIssueId, c.customerId)).bytes; }
+catch (e) { errs.push('גיליון ' + (c.issue || c.proofIssueId)); continue; }
+base = 'גזיר_מהגיליון.pdf';
+} else { continue; }
+let name = (c.issue != null ? 'גיליון_' + c.issue + '_' : '') + base;
 // שם כפול (אותה מודעה בכמה שורות וכד') — מוסיפים מונה לפני הסיומת
 if (used[name]) {
 const n = ++used[name]; const dot = name.lastIndexOf('.');
 name = dot > 0 ? name.slice(0, dot) + '_' + n + name.slice(dot) : name + '_' + n;
 } else used[name] = 1;
-entries.push({ name, data: new Uint8Array(await data.arrayBuffer()) });
+entries.push({ name, data: bytes });
 }
 if (btn) { btn.disabled = false; btn.textContent = `⬇ הורדת כל הגזירים (${list.length}) — ZIP`; }
 if (!entries.length) { toast('לא הצלחתי להוריד אף קובץ' + (errs.length ? ': ' + errs[0] : ''), true); return; }

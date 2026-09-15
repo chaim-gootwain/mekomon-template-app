@@ -271,7 +271,7 @@ async function deRunQuery() {
   try {
     const pubs = await custPubsFetch(cst.id, q.from || null, q.to || null);
     wait.remove();
-    const { ads, clipOf, issNum } = pubs;
+    const { ads, clipOf, proofOf, issNum } = pubs;
     const rangeTxt = (q.from || q.to) ? ' בגיליונות ' + (q.from || '…') + '–' + (q.to || '…') : '';
     if (_deState.reqId) db.from('entry_requests').update({
       status: 'committed',
@@ -287,7 +287,8 @@ async function deRunQuery() {
       const rows = ads.slice(0, SHOW).map(a => `<tr>
         <td>${issNum[a.issue_id] != null ? 'גיליון ' + issNum[a.issue_id] : heDate(a.created_at)}</td>
         <td>${esc(a.title)}</td><td>${pill('ad', a.status)}</td>
-        <td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎</button>` : '—'}</td>
+        <td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎</button>`
+          : (proofOf && proofOf[a.id]) ? `<button class="btn btn-sm btn-ghost" onclick="adProofOpen(${a.issue_id}, ${a.customer_id})">🗞️</button>` : '—'}</td>
       </tr>`).join('');
       deSay('ל<b>' + esc(cst.name || '') + '</b>' + rangeTxt + ': <b>' + ads.length + '</b> מודעות, מהן <b>' + published + '</b> פורסמו · <b>' + pubs.clips.length + '</b> גזירים זמינים.' +
         '<div class="table-wrap" style="margin-top:8px;max-height:280px;overflow:auto"><table class="data"><thead><tr><th>גיליון</th><th>מודעה</th><th>סטטוס</th><th>גזיר</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
