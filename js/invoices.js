@@ -200,6 +200,7 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
     orderRef: opts.orderRef || '',
     lines: _lines,
     adIds: (Array.isArray(opts.adIds) && opts.adIds.length) ? opts.adIds.slice() : null,
+    contractId: opts.contractId || null, // חשבונית על חוזה שלם → סימון "חויב מראש"
     srcLabel2: opts.label || null,
     vatInc: (opts.vatInc != null ? opts.vatInc : (isPayment ? true : false)), method: 'cash', date: '',
     docDate: today(),
@@ -410,6 +411,8 @@ async function invSubmit() {
   if (_issueIds.size) { try { const { data: _mAds } = await db.from('ads').select('id').eq('customer_id', cid).in('issue_id', [..._issueIds]).not('status', 'in', '("cancelled","rejected")'); if (_mAds) body.ad_ids = _mAds.map(a => a.id); } catch (e) { } }
   // שיוך מפורש של מודעות לחשבונית (הפקה מחוזה / ממודעה בודדת) — גובר על נגזרת הגיליון
   if (s.adIds && s.adIds.length) body.ad_ids = s.adIds;
+  // חשבונית על חוזה שלם — אחרי ההפקה החוזה יסומן "חויב מראש" (invCall)
+  if (s.contractId) body.contract_ref = s.contractId;
   // רושמים על החשבונית לאיזה גיליון(ות) היא שייכת — נשמר בהערת המסמך ובתיאור החיוב
   if (_issueIds.size && !body.comment) {
     const _nums = [..._issueIds].map(iid => { const _i = (_invIssues || []).find(x => x.id === iid); return _i ? _i.issue_number : null; }).filter(Boolean).sort((a, b) => a - b);
@@ -463,6 +466,14 @@ async function invCredit(docId) {
   await invCall(body);
 }
 
+/* סימון חוזה "חויב מראש" אחרי הפקת חשבונית עליו: הדגל + המודעות
+   הקיימות של החוזה. מודעות עתידיות ייוולדו מסומנות (subscriptions.js). */
+async function markContractPrepaid(contractId) {
+  await db.from('contracts').update({ prepaid: true }).eq('id', contractId);
+  await db.from('ads').update({ deal_stage: 'invoiced' }).eq('contract_id', contractId)
+    .not('status', 'in', '("cancelled","rejected")').or('deal_stage.is.null,deal_stage.neq.paid');
+}
+
 async function invCall(body) {
   toast('מפיק מסמך...');
   try {
@@ -492,6 +503,9 @@ async function invCall(body) {
         } catch (e) { /* עמודת settled_at אולי לא קיימת במופע — לא חוסם */ }
       }
       try { if (Array.isArray(body.ad_ids) && body.ad_ids.length) { await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', body.ad_ids).or('deal_stage.is.null,deal_stage.neq.paid'); } } catch (e) { console.error('mark invoiced', e); }
+      // חשבונית על חוזה שלם: דגל "חויב מראש" (מודעות עתידיות מהחוזה ייוולדו
+      // מסומנות "חויבו") + סימון המודעות הקיימות של החוזה
+      try { if (body.contract_ref) await markContractPrepaid(body.contract_ref); } catch (e) { console.error('mark prepaid', e); }
     } else if (data && data.status === 'pending_allocation') {
       toast('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount', true);
     } else {

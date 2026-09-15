@@ -132,9 +132,9 @@ async function contractInvoice(contractId) {
     <h3 style="margin:0 0 4px">🧾 הפקת חשבונית מהחוזה — ${esc(cust.name)}</h3>
     <p class="muted" style="font-size:.83rem;margin:0 0 14px">${esc(_ciLines[0].details)} · ${money(_ciLines[0].price)} (לפני מע"מ)</p>
     <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn" onclick="${close} invOpenModal(_ciCust, 'proforma', false, {lines:_ciLines})">חשבון עסקה</button>
-      <button class="btn" onclick="${close} invOpenModal(_ciCust, 'tax_invoice', false, {lines:_ciLines})">חשבונית מס</button>
-      <button class="btn" onclick="${close} invOpenModal(_ciCust, 'invoice_receipt', true, {lines:_ciLines, vatInc:false})">חשבונית מס קבלה</button>
+      <button class="btn" onclick="${close} invOpenModal(_ciCust, 'proforma', false, {lines:_ciLines, contractId:${ct.id}})">חשבון עסקה</button>
+      <button class="btn" onclick="${close} invOpenModal(_ciCust, 'tax_invoice', false, {lines:_ciLines, contractId:${ct.id}})">חשבונית מס</button>
+      <button class="btn" onclick="${close} invOpenModal(_ciCust, 'invoice_receipt', true, {lines:_ciLines, vatInc:false, contractId:${ct.id}})">חשבונית מס קבלה</button>
       ${typeof invIssueFromAds === 'function' ? `<button class="btn btn-ghost" style="border:1px dashed var(--line,#cbd5e1)" onclick="${close} contractInvoiceUnbilled(${ct.id})" title="חיוב רק המודעות של החוזה שעדיין לא הופקה להן חשבונית">🎯 רק מודעות שטרם חויבו</button>` : ''}
       <button class="btn btn-ghost" onclick="${close}">ביטול</button>
     </div></div>`;

@@ -254,7 +254,13 @@ source: 'contract', status: 'committee',
 title: (nameOf('customers', c.customer_id) || 'לקוח') + ' — חוזה', created_by: profile.id,
 };
 if (c.commission_pct != null) rec.commission_pct = c.commission_pct;
-try { await run(db.from('ads').insert(rec)); created++; } catch (e) { console.error('gen ad', e); }
+try {
+const ins = await run(db.from('ads').insert(rec).select('id').single());
+created++;
+// חוזה שחויב מראש — המודעה נולדת מסומנת "חויבה" (עדכון נפרד: בטוח גם
+// במופע שבו עמודת deal_stage טרם קיימת — ההזרעה לא נכשלת בגללו)
+if (c.prepaid && ins) { try { await db.from('ads').update({ deal_stage: 'invoiced' }).eq('id', ins.id); } catch (e2) { } }
+} catch (e) { console.error('gen ad', e); }
 }
 if (skippedIds.length) { try { await run(db.from('contracts').update({ skip_next: false }).in('id', skippedIds)); } catch (e) { } }
 return created;
@@ -275,7 +281,9 @@ source: 'contract', status: 'committee',
 title: (nameOf('customers', c.customer_id) || 'לקוח') + ' — חוזה', created_by: profile.id,
 };
 if (c.commission_pct != null) rec.commission_pct = c.commission_pct;
-await run(db.from('ads').insert(rec));
+const ins = await run(db.from('ads').insert(rec).select('id').single());
+// חוזה שחויב מראש — המודעה נולדת מסומנת "חויבה"
+if (c.prepaid && ins) { try { await db.from('ads').update({ deal_stage: 'invoiced' }).eq('id', ins.id); } catch (e) { } }
 return true;
 }
 window.subRemInsertRow = async function (contractId, issueId, btn) {
