@@ -169,6 +169,7 @@ const CUSTOMER_FIELDS = [
 { name: 'phone', label: 'טלפון', dir: 'ltr' },
 { name: 'whatsapp', label: 'וואטסאפ / טלפון נוסף', dir: 'ltr' },
 { name: 'email', label: 'אימייל', dir: 'ltr' },
+{ name: 'mailing_list', label: '📧 רשימת תפוצה — מקבל את הגליון במייל', type: 'checkbox' },
 { name: 'address', label: 'כתובת' },
 { name: 'city', label: 'יישוב' },
 { name: 'field', label: 'תחום' },
