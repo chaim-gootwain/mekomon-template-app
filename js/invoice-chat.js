@@ -375,6 +375,7 @@ function invChatRenderCard() {
         </select></div>
     </div>
     <div id="icCtx-${_icState.reqId}"></div>
+    <div id="icLink-${_icState.reqId}"></div>
     <div class="ic-lh"><span>תיאור</span><span>כמות</span><span>מחיר יח׳</span><span>כולל מע"מ</span><span></span></div>
     <div id="icLines">${invChatLinesHtml()}</div>
     <button class="btn btn-sm btn-ghost" onclick="invChatAddLine()">+ הוסף שורה</button>
@@ -390,6 +391,7 @@ function invChatRenderCard() {
   document.getElementById('icLog').appendChild(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'end' });
   if (f.customer_id) invChatCustomerContext(f.customer_id, _icState.reqId);
+  if (f.customer_id) invChatLinkHint(f, _icState.reqId);
 }
 
 /* פאנל הקשר ללקוח מזוהה בכרטיס הצ'אט: חוב פתוח + חוזים פעילים + שליחה.
@@ -578,6 +580,8 @@ async function invChatApprove() {
   }
   if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
   if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  let icIssuesNote = '';
+  try { icIssuesNote = await invChatMarkIssueAds(f) || ''; } catch (e) { console.error('mark issue ads', e); }
   const t = invChatTotals(f.line_items, invChatVatPct());
   const shownTotal = f.doc_type === 'receipt'
     ? Math.round(f.line_items.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0) * 100) / 100
@@ -586,11 +590,94 @@ async function invChatApprove() {
   icSayOk('✅ הופק <b>' + (INVCHAT_DOC_HE[f.doc_type] || 'מסמך') + '</b> ללקוח <b>' + esc(f.customer_name || '') + '</b>' +
     (doc.doc_number ? ' · מספר <b dir="ltr">' + esc(String(doc.doc_number)) + '</b>' : '') +
     ' · סה"כ <b>' + money(shownTotal) + '</b>' +
+    icIssuesNote +
     (doc.pdf_url ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(doc.pdf_url)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
   icResetState();
   invChatLoadHistory();
   document.getElementById('icInput')?.focus();
 }
+/* ---------- קישור חשבונית מהצ'אט לחיוב הגיליון ----------
+   מזהה מספרי גיליון שהוזכרו במלל הבקשה ובתיאורי השורות, ומסמן את
+   מודעות הלקוח באותם גיליונות deal_stage='invoiced' — הסימון שמסך
+   חיוב הגיליון קורא ("חויב ✓"). בטיחות: רק מספרים שהם גיליונות
+   קיימים ורק מודעות של הלקוח הזה — מספר אחר (מחיר, כמות) מתעלם. */
+function invChatIssueNums(text) {
+  const out = new Set();
+  // "גיליון 299" / "גליונות 290-295" / "מגיליון 290 עד 295" / "גיליונות 290 ו-292"
+  const re = /גי?ליו(?:ן|נות)\s*(?:מס['׳"]?\s*)?((?:\d+|[,\s]|[-–—]|עד|ועד|ו)+)/g;
+  let m;
+  while ((m = re.exec(String(text || '')))) {
+    const seg = m[1] || '';
+    const used = new Set();
+    const rng = /(\d+)\s*(?:[-–—]|עד)\s*(\d+)/g;
+    let r;
+    while ((r = rng.exec(seg))) {
+      const a = Number(r[1]), b = Number(r[2]);
+      if (a > 0 && b >= a && b - a <= 60) { for (let n = a; n <= b; n++) out.add(n); used.add(r[1]); used.add(r[2]); }
+    }
+    (seg.match(/\d+/g) || []).forEach(x => { if (!used.has(x)) out.add(Number(x)); });
+  }
+  return [...out].filter(n => n > 0);
+}
+/* איסוף המידע לקישור — פעם אחת פר בקשה (נשמר ב-_icState._linkInfo):
+   צוינו גיליונות במלל → הם הקובעים; לא צוינו (במצב הפקה רגיל) →
+   הגיליונות הפתוחים של הלקוח: מודעות מתומחרות שטרם סומנו חויבו/שולמו. */
+async function _icLinkInfo(f) {
+  if (_icState && _icState._linkInfo !== undefined && _icState._linkCust === (f && f.customer_id)) return _icState._linkInfo;
+  let info = null;
+  try {
+    if (f && f.customer_id) {
+      const txt = (_icState && _icState.rawText || '') + ' ' + (f.line_items || []).map(l => l.description || '').join(' ');
+      const nums = invChatIssueNums(txt);
+      if (nums.length) {
+        const issues = await run(db.from('issues').select('id,issue_number').in('issue_number', nums));
+        if (issues && issues.length) {
+          const ads = await run(db.from('ads').select('id,issue_id').eq('customer_id', f.customer_id)
+            .in('issue_id', issues.map(i => i.id)).not('status', 'in', '("cancelled","rejected")'));
+          if (ads && ads.length) info = { source: 'text', ads, issues };
+        }
+      } else if (_icState && _icState.mode === 'issue') {
+        const all = await run(db.from('ads').select('id,issue_id,price,discount,deal_stage').eq('customer_id', f.customer_id)
+          .not('issue_id', 'is', null).not('status', 'in', '("cancelled","rejected")'));
+        const ads = (all || [])
+          .filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0)
+          .filter(a => !['invoiced', 'paid'].includes(a.deal_stage));
+        if (ads.length) {
+          const issues = await run(db.from('issues').select('id,issue_number').in('id', [...new Set(ads.map(a => a.issue_id))]));
+          info = { source: 'open', ads, issues: issues || [] };
+        }
+      }
+    }
+  } catch (e) { console.error('link info', e); }
+  if (_icState) { _icState._linkInfo = info; _icState._linkCust = f && f.customer_id; }
+  return info;
+}
+function _icLinkNums(info) {
+  const numOf = {}; (info.issues || []).forEach(i => numOf[i.id] = i.issue_number);
+  return [...new Set(info.ads.map(a => numOf[a.issue_id]).filter(n => n != null))].sort((a, b) => a - b);
+}
+/* שורת שקיפות בכרטיס — מה יסומן "חויב" אחרי ההפקה */
+async function invChatLinkHint(f, reqId) {
+  const box = document.getElementById('icLink-' + reqId);
+  if (!box) return;
+  const info = await _icLinkInfo(f);
+  const boxNow = document.getElementById('icLink-' + reqId); // הכרטיס אולי צויר מחדש בינתיים
+  if (!boxNow) return;
+  if (!info || !info.ads.length) { boxNow.innerHTML = ''; return; }
+  const nums = _icLinkNums(info);
+  boxNow.innerHTML = '<div class="muted" style="font-size:.78rem;margin:6px 0">🔗 אחרי ההפקה יסומנו "חויבו" בחיוב הגיליון: גיליונות <b>' +
+    nums.join(', ') + '</b> (' + info.ads.length + ' מודעות' +
+    (info.source === 'open' ? ' — הגיליונות הפתוחים של הלקוח, כי לא צוינו גיליונות במלל' : ' — לפי המלל') + ').</div>';
+}
+async function invChatMarkIssueAds(f) {
+  const info = await _icLinkInfo(f);
+  if (!info || !info.ads.length) return '';
+  await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', info.ads.map(a => a.id)).or('deal_stage.is.null,deal_stage.neq.paid');
+  const nums = _icLinkNums(info);
+  return '<div class="muted" style="font-size:.78rem;margin-top:4px">🔗 סומנו "חויבו" ' + info.ads.length + ' מודעות בגיליונות ' + nums.join(', ') +
+    (info.source === 'open' ? ' (הגיליונות הפתוחים של הלקוח)' : '') + ' — יופיעו "חויב ✓" במסך חיוב הגיליון.</div>';
+}
+
 async function invChatCancel() {
   document.getElementById('icCard-' + _icState.reqId)?.remove();
   if (_icState.reqId) db.from('invoice_requests').update({ status: 'cancelled' }).eq('id', _icState.reqId).then(() => { });
