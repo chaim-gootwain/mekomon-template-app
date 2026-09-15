@@ -20,7 +20,7 @@ const reports = [
 { id: 'top', title: '🏆 מפרסמים מובילים', desc: 'הלקוחות עם ההכנסה הגבוהה ביותר', roles: ['admin', 'sales'] },
 { id: 'unsold', title: '📭 שטח שלא נמכר', desc: 'עמודים ריקים בכל גיליון — פוטנציאל מכירה', roles: ['admin', 'sales', 'editor'] },
 { id: 'churn', title: '⚠️ לקוחות שהפסיקו', desc: 'מפרסמים שלא חזרו — הזדמנות לחידוש', roles: ['admin', 'sales'] },
-{ id: 'customer', title: '🏪 היסטוריית לקוח', desc: 'כל הפרסומים, החיובים והתשלומים', roles: ['admin', 'sales'] },
+{ id: 'customer', title: '🏪 היסטוריית לקוח', desc: 'כל הפרסומים, החיובים והתשלומים + הורדת גזירים', roles: ['admin', 'sales'] },
 { id: 'ledger', title: '📒 כרטסות לרו"ח', desc: 'ייצוא חודשי לאקסל — כל תנועות הלקוחות עם יתרה רצה', roles: ['admin'] },
 { id: 'weekly', title: '🗓️ דוח שבועי תפעולי', desc: 'מה נסגר, מה נכנס ומה תקוע — לשבוע שנבחר', roles: ['admin', 'sales'] },
 { id: 'agencies', title: '🏢 עמלות סוכנויות', desc: 'מחזור חודשי פר סוכנות × אחוז העמלה — תצוגה בלבד', roles: ['admin'] },
@@ -217,41 +217,136 @@ ${_repData.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td>
 () => exportCsv('גיליונות', ['גיליון','תאריך','מודעות','הכנסה','סטטוס'], _repData));
 }
 
-/* ---------- היסטוריית לקוח ---------- */
+/* ---------- היסטוריית לקוח + גזירים ---------- */
+// כל הפרסומים/חיובים/תשלומים של לקוח, עם סינון טווח גיליונות, צפייה
+// בקובץ הגזיר של כל מודעה (העיצוב האחרון; אם אין — חומר הגלם) והורדת
+// כל הגזירים כקובץ ZIP אחד. קריאה בלבד — שום דבר לא משתנה במסד.
+let _custIssues = []; // כל הגיליונות (המטמון מחזיק רק 30 אחרונים)
+
 async function report_customer() {
+_custIssues = await runAll((f, t) => db.from('issues').select('id,issue_number,publish_date').order('issue_number', { ascending: false }).order('id').range(f, t));
+const opts = _custIssues.filter(i => i.issue_number != null).map(i => `<option value="${i.issue_number}">גיליון ${i.issue_number}${i.publish_date ? ' · ' + heDate(i.publish_date) : ''}</option>`).join('');
 document.getElementById('reportArea').innerHTML = `
 <div class="card-pad">
 <b>היסטוריית לקוח</b>
-<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
+<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
 <div style="min-width:240px">${custPickerHtml({ base: 'repCust', allowNew: false, placeholder: 'הקלד שם לקוח לחיפוש…' })}</div>
+<div class="field" style="margin:0"><label style="font-size:.8rem">מגיליון</label><select id="repCustFrom"><option value="">הכל</option>${opts}</select></div>
+<div class="field" style="margin:0"><label style="font-size:.8rem">עד גיליון</label><select id="repCustTo"><option value="">הכל</option>${opts}</select></div>
 <button class="btn btn-sm" onclick="reportCustomerRun()">הצגה</button>
 </div>
 <div id="repTable" class="table-wrap" style="margin-top:14px"></div>
 </div>`;
 }
 
+let _custClips = []; // הגזירים של הדוח האחרון — להורדת ה-ZIP
+let _custClipsName = '';
+
 async function reportCustomerRun() {
 const id = Number(document.getElementById('repCust').value);
 if (!id) { toast('בחר לקוח מהחיפוש', true); return; }
-const [ads, charges, payments] = await Promise.all([
+const fromIss = Number(document.getElementById('repCustFrom')?.value) || null;
+const toIss = Number(document.getElementById('repCustTo')?.value) || null;
+if (fromIss && toIss && fromIss > toIss) { toast('טווח גיליונות לא תקין', true); return; }
+const [allAds, charges, payments] = await Promise.all([
 runAll((f, t) => db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).order('id').range(f, t)),
 runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)),
 runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)),
 ]);
+// מספר גיליון פר מודעה — לסינון הטווח ולשמות הקבצים ב-ZIP
+const issNum = {}; (_custIssues.length ? _custIssues : (cache.issues || [])).forEach(i => issNum[i.id] = i.issue_number);
+const ranged = fromIss || toIss;
+const ads = allAds.filter(a => {
+if (!ranged) return true;
+const n = issNum[a.issue_id];
+if (n == null) return false; // בסינון טווח — רק מודעות ששובצו לגיליון
+return (!fromIss || n >= fromIss) && (!toIss || n <= toIss);
+});
+// קובץ הגזיר פר מודעה: העיצוב (design) העדכני; אם אין — חומר הגלם העדכני
+const files = ads.length ? await runAllIn((f, t) => db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at').order('id').range(f, t), 'ad_id', ads.map(a => a.id)) : [];
+const clipOf = {};
+files.forEach(f => {
+const cur = clipOf[f.ad_id];
+if (!cur || (f.kind === 'design' && cur.kind !== 'design')
+|| ((f.kind === 'design') === (cur.kind === 'design') && String(f.created_at) > String(cur.created_at))) clipOf[f.ad_id] = f;
+});
+_custClips = ads.filter(a => clipOf[a.id]).map(a => ({ ad: a, file: clipOf[a.id], issue: issNum[a.issue_id] }));
+_custClipsName = nameOf('customers', id) || ('לקוח_' + id);
 const billed = charges.filter(c => !['cancelled', 'lost'].includes(c.status)).reduce((s, c) => s + Number(c.amount), 0);
 const paid = payments.reduce((s, p) => s + Number(p.amount), 0);
 document.getElementById('repTable').innerHTML = `
 <div class="stats">
-${stat(ads.filter(a => a.status === 'published').length, 'מודעות שפורסמו')}
+${stat(ads.filter(a => a.status === 'published').length, 'מודעות שפורסמו' + (ranged ? ' בטווח' : ''))}
 ${stat(money(billed) || '₪0', 'סה"כ חויב')}
 ${stat(money(paid) || '₪0', 'סה"כ שולם')}
 ${stat(money(billed - paid) || '₪0', 'יתרה', billed - paid > 0 ? 'red' : '')}
 </div>
-<table class="data"><thead><tr><th>תאריך</th><th>מודעה</th><th>גיליון</th><th>סכום</th><th>סטטוס</th></tr></thead><tbody>
+${ranged ? '<p class="muted" style="font-size:.78rem;margin:0 0 8px">טבלת המודעות מסוננת לפי טווח הגיליונות שנבחר; סיכומי הכספים — כל התקופה.</p>' : ''}
+${_custClips.length ? `<div style="margin-bottom:10px"><button class="btn btn-sm" id="custClipsBtn" onclick="reportCustClipsZip()">⬇ הורדת כל הגזירים (${_custClips.length}) — ZIP</button></div>` : ''}
+<table class="data"><thead><tr><th>תאריך</th><th>מודעה</th><th>גיליון</th><th>סכום</th><th>סטטוס</th><th>גזיר</th></tr></thead><tbody>
 ${ads.map(a => `<tr><td>${heDate(a.created_at)}</td><td>${esc(a.title)}</td>
-<td>${esc(nameOf('issues', a.issue_id, 'issue'))}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)}</td></tr>`).join('')
-|| '<tr><td colspan="5">אין מודעות</td></tr>'}
+<td>${issNum[a.issue_id] != null ? 'גיליון ' + issNum[a.issue_id] : ''}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)}</td>
+<td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎 ${clipOf[a.id].kind === 'design' ? 'עיצוב' : 'חומר גלם'}</button>` : '—'}</td></tr>`).join('')
+|| `<tr><td colspan="6">אין מודעות${ranged ? ' בטווח הגיליונות שנבחר' : ''}</td></tr>`}
 </tbody></table>`;
+}
+
+/* הורדת כל הגזירים של הדוח האחרון כ-ZIP אחד (בלי דחיסה — שיטת store) */
+async function reportCustClipsZip() {
+if (!_custClips.length) { toast('אין גזירים להורדה', true); return; }
+const btn = document.getElementById('custClipsBtn');
+if (btn) btn.disabled = true;
+const entries = []; const used = {}; const errs = [];
+for (let i = 0; i < _custClips.length; i++) {
+const c = _custClips[i];
+if (btn) btn.textContent = `מוריד ${i + 1}/${_custClips.length}...`;
+const { data, error } = await db.storage.from('ad-files').download(c.file.storage_path);
+if (error || !data) { errs.push(c.ad.title || c.file.file_name || ''); continue; }
+const extM = String(c.file.file_name || c.file.storage_path).match(/\.[A-Za-z0-9]{1,6}$/);
+let name = (c.issue != null ? 'גיליון_' + c.issue + '_' : '') + String(c.ad.title || 'מודעה').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) + (extM ? extM[0] : '');
+// שם כפול (אותה מודעה בכמה שורות וכד') — מוסיפים מונה לפני הסיומת
+if (used[name]) {
+const n = ++used[name]; const dot = name.lastIndexOf('.');
+name = dot > 0 ? name.slice(0, dot) + '_' + n + name.slice(dot) : name + '_' + n;
+} else used[name] = 1;
+entries.push({ name, data: new Uint8Array(await data.arrayBuffer()) });
+}
+if (btn) { btn.disabled = false; btn.textContent = `⬇ הורדת כל הגזירים (${_custClips.length}) — ZIP`; }
+if (!entries.length) { toast('לא הצלחתי להוריד אף קובץ' + (errs.length ? ': ' + errs[0] : ''), true); return; }
+const a = document.createElement('a');
+a.href = URL.createObjectURL(_zipStore(entries));
+a.download = ('גזירים_' + _custClipsName).replace(/[\\/:*?"<>|]/g, '_') + '.zip';
+a.click();
+toast('✓ ירדו ' + entries.length + ' גזירים' + (errs.length ? ' (' + errs.length + ' נכשלו)' : ''));
+}
+
+/* בניית ZIP בדפדפן ללא ספרייה חיצונית. store בלבד (רוב הגזירים ממילא
+   PDF/JPG דחוסים). דגל 0x0800 = שמות קבצים ב-UTF-8, בשביל העברית. */
+const _zipCrcT = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } return t; })();
+function _zipCrc(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = _zipCrcT[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function _zipStore(files) {
+const enc = new TextEncoder();
+const u16 = v => new Uint8Array([v & 255, (v >> 8) & 255]);
+const u32 = v => new Uint8Array([v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]);
+const d = new Date();
+const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+const parts = [], central = [];
+let offset = 0;
+files.forEach(f => {
+const name = enc.encode(f.name);
+const crc = _zipCrc(f.data);
+parts.push(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(crc), u32(f.data.length), u32(f.data.length), u16(name.length), u16(0), name, f.data);
+central.push({ name, crc, size: f.data.length, offset });
+offset += 30 + name.length + f.data.length;
+});
+const cdStart = offset;
+central.forEach(c => {
+parts.push(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(c.crc), u32(c.size), u32(c.size), u16(c.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(c.offset), c.name);
+offset += 46 + c.name.length;
+});
+parts.push(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(offset - cdStart), u32(cdStart), u16(0));
+return new Blob(parts, { type: 'application/zip' });
 }
 
 
