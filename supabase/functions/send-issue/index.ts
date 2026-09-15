@@ -98,7 +98,7 @@ Deno.serve(async (req)=>{
       const { data } = await admin.from("issues").select("*").eq("id", issueIdIn).single();
       issue = data;
     } else {
-      const { data } = await admin.from("issues").select("*").not("pdf_url", "is", null).is("emailed_at", null).order("id", {
+      const { data } = await admin.from("issues").select("*").not("pdf_path", "is", null).is("emailed_at", null).order("id", {
         ascending: false
       }).limit(1);
       issue = (data || [])[0] || null;
@@ -108,10 +108,49 @@ Deno.serve(async (req)=>{
       sent: 0,
       note: "no-issue-ready"
     });
-    if (!issue.pdf_url) return json({
+    const issueNum = issue.number ?? issue.issue_number ?? issue.id;
+    // ה-PDF יושב באחסון הפרטי issues-archive תחת pdf_path — יוצרים קישור חתום
+    // (pdf_url נשמר כנפילה-אחורה לגיליונות ישנים אם קיים)
+    let pdfUrl = issue.pdf_url || null;
+    if (!pdfUrl && issue.pdf_path) {
+      const { data: s } = await admin.storage.from("issues-archive").createSignedUrl(issue.pdf_path, 60 * 60 * 24 * 7);
+      pdfUrl = s?.signedUrl || null;
+    }
+    if (!pdfUrl) return json({
       ok: false,
       error: "issue-has-no-pdf"
     }, 400);
+    // נמענים = מפרסמי הגיליון (מודעה שלא בוטלה/נדחתה, כמו ב-send-clip)
+    // + כל לקוח שסומן ברשימת התפוצה (customers.mailing_list) — בלי כפילויות מייל
+    const seen = new Set();
+    const recipients = [];
+    const addCust = (c)=>{
+      if (!c || !c.email || !c.email.includes("@")) return;
+      const key = c.email.trim().toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      recipients.push(c);
+    };
+    const { data: ads } = await admin.from("ads").select("customer_id").eq("issue_id", issue.id).not("status", "in", "(cancelled,rejected)");
+    const custIds = [
+      ...new Set((ads || []).map((a)=>a.customer_id).filter(Boolean))
+    ];
+    if (custIds.length) {
+      const { data: custs } = await admin.from("customers").select("id,name,invoice_name,email").in("id", custIds);
+      (custs || []).forEach(addCust);
+    }
+    // עמודת mailing_list מגיעה במיגרציה 2026-09-15 — מופע שטרם הריץ אותה
+    // מקבל שגיאה כאן וממשיך עם מפרסמי הגיליון בלבד
+    const { data: mlCusts, error: mlErr } = await admin.from("customers").select("id,name,invoice_name,email").eq("mailing_list", true);
+    if (!mlErr) (mlCusts || []).forEach(addCust);
+    // dry_run: ספירת נמענים לתצוגת אישור ב-UI — בלי לשלוח ובלי לתפוס את הגיליון
+    if (body?.dry_run) return json({
+      ok: true,
+      dry_run: true,
+      issue: issueNum,
+      recipients: recipients.length,
+      already_sent: issue.emailed_at || null
+    });
     // תפיסה אטומית של הגיליון (רק בנתיב האוטומטי, לא בדיקה): מסמנים emailed_at
     // מראש בתנאי שהוא עדיין null. ריצה מקבילה (cron + לחיצת אדמין) או ריצה שנייה
     // אחרי קריסה תקבל 0 שורות ותצא — במקום לשלוח שוב לכל הרשימה.
@@ -125,25 +164,14 @@ Deno.serve(async (req)=>{
         note: "already-claimed"
       });
     }
-    // סינון מבוטלות/נדחות — לקוח שמודעתו בוטלה לא אמור לקבל את הגיליון (כמו ב-send-clip)
-    const { data: ads } = await admin.from("ads").select("customer_id").eq("issue_id", issue.id).not("status", "in", "(cancelled,rejected)");
-    const custIds = [
-      ...new Set((ads || []).map((a)=>a.customer_id).filter(Boolean))
-    ];
-    let recipients = [];
-    if (custIds.length) {
-      const { data: custs } = await admin.from("customers").select("id,name,invoice_name,email").in("id", custIds);
-      recipients = (custs || []).filter((c)=>c.email && c.email.includes("@"));
-    }
     let attachBytes = null;
     try {
-      const r = await fetch(issue.pdf_url);
+      const r = await fetch(pdfUrl);
       const buf = new Uint8Array(await r.arrayBuffer());
       if (buf.byteLength <= ATTACH_LIMIT) attachBytes = buf;
     } catch (_e) {
       attachBytes = null;
     }
-    const issueNum = issue.number ?? issue.issue_number ?? issue.id;
     const subject = subjTmpl.replace(/\[מספר\]/g, String(issueNum));
     const client = new SMTPClient({
       connection: {
@@ -161,7 +189,7 @@ Deno.serve(async (req)=>{
     for (const c of recipients){
       const name = c.invoice_name || c.name || "לקוח";
       let text = bodyTmpl.replace(/\[שם הלקוח\]/g, name);
-      if (!attachBytes) text += "\n\nלצפייה בגיליון: " + issue.pdf_url;
+      if (!attachBytes) text += "\n\nלצפייה בגיליון: " + pdfUrl;
       const msg = {
         from: GMAIL_USER,
         to: c.email,

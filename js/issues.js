@@ -801,9 +801,14 @@ ${on ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-
 </div>`;
 })() : ''}
 <div class="card" id="archTable"></div>`;
+const mailOn = String((cache.settings || {}).issue_mail_enabled || '0') === '1';
 renderTable(document.getElementById('archTable'), withPdf, [
 { h: 'גיליון', f: r => `<b>גיליון ${r.issue_number}</b>` },
 { h: 'תאריך', f: r => heDate(r.publish_date) },
+...(isAdmin && mailOn ? [{ h: 'דיוור', f: r => {
+  const sent = r.emailed_at ? `<div class="muted" style="font-size:.76rem">נשלח ${heDateTime(r.emailed_at)}${r.email_log && Array.isArray(r.email_log.sent) ? ' · ' + r.email_log.sent.length + ' נמענים' : ''}${r.email_log && Array.isArray(r.email_log.failed) && r.email_log.failed.length ? ' · ⚠ ' + r.email_log.failed.length + ' נכשלו' : ''}</div>` : '';
+  return sent + `<button class="btn btn-sm btn-ghost" onclick="issueMailSend(${r.id})">📧 ${r.emailed_at ? 'שליחה חוזרת' : 'שליחה לתפוצה'}</button>`;
+} }] : []),
 { h: '', f: r => `<button class="btn btn-sm btn-ghost" onclick="archiveOpen('${esc(r.pdf_path)}')">📖 פתיחה</button>` },
 ], { empty: 'אין עדיין גיליונות בארכיון — העלה את ה-PDF הראשון' });
 }
@@ -867,6 +872,91 @@ document.getElementById('viewBack').classList.remove('open');
 toast('✓ גיליון ' + num + ' נשמר בארכיון');
 openPage('archive');
 }
+
+/* ==================== דיוור הגליון לרשימת תפוצה ==================== */
+/* נמענים: מפרסמי הגיליון + לקוחות שסומנו customers.mailing_list.
+   השליחה עצמה בפונקציית send-issue (Edge) — כאן רק אישור, הפעלה ומעקב. */
+
+async function issueMailSend(issueId) {
+  toast('בודק נמענים...');
+  const { data: dry, error: dryErr } = await db.functions.invoke('send-issue', { body: { issue_id: issueId, dry_run: true } });
+  if (dryErr || !dry || !dry.ok) { toast('שגיאה: ' + ((dry && dry.error) || (dryErr && dryErr.message) || 'לא ידוע'), true); return; }
+  if (!dry.recipients) { toast('אין נמענים עם כתובת מייל — סמן לקוחות "רשימת תפוצה" בטופס הלקוח', true); return; }
+  let q = 'לשלוח את גיליון ' + dry.issue + ' במייל ל-' + dry.recipients + ' נמענים?';
+  if (dry.already_sent) q = '⚠️ הגיליון כבר נשלח ב-' + heDateTime(dry.already_sent) + '.\nלשלוח שוב ל-' + dry.recipients + ' נמענים?';
+  if (!confirm(q)) return;
+  toast('שולח... שליחה לכל הרשימה יכולה לקחת כמה דקות');
+  const { data, error } = await db.functions.invoke('send-issue', { body: { issue_id: issueId } });
+  if (error || !data || !data.ok) { toast('שגיאה בשליחה: ' + ((data && data.error) || (error && error.message) || 'לא ידוע'), true); return; }
+  toast('✓ הגיליון נשלח ל-' + data.sent + ' נמענים' + (data.failed ? ' · ⚠ ' + data.failed + ' נכשלו' : ''));
+  openPage('archive');
+}
+
+async function issueMailToggle(on) {
+  await run(db.from('settings').upsert({ key: 'issue_mail_enabled', value: on ? '1' : '0' }));
+  cache.settings.issue_mail_enabled = on ? '1' : '0';
+  toast(on ? 'דיוור הגליון הופעל — כפתור השליחה בעמוד הארכיון' : 'דיוור הגליון כובה');
+}
+
+async function issueMailTmplSave() {
+  const s = (document.getElementById('imSubj') || {}).value || '';
+  const b = (document.getElementById('imBody') || {}).value || '';
+  await run(db.from('settings').upsert([
+    { key: 'issue_mail_subject', value: s.trim() },
+    { key: 'issue_mail_body', value: b.trim() },
+  ]));
+  cache.settings.issue_mail_subject = s.trim();
+  cache.settings.issue_mail_body = b.trim();
+  toast('נוסח הדיוור נשמר');
+}
+
+async function issueMailTest() {
+  const to = prompt('לאיזו כתובת לשלוח מייל בדיקה?', (typeof profile !== 'undefined' && profile.email) || '');
+  if (!to) return;
+  toast('שולח מייל בדיקה...');
+  const { data, error } = await db.functions.invoke('send-issue', { body: { test_to: to } });
+  if (error || !data || !data.ok) { toast('הבדיקה נכשלה: ' + ((data && data.error) || (error && error.message) || 'לא ידוע'), true); return; }
+  toast('✓ מייל הבדיקה נשלח ל-' + to);
+}
+
+/* כרטיס הגדרות "📧 דיוור הגליון" — מוזרק למסך ההגדרות */
+(function () {
+  const orig = Pages.settings && Pages.settings.render;
+  if (orig && !orig._issueMailWrapped) {
+    const wrapped = async function (el) {
+      const r = await orig.apply(this, arguments);
+      try {
+        const st = cache.settings || {};
+        const on = String(st.issue_mail_enabled || '0') === '1';
+        const card = document.createElement('div');
+        card.className = 'card card-pad';
+        card.innerHTML = `
+        <b>📧 דיוור הגליון</b>
+        <p class="muted" style="font-size:.82rem">שליחת ה-PDF של הגיליון במייל בלחיצה אחת (מעמוד הארכיון).
+        נמענים: מפרסמי אותו גיליון + כל לקוח שסומן "רשימת תפוצה" בטופס הלקוח.
+        דורש את סודות ה-Gmail‏ (GMAIL_USER + GMAIL_APP_PASSWORD) ב-Supabase → Edge Functions → Secrets.</p>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+          <input type="checkbox" ${on ? 'checked' : ''} onchange="issueMailToggle(this.checked)" style="width:18px;height:18px">
+          דיוור הגליון פעיל
+        </label>
+        <div class="field" style="margin-top:10px"><label>נושא המייל ([מספר] = מספר הגיליון)</label>
+          <input id="imSubj" value="${esc(st.issue_mail_subject || '')}" placeholder="@@PAPER_NAME@@ — גיליון [מספר]"></div>
+        <div class="field"><label>גוף המייל ([שם הלקוח] = שם הנמען)</label>
+          <textarea id="imBody" rows="3" placeholder="שלום [שם הלקוח],&#10;מצורף הגיליון החדש של @@PAPER_NAME@@. קריאה נעימה!">${esc(st.issue_mail_body || '')}</textarea></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="issueMailTmplSave()">שמירת נוסח</button>
+          <button class="btn btn-sm btn-ghost" onclick="issueMailTest()">✉ מייל בדיקה</button>
+        </div>`;
+        const anchor = el.querySelector('#activityLog');
+        const anchorCard = anchor ? anchor.closest('.card') : null;
+        if (anchorCard) el.insertBefore(card, anchorCard); else el.appendChild(card);
+      } catch (e) { console.error('issue-mail settings card', e); }
+      return r;
+    };
+    wrapped._issueMailWrapped = true;
+    Pages.settings.render = wrapped;
+  }
+})();
 
 async function archiveOpen(path) {
 const { data, error } = await db.storage.from('issues-archive').createSignedUrl(path, 600);
