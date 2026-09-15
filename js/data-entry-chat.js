@@ -3,6 +3,8 @@ data-entry-chat.js — בוט הזנת נתונים (צ'אט תפעולי לסו
 ------------------------------------------------------------
 בוט נפרד מצ'אט החשבוניות, על אותו שלד מוכח:
 - כותבים משפט חופשי → פענוח (Edge: parse-entry, Claude בצד השרת)
+- הזנה (new_deal) או שאילתה (query_publications — "מה פורסם ללקוח",
+  כולל הורדת גזירים; קריאה בלבד, על העוזרים של דוח היסטוריית לקוח)
 - התאמת לקוח fuzzy (Edge: match-customer) — לעולם לא מנחשים,
   והמועמדים מסוננים מול המטמון (RLS): סוכן רואה רק את הלקוחות שלו
 - כרטיס תצוגה מקדימה לעריכה ואישור → כתיבת חוזה (contracts) +
@@ -72,8 +74,11 @@ async function deFn(name, body) {
 /* ---------- מצב הצ'אט ---------- */
 let _deState = null;
 function deResetState() {
-  _deState = { reqId: null, rawText: '', pending: null, candidates: [], confidence: 'high', busy: false, customer: null, deal: null };
+  _deState = { reqId: null, rawText: '', pending: null, candidates: [], confidence: 'high', busy: false, customer: null, deal: null, mode: null, query: null };
 }
+/* תשובות שאילתה שמורות פר בועה — כדי שכפתור ZIP ישן יוריד את הגזירים שלו */
+let _deQuerySeq = 0;
+const _deQueryClips = {};
 
 /* ---------- הדף ---------- */
 Pages.entrychat = {
@@ -91,7 +96,8 @@ Pages.entrychat = {
       <div class="card card-pad" style="padding:12px 16px">
         <b>📝 הזנת נתונים</b>
         <div class="muted" style="font-size:.83rem;margin-top:2px">
-          כתוב משפט חופשי על עסקה שסגרת — למשל: <i>"עסקה של 4 פרסומים רבע עמוד מגיליון 295 לפסיפס"</i>.
+          כתוב משפט חופשי על עסקה שסגרת — למשל: <i>"עסקה של 4 פרסומים רבע עמוד מגיליון 295 לפסיפס"</i> —
+          או שאל <i>"מה פורסם לפסיפס בגיליונות 290–295?"</i> / <i>"תן לי את הגזירים של גן ורדים"</i>.
           שום דבר לא נכתב למערכת בלי אישור שלך בכרטיס. הבוט לא מפיק מסמכים כספיים — המנהל מקבל התראה ומפיק.
         </div>
       </div>
@@ -140,7 +146,7 @@ async function deChatSend() {
   deBubble(esc(text), 'ic-msg ic-user');
 
   // תשובה לשאלה פתוחה ("איזה לקוח?") — לא בקשה חדשה
-  if (_deState && _deState.pending === 'customer' && _deState.deal) {
+  if (_deState && _deState.pending === 'customer' && (_deState.deal || _deState.mode === 'query')) {
     deSetBusy(true);
     await deResolveCustomer(text);
     deSetBusy(false);
@@ -167,9 +173,18 @@ async function deChatSend() {
     }
     const parsed = p.data.parsed;
     db.from('entry_requests').update({ parsed_json: parsed }).eq('id', _deState.reqId).then(() => { });
+    // שאילתת "מה פורסם / גזירים" — קריאה בלבד, בלי כרטיס אישור
+    if (parsed.action === 'query_publications') {
+      _deState.mode = 'query';
+      const q = parsed.query || {};
+      _deState.query = { from: Number(q.from_issue) || 0, to: Number(q.to_issue) || 0, clips: !!q.want_clips };
+      if (parsed.customer_name_raw) await deResolveCustomer(parsed.customer_name_raw);
+      else deAskCustomerAgain();
+      return;
+    }
     if (parsed.action !== 'new_deal') {
       db.from('entry_requests').update({ status: 'cancelled' }).eq('id', _deState.reqId).then(() => { });
-      deSay('בשלב הזה אני יודע להזין רק <b>עסקת פרסומים על לקוח קיים</b> — למשל: <i>"עסקה של 4 פרסומים רבע עמוד מגיליון 295 לפסיפס"</i>.<br>הפקת מסמכים כספיים נשארת בצ׳אט החשבוניות (למנהל).');
+      deSay('אני יודע להזין <b>עסקת פרסומים על לקוח קיים</b> (למשל: <i>"עסקה של 4 פרסומים רבע עמוד מגיליון 295 לפסיפס"</i>) ולענות על <b>"מה פורסם ללקוח"</b> כולל הורדת גזירים (למשל: <i>"תן לי את הגזירים של פסיפס מגיליונות 290–295"</i>).<br>הפקת מסמכים כספיים נשארת בצ׳אט החשבוניות (למנהל).');
       return;
     }
     _deState.confidence = parsed.confidence || 'low';
@@ -224,14 +239,15 @@ async function deResolveCustomer(name) {
     deSay((foundHidden && profile.role === 'sales'
       ? 'לא נמצא לקוח בשם "' + esc(name) + '" בין הלקוחות המשויכים אליך.'
       : 'לא נמצא לקוח קיים בשם "' + esc(name) + '".') +
-      ' עסקה נפתחת על כרטיס לקוח קיים בלבד (פתיחת לקוח חדש — דרך מסך הלקוחות).' +
+      (_deState.mode === 'query' ? '' : ' עסקה נפתחת על כרטיס לקוח קיים בלבד (פתיחת לקוח חדש — דרך מסך הלקוחות).') +
       '<div class="ic-choices"><button class="btn btn-sm btn-ghost" onclick="deAskCustomerAgain()">✎ נסה שם אחר</button></div>');
   }
 }
 function deSetCustomer(c) {
   _deState.customer = { id: c.id, name: c.name };
   _deState.pending = null;
-  deStartNewDeal();
+  if (_deState.mode === 'query') deRunQuery();
+  else deStartNewDeal();
 }
 function dePickCustomer(i) {
   const c = _deState.candidates[i];
@@ -240,8 +256,61 @@ function dePickCustomer(i) {
 }
 function deAskCustomerAgain() {
   _deState.pending = 'customer';
-  deSay('על איזה לקוח העסקה? כתוב את שם הלקוח למטה.');
+  deSay(_deState.mode === 'query' ? 'על איזה לקוח לבדוק? כתוב את שם הלקוח למטה.' : 'על איזה לקוח העסקה? כתוב את שם הלקוח למטה.');
   document.getElementById('deInput')?.focus();
+}
+
+/* ---------- שאילתת "מה פורסם" + גזירים (קריאה בלבד) ----------
+   נשען על העוזרים של דוח היסטוריית לקוח (reports.js, נטען לפנינו
+   בבאנדל): custPubsFetch לשליפה ו-reportCustClipsZip להורדת ה-ZIP. */
+async function deRunQuery() {
+  const cst = _deState.customer, q = _deState.query || {};
+  if (typeof custPubsFetch !== 'function') { deSayErr('מודול הדוחות לא נטען — רענן את הדף ונסה שוב.'); return; }
+  const wait = deSay('בודק מה פורסם ל<b>' + esc(cst.name || '') + '</b>... ⏳');
+  deSetBusy(true);
+  try {
+    const pubs = await custPubsFetch(cst.id, q.from || null, q.to || null);
+    wait.remove();
+    const { ads, clipOf, issNum } = pubs;
+    const rangeTxt = (q.from || q.to) ? ' בגיליונות ' + (q.from || '…') + '–' + (q.to || '…') : '';
+    if (_deState.reqId) db.from('entry_requests').update({
+      status: 'committed',
+      result_json: { kind: 'query', customer_id: cst.id, ads: ads.length, clips: pubs.clips.length },
+    }).eq('id', _deState.reqId).then(() => { });
+    if (!ads.length) {
+      deSay('לא נמצאו מודעות ל<b>' + esc(cst.name || '') + '</b>' + rangeTxt + '.');
+    } else {
+      const qid = ++_deQuerySeq;
+      _deQueryClips[qid] = { clips: pubs.clips, name: cst.name || ('לקוח_' + cst.id) };
+      const published = ads.filter(a => a.status === 'published').length;
+      const SHOW = 40;
+      const rows = ads.slice(0, SHOW).map(a => `<tr>
+        <td>${issNum[a.issue_id] != null ? 'גיליון ' + issNum[a.issue_id] : heDate(a.created_at)}</td>
+        <td>${esc(a.title)}</td><td>${pill('ad', a.status)}</td>
+        <td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎</button>` : '—'}</td>
+      </tr>`).join('');
+      deSay('ל<b>' + esc(cst.name || '') + '</b>' + rangeTxt + ': <b>' + ads.length + '</b> מודעות, מהן <b>' + published + '</b> פורסמו · <b>' + pubs.clips.length + '</b> גזירים זמינים.' +
+        '<div class="table-wrap" style="margin-top:8px;max-height:280px;overflow:auto"><table class="data"><thead><tr><th>גיליון</th><th>מודעה</th><th>סטטוס</th><th>גזיר</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        (ads.length > SHOW ? '<div class="muted" style="font-size:.78rem">מוצגות ' + SHOW + ' מתוך ' + ads.length + ' — הרשימה המלאה בדוח היסטוריית לקוח.</div>' : '') +
+        '<div class="ic-choices" style="margin-top:8px">' +
+        (pubs.clips.length ? `<button class="btn btn-sm" onclick="deQueryZip(${qid}, this)">⬇ הורדת הגזירים (${pubs.clips.length}) — ZIP</button>` : '') +
+        '<button class="btn btn-sm btn-ghost" onclick="openPage(\'reports\')">📊 לדוח המלא</button></div>');
+    }
+    deLoadHistory();
+  } catch (e) {
+    wait.remove();
+    if (_deState.reqId) db.from('entry_requests').update({ status: 'error', error_message: String(e && e.message || e).slice(0, 300) }).eq('id', _deState.reqId).then(() => { });
+    deSayErr('השאילתה נכשלה: ' + esc(String(e && e.message || e)));
+  } finally {
+    deSetBusy(false);
+    deResetState();
+    document.getElementById('deInput')?.focus();
+  }
+}
+function deQueryZip(qid, btn) {
+  const d = _deQueryClips[qid];
+  if (!d || typeof reportCustClipsZip !== 'function') { toast('הגזירים לא זמינים — הרץ את השאילתה שוב', true); return; }
+  reportCustClipsZip(btn, d.clips, d.name);
 }
 
 /* ---------- כרטיס העסקה ---------- */
@@ -602,7 +671,8 @@ async function deProbe() {
         card.innerHTML = `
         <b>בוט הזנת נתונים 📝</b>
         <p class="muted" style="font-size:.82rem">צ׳אט תפעולי לסוכנים: הזנת עסקת פרסומים (חוזה + מודעות) ממשפט חופשי,
-        עם אישור לפני כל כתיבה. הבוט לא מפיק מסמכים כספיים — בעסקה נשלחת התראה למנהל שמפיק
+        עם אישור לפני כל כתיבה, ומענה על שאילתות "מה פורסם ללקוח" כולל הורדת גזירים (ZIP).
+        הבוט לא מפיק מסמכים כספיים — בעסקה נשלחת התראה למנהל שמפיק
         מצ׳אט החשבוניות. עובד גם במופע בלי EZcount. דורש את מיגרציית data_entry_bot
         ואת ANTHROPIC_API_KEY ב-Supabase → Edge Functions → Secrets.</p>
         <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
