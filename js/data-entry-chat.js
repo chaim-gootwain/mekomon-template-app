@@ -586,6 +586,7 @@ async function deAlertInvoice(alertId) {
     customer_id: Number(p.cust_id) || null,
     customer_name: p.customer_name || '',
     customer_source: p.cust_id ? 'existing' : null,
+    _contract_id: Number(p.contract_id) || null, // אחרי ההפקה החוזה יסומן "חויב מראש"
     line_items: [{
       description: p.doc_label || ('פרסום — ' + (p.scope || '')),
       quantity: Number(p.count) || 1,

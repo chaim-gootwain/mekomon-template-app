@@ -580,6 +580,8 @@ async function invChatApprove() {
   }
   if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
   if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  // הפקה על חוזה שלם (למשל מהתראת עסקת סוכן) — סימון "חויב מראש"
+  if (f._contract_id && typeof markContractPrepaid === 'function') { try { await markContractPrepaid(f._contract_id); } catch (e) { console.error('mark prepaid', e); } }
   let icIssuesNote = '';
   try { icIssuesNote = await invChatMarkIssueAds(f) || ''; } catch (e) { console.error('mark issue ads', e); }
   const t = invChatTotals(f.line_items, invChatVatPct());
@@ -1098,6 +1100,8 @@ async function invChatNewDealApprove() {
       docNum = doc.doc_number; pdfUrl = doc.pdf_url;
       if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: docNum ? String(docNum) : null, icount_doc_url: pdfUrl || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
       if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+      // העסקה חויבה מראש: הדגל על החוזה + סימון המודעות שנוצרו כ"חויבו"
+      if (contractId && typeof markContractPrepaid === 'function') { try { await markContractPrepaid(contractId); } catch (e) { console.error('mark prepaid', e); } }
       done.push('חשבון עסקה' + (docNum ? ' #' + docNum : ''));
     }
     // רישום בציר הזמן של הלקוח (כמו בהזנת גיליון) — לא קריטי
