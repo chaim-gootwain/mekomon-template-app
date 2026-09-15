@@ -121,8 +121,8 @@ function _pvEnsurePdfJs() {
   if (_pvPdfJsPromise) return _pvPdfJsPromise;
   _pvPdfJsPromise = new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-    s.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { } res(); };
+    s.src = 'js/vendor/pdf.min.js';
+    s.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/vendor/pdf.worker.min.js'; } catch (e) { } res(); };
     s.onerror = () => rej(new Error('pdfjs load'));
     document.head.appendChild(s);
   });
