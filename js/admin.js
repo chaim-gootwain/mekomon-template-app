@@ -240,6 +240,8 @@ ${typeof weeklySummaryCard === 'function' ? weeklySummaryCard() : ''}
 
 ${typeof collSettingsCard === 'function' ? collSettingsCard() : ''}
 
+${typeof pipSettingsCard === 'function' ? pipSettingsCard() : ''}
+
 ${typeof standingOrdersCard === 'function' ? standingOrdersCard() : ''}
 
 ${typeof agenciesCard === 'function' ? agenciesCard() : ''}
