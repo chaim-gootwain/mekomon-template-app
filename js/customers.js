@@ -794,26 +794,53 @@ document.head.appendChild(st);
 document.addEventListener('click', e => { if (!e.target.closest('.cc-mwrap')) ccMenuClose(); });
 }
 
-/* כרטסת מאוחדת: חיובים + תשלומים כרונולוגית עם יתרה רצה */
+/* כרטסת מאוחדת: חיובים + תשלומים כרונולוגית עם יתרה רצה.
+   מנהל: כפתור ✕ על חיוב פתוח — ביטול חיוב כפול (למשל: הפרסומים נרשמו
+   כחוב וגם החשבונית שהופקה נרשמה כחוב על אותו כסף). */
 function _custLedgerHtml(charges, payments) {
   const live = (charges || []).filter(c => !['cancelled', 'lost'].includes(c.status));
   const rows = [];
-  live.forEach(c => rows.push({ date: c.issued_date, type: 'charge', desc: c.description || 'חיוב', amount: Number(c.amount) || 0, inv: c.invoice_number, status: c.status }));
+  live.forEach(c => rows.push({ date: c.issued_date, type: 'charge', desc: c.description || 'חיוב', amount: Number(c.amount) || 0, inv: c.invoice_number, status: c.status, id: c.id, cid: c.customer_id }));
   (payments || []).forEach(p => rows.push({ date: p.paid_date, type: 'pay', desc: 'תשלום' + (PAY_METHODS[p.method] ? ' · ' + PAY_METHODS[p.method] : '') + (p.notes ? ' · ' + p.notes : ''), amount: Number(p.amount) || 0 }));
   rows.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
   if (!rows.length) return '<p class="muted">אין תנועות כספיות</p>';
+  const canCancel = profile.role === 'admin';
   let bal = 0;
   const body = rows.map(r => {
     if (r.type === 'charge') bal += r.amount; else bal -= r.amount;
+    const openCharge = r.type === 'charge' && ['pending', 'invoiced', 'partial', 'overdue'].includes(r.status);
     return `<tr>
       <td style="white-space:nowrap">${heDate(r.date)}</td>
       <td>${esc(r.desc)}${r.inv ? ` <span class="muted" dir="ltr" style="font-size:.78rem">#${esc(r.inv)}</span>` : ''}${r.type === 'charge' && r.status ? ' ' + pill('charge', r.status) : ''}</td>
       <td style="color:#b91c1c">${r.type === 'charge' ? money(r.amount) : ''}</td>
       <td style="color:#15803d">${r.type === 'pay' ? money(r.amount) : ''}</td>
       <td><b style="color:${bal > 0.001 ? '#b91c1c' : '#15803d'}">${money(bal)}</b></td>
+      <td>${canCancel && openCharge ? `<button class="btn btn-sm btn-danger-ghost" title="ביטול חיוב (חוב כפול / נרשם בטעות)" onclick="custChargeCancel(${r.id}, ${r.cid})">✕</button>` : ''}</td>
     </tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="data"><thead><tr><th>תאריך</th><th>תיאור</th><th>חיוב</th><th>תשלום</th><th>יתרה</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="data"><thead><tr><th>תאריך</th><th>תיאור</th><th>חיוב</th><th>תשלום</th><th>יתרה</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* ביטול חיוב פתוח מהכרטסת (מנהל) — לחוב כפול או רישום שגוי. לא נוגע
+   במסמכי EZcount (זיכוי מסמך — דרך מסך החשבוניות); רק בספר החוב. */
+async function custChargeCancel(chargeId, custId) {
+  if (profile.role !== 'admin') return;
+  const ch = await run(db.from('charges').select('id,amount,description,status,notes').eq('id', chargeId).single());
+  if (!ch || ['cancelled', 'lost', 'paid'].includes(ch.status)) { toast('החיוב כבר לא פתוח', true); return; }
+  const pays = await run(db.from('payments').select('id,amount').eq('charge_id', chargeId));
+  if ((pays || []).length) {
+    toast('לחיוב הזה נרשמו תשלומים (' + money(pays.reduce((s, p) => s + Number(p.amount), 0)) + ') — אי אפשר לבטל אותו ישירות. טפל דרך זיכוי.', true);
+    return;
+  }
+  if (!confirm('לבטל את החיוב "' + (ch.description || 'חיוב') + '" על ' + money(ch.amount) + '?\n' +
+    'החוב יירד מהכרטסת ומכל מסכי הגבייה. המסמך ב-EZcount (אם קיים) לא מבוטל — זה תיקון רישום בלבד.')) return;
+  await run(db.from('charges').update({
+    status: 'cancelled',
+    notes: ((ch.notes || '') + ' · בוטל ידנית מהכרטסת (חוב כפול/שגוי)').trim(),
+  }).eq('id', chargeId));
+  try { await addInteraction('customer', custId, '✕ בוטל חיוב מהכרטסת: ' + (ch.description || '') + ' — ' + money(ch.amount) + ' (חוב כפול/שגוי)'); } catch (e) { }
+  toast('✓ החיוב בוטל');
+  openCustomerCard(custId);
 }
 
 /* ============================================================
