@@ -1,7 +1,7 @@
 /* ============================================================
 approve-import.js — אישור שורה-שורה של ייבוא גיליון
 ------------------------------------------------------------
-- קורא תור מ-settings.import_queue_295 (נכתב ע"י הייבוא)
+- קורא תור מ-settings.import_queue_<מס' גיליון> (נכתב ע"י הייבוא)
 - בכניסה נפתח חלון לכל שורה: מפרסם · התאמת לקוח · עמוד · מחיר
 - אשר → יוצר מודעה משובצת (status=placed) בעמוד, ומתאים/יוצר לקוח
 - דחה → מדלג בלי ליצור · דלג → משאיר לפעם הבאה
@@ -10,18 +10,24 @@ approve-import.js — אישור שורה-שורה של ייבוא גיליון
 
 'use strict';
 
-const AQ_KEY = 'import_queue_295';
+/* מפתח התור מתגלה דינמית (import_queue_<מס' גיליון>) — לא מקודד בתבנית */
+const AQ_KEY_PREFIX = 'import_queue_';
+let AQ_KEY = null;
 let _aqState = null;
 
 async function aqLoad() {
   try {
-    const { data } = await db.from('settings').select('value').eq('key', AQ_KEY).single();
-    if (!data || !data.value) return null;
-    return JSON.parse(data.value);
+    const { data } = await db.from('settings').select('key,value').like('key', AQ_KEY_PREFIX + '%');
+    for (const row of (data || [])) {
+      if (!row.value) continue;
+      let q; try { q = JSON.parse(row.value); } catch (e) { continue; }
+      if (q && Array.isArray(q.items) && q.items.some(it => !it.done)) { AQ_KEY = row.key; return q; }
+    }
+    return null;
   } catch (e) { return null; }
 }
 async function aqPersist() {
-  if (!_aqState) return;
+  if (!_aqState || !AQ_KEY) return;
   try {
     // מיזוג עם המצב במסד — שלא נדרוס "טופל" שסומן במקביל אצל מנהל אחר
     const { data } = await db.from('settings').select('value').eq('key', AQ_KEY).single();

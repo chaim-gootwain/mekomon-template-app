@@ -31,7 +31,11 @@ jobs:
           LEAK=$(echo "$ADDED" | grep -inE 'עמנואל שלי|אמצעש|hkbstegusfdjtkjxkmjc|lnpvebpqtogwegvudvou|2b3990|f26622|058-322-1232|053-412-0800' || true)
           if [ -n "$LEAK" ]; then
             echo "::error::נמצאו ערכים אמיתיים של מופע בתוך התבנית (אמורים להיות רק טוקנים):"; echo "$LEAK" | head -10; FAIL=1; fi
-          # 3) (בתבנית טוקנים דווקא תקינים — בדיקה זו לא רלוונטית)
+          # 3) קישורי תשלום/סליקה קשיחים — שייכים ל-settings של מופע, לא לקוד
+          PAY=$(echo "$ADDED" | grep -inE 'pay360|isracard|SaleId=' || true)
+          if [ -n "$PAY" ]; then
+            echo "::error::נמצאו קישורי תשלום מקודדים קשיח (שייכים ל-settings.classified_pay_links של המופע):"; echo "$PAY" | head -10; FAIL=1; fi
+          # 4) (בתבנית טוקנים דווקא תקינים — בדיקה זו לא רלוונטית)
           TOK=""
           if [ -n "$TOK" ]; then
             echo "::error::נשארו טוקנים לא מפוענחים בקוד המופע:"; echo "$TOK" | head -10; FAIL=1; fi

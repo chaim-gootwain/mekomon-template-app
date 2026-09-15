@@ -162,21 +162,11 @@ const CATS = [
   ['gemach','גמ״חים'],['lost','השבת אבידה'],['other','שונות']
 ];
 
-// קישורי תשלום אמיתיים (ישראכרט Pay360) — קבועים מראש לפי סוג/מילים/מסלול 4+1.
-// אין קישור למודעה עם תמונה + 4+1 (לא מוצע בטופס), ואין קישור מעבר ל-22 מילה (free_words 12 + בלוק של 10).
-const PAY_LINKS = {
-  regular: {
-    10: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=AD36D5E5-5BED-EA09-BF35-717B297CA706', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=5A9E03F9-A409-8F7D-8170-8C77DAF48304' },
-    20: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=9C61C820-6881-E18C-0E3B-F1149CBBD912', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=B3E6358C-2253-D0B6-3454-95CEB564886D' }
-  },
-  bold: {
-    10: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=9394555B-0F71-6FBF-C25C-4C108BDF0B5A', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=2C080DF4-A067-842B-16C6-CB5378A19E46' },
-    20: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=C9A13A14-51CC-45BD-7167-2936C0A6874A', pkg:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=8014B9CB-922E-6B6F-94B7-20D13D0A598D' }
-  },
-  image: {
-    10: { single:'https://pay360.isracard.co.il/CustomerPayment/GenericURL?SaleId=2342C08E-43A9-FB3E-C2ED-8BB62043C9AC', pkg:null }
-  }
-};
+// קישורי תשלום (Pay360 וכד') — נטענים בזמן ריצה מהגדרות המופע
+// (settings.classified_pay_links דרך ה-RPC הציבורי portal_pay_links),
+// לא מקודדים בתבנית. מבנה: {סוג:{מדרגת מילים:{single,pkg}}}.
+// מופע בלי קישורים — כפתור התשלום מוסתר.
+let PAY_LINKS = {};
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function wc(t){return String(t||'').trim().split(/\s+/).filter(Boolean).length;}
@@ -233,6 +223,12 @@ async function init(){
   const {data, error} = await db.rpc('portal_classified_meta');
   if(error||!data){document.getElementById('loading').textContent='שגיאה בטעינה — נסו לרענן';return;}
   META = data;
+  // קישורי תשלום של המופע (אם הוגדרו); כשל/היעדר — פשוט בלי כפתור תשלום
+  try{
+    const pl = await db.rpc('portal_pay_links');
+    if(pl && pl.data && typeof pl.data === 'object') PAY_LINKS = pl.data;
+  }catch(e){}
+  if(!Object.keys(PAY_LINKS).length) document.getElementById('payLinkBtn').style.display='none';
   // קטגוריות
   document.getElementById('fCat').innerHTML = CATS.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join('');
   // מחירי סוג
