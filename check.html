@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@@PAPER_NAME@@ — בדיקת חיבור</title>
+<style>
+  body{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:24px;color:#1e293b}
+  .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:#64748b;font-size:14px;margin-bottom:20px}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:12px 8px;border-bottom:1px solid #eef1f7;font-size:16px}
+  .row .st{font-weight:700;white-space:nowrap}
+  .ok{color:#1e7e34}.bad{color:#c0392b}.wait{color:#94a3b8}
+  #verdict{margin-top:20px;padding:14px;border-radius:10px;font-size:16px;line-height:1.6;display:none}
+  .v-bad{background:#fdecea;color:#8c2318;display:block!important}
+  .v-ok{background:#e8f5e9;color:#1b5e20;display:block!important}
+  .nojs{background:#fdecea;color:#8c2318;padding:14px;border-radius:10px;font-size:17px;font-weight:700;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>בדיקת חיבור למערכת</h1>
+  <div class="sub">הדף בודק מה נחסם ברשת שלך. המתן כמה שניות ואז צלם את המסך ושלח.</div>
+
+  <div id="nojs" class="nojs">
+    ❌ אם אתה רואה רק את ההודעה הזו (והשורות למטה נשארות אפורות) —
+    הסינון חוסם הרצת JavaScript באתר הזה לגמרי.
+    יש לבקש מספק הסינון לאשר את האתר: imanuel-sheli.netlify.app
+  </div>
+
+  <div class="row"><span>1. הרצת קוד בדף (JavaScript)</span><span class="st wait" id="t-js">ממתין…</span></div>
+  <div class="row"><span>2. קובץ ספרייה מהאתר (js/vendor)</span><span class="st wait" id="t-vendor">ממתין…</span></div>
+  <div class="row"><span>3. קובץ המערכת (app.bundle.js)</span><span class="st wait" id="t-bundle">ממתין…</span></div>
+  <div class="row"><span>4. עיצוב המערכת (css/style.css)</span><span class="st wait" id="t-css">ממתין…</span></div>
+  <div class="row"><span>5. מסד הנתונים (supabase.co)</span><span class="st wait" id="t-db">ממתין…</span></div>
+  <div class="row"><span>6. גופנים (fonts.googleapis.com)</span><span class="st wait" id="t-fonts">ממתין…</span></div>
+  <div class="row"><span>7. שרת CDN חיצוני (jsdelivr) — לא חובה</span><span class="st wait" id="t-cdn">ממתין…</span></div>
+
+  <div class="row"><span>8. שלמות קובץ המערכת (האם הסינון משנה אותו)</span><span class="st wait" id="t-int">ממתין…</span></div>
+  <div id="intOut" style="display:none;margin-top:14px;padding:12px;border-radius:10px;background:#fdecea;color:#8c2318;font-size:13px;line-height:1.7"></div>
+
+  <div id="verdict"></div>
+  <div class="sub" style="margin-top:16px" id="ua"></div>
+</div>
+
+<script>
+/* בדיקה 8: מוריד את קובץ המערכת כפי שהוא מגיע לדפדפן הזה, ומשווה לאזור
+   שידוע שנשבר (סביב שורה 9458) — כדי לראות אילו שורות הסינון מוחק. */
+(function () {
+  var EXPECTED = ["const { cadence, selected_dates, used_offset, ...safe } = rec;","res = await doSave(safe);","if (!res.error) toast('נשמר (התדירות תיכנס כשה-DB יתעדכן)');","} else if (!res.error) {","toast(id ? 'נשמר' : 'החוזה נוצר');","}","if (res.error) { toast('שגיאה: ' + res.error.message, true); return; }","const newId = id || (res.data && res.data.id);","if (!id) { try { await addInteraction('customer', rec.customer_id, `נחתם חוזה: ${_subCadenceHe(cad)} — ${nameOf('priceList', rec.price_item_id)} × ${rec.total_inserts}`); } catch (e) { } }","// חוזה חדש → פותח ישר את טופס \"מודעה חדשה\" עם פרטי החוזה ממולאים מראש,","// כך שהמשתמש עצמו יזין את הנחיית העיצוב (וכל פרט אחר) — החוזה עצמו נשאר ללא שינוי.","// (אלא אם סומן \"דלג על הקרוב\", או שאין גיליון פתוח שמתאים לתדירות החוזה)","let _subPendingAdPrefill = null;","if (!id && newId && rec.active && !rec.skip_next) {","try {","const openIssues = await run(db.from('issues').select('id,issue_number,publish_date,print_date,status')",".not('status', 'in', '(\"published\",\"closed\")').order('publish_date'));","const T = today();","const upcoming = openIssues.find(i => (i.publish_date || '') >= T) || openIssues[0];","const c = await run(db.from('contracts').select('*').eq('id', newId).single());","if (upcoming && c && subIssueMatches(upcoming, c, openIssues)) {","const perInsert = c.total_inserts ? Math.round(Number(c.total_price) / c.total_inserts * 100) / 100 : Number(c.total_price);","_subPendingAdPrefill = {","customer_id: c.customer_id, price_item_id: c.price_item_id, issue_id: upcoming.id,","price: perInsert, contract_id: c.id, source: 'contract',","title: (nameOf('customers', c.customer_id) || 'לקוח') + ' — חוזה',","};","}","} catch (e) { console.error('prep contract ad prefill', e); }","}","document.getElementById('viewBack').classList.remove('open');"];
+  var elInt = document.getElementById('t-int');
+  var out = document.getElementById('intOut');
+  function mark(ok, extra) {
+    elInt.textContent = (ok ? '✅ תקין' : '❌ הקובץ שונה בדרך') + (extra ? ' (' + extra + ')' : '');
+    elInt.className = 'st ' + (ok ? 'ok' : 'bad');
+  }
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function codeLine(prefix, l) {
+    return '<span dir="ltr" style="font-family:monospace;display:block;unicode-bidi:isolate">' + prefix + ' ' + esc(l) + '</span>';
+  }
+  fetch('app.bundle.js?diag=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.text(); })
+    .then(function (text) {
+      var his = text.split('\n').map(function (l) { return l.trim(); });
+      var report = 'מספר שורות אצלך: ' + his.length + ' (בשרת: 17801)';
+      var ai = -1;
+      for (var i = 0; i < his.length; i++) { if (his[i].indexOf('prep contract ad prefill') > -1) { ai = i; break; } }
+      if (ai === -1) {
+        mark(false, 'קטע העוגן חסר');
+        out.style.display = 'block';
+        out.textContent = report + ' — קטע העוגן לא נמצא בקובץ בכלל.';
+        return;
+      }
+      var win = his.slice(Math.max(0, ai - 30), ai + 3);
+      var missing = EXPECTED.filter(function (e) { return e && win.indexOf(e) === -1; });
+      var extra = win.filter(function (h) { return h && EXPECTED.indexOf(h) === -1; });
+      if (his.length === 17801 && missing.length === 0) { mark(true); return; }
+      mark(false, missing.length ? missing.length + ' שורות חסרות באזור שנבדק' : 'אורך הקובץ שונה מהמקור');
+      out.style.display = 'block';
+      out.innerHTML = '<b>' + report + '</b><br>' +
+        (missing.length ? '<b>שורות שנמחקו/שונו על ידי הסינון:</b><br>' + missing.map(function (l) { return codeLine('-', l); }).join('') : '') +
+        (extra.length ? '<b>שורות שמופיעות אצלך ולא במקור:</b><br>' + extra.map(function (l) { return codeLine('+', l); }).join('') : '');
+    })
+    .catch(function () { mark(false, 'שגיאת הורדה'); });
+})();
+</script>
+
+<script>
+(function(){
+  document.getElementById('nojs').style.display = 'none';
+  mark('t-js', true);
+  document.getElementById('ua').textContent = 'דפדפן: ' + navigator.userAgent;
+
+  function mark(id, ok, extra){
+    var el = document.getElementById(id);
+    el.textContent = (ok ? '✅ עובד' : '❌ נחסם') + (extra ? ' (' + extra + ')' : '');
+    el.className = 'st ' + (ok ? 'ok' : 'bad');
+    el.dataset.done = ok ? '1' : '0';
+  }
+
+  // בדיקת הורדה עם מגבלת זמן — כשל או תקיעה נחשבים חסימה
+  function probe(id, url, opts){
+    var ctl = new AbortController();
+    var timer = setTimeout(function(){ ctl.abort(); }, 10000);
+    return fetch(url, Object.assign({cache:'no-store', signal: ctl.signal}, opts || {}))
+      .then(function(r){ clearTimeout(timer); mark(id, r.ok, 'קוד ' + r.status); return r.ok; })
+      .catch(function(){ clearTimeout(timer); mark(id, false); return false; });
+  }
+
+  var results = {};
+  Promise.all([
+    probe('t-vendor', 'js/vendor/supabase.min.js').then(function(ok){ results.vendor = ok; }),
+    probe('t-bundle', 'app.bundle.js').then(function(ok){ results.bundle = ok; }),
+    probe('t-css', 'css/style.css').then(function(ok){ results.css = ok; }),
+    probe('t-db', '@@SUPABASE_URL@@/auth/v1/health',
+      {headers:{apikey:'@@SUPABASE_KEY@@'}}).then(function(ok){ results.db = ok; }),
+    probe('t-fonts', 'https://fonts.googleapis.com/css2?family=Heebo&display=swap').then(function(ok){ results.fonts = ok; }),
+    probe('t-cdn', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/package.json').then(function(ok){ results.cdn = ok; })
+  ]).then(function(){
+    var v = document.getElementById('verdict');
+    if (results.vendor && results.bundle && results.css && results.db) {
+      v.className = 'v-ok';
+      v.textContent = '✅ כל מה שהמערכת צריכה — עובד ברשת הזו. אם המערכת עדיין לא עולה, נסה רענון כפוי (Ctrl+Shift+R) או ניקוי נתוני האתר.';
+    } else {
+      v.className = 'v-bad';
+      var need = [];
+      if (!results.vendor || !results.bundle || !results.css) need.push('imanuel-sheli.netlify.app (האתר עצמו — כולל קובצי קוד ועיצוב)');
+      if (!results.db) need.push('hkbstegusfdjtkjxkmjc.supabase.co (מסד הנתונים)');
+      v.textContent = '❌ נמצאה חסימה. יש לבקש מספק הסינון לאשר במלואן את הכתובות: ' + need.join(' וגם ') + '. צלם מסך זה ושלח.';
+    }
+  });
+})();
+</script>
+</body>
+</html>
