@@ -631,8 +631,8 @@ if (window.jspdf && window.jspdf.jsPDF && window.html2canvas) return Promise.res
 if (_fpPdfLibsPromise) return _fpPdfLibsPromise;
 const load = (src) => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(s); });
 _fpPdfLibsPromise = Promise.all([
-(window.jspdf && window.jspdf.jsPDF) ? Promise.resolve() : load('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'),
-window.html2canvas ? Promise.resolve() : load('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js')
+(window.jspdf && window.jspdf.jsPDF) ? Promise.resolve() : load('js/vendor/jspdf.umd.min.js'),
+window.html2canvas ? Promise.resolve() : load('js/vendor/html2canvas.min.js')
 ]);
 return _fpPdfLibsPromise;
 }
