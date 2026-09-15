@@ -38,7 +38,7 @@
 'use strict';
 const SUPA_URL = '@@SUPABASE_URL@@';
 const SUPA_KEY = '@@SUPABASE_KEY@@';
-const out = { static: null, bundleMs: null, bundleMbps: null, cold: null, warm: null };
+const out = { static: null, bundleMs: null, bundleMbps: null, cold: null, warm: null, dbErr: '' };
 
 function fmt(ms) { return ms == null ? 'נכשל' : (ms >= 1000 ? (ms / 1000).toFixed(1) + ' שנ׳' : Math.round(ms) + 'ms'); }
 function cls(ms, warnAt, badAt) { return ms == null ? 'bad' : ms > badAt ? 'bad' : ms > warnAt ? 'warn' : 'ok'; }
@@ -69,9 +69,11 @@ async function runTest() {
 
   // 3+4. שאילתות למסד — ראשונה קרה, אחר כך 4 חמות
   if (SUPA_URL.indexOf('https://') === 0) {
-    const q = () => timeFetch(SUPA_URL + '/rest/v1/settings?select=key&limit=1&st=' + Date.now(),
+    // בלי פרמטר anti-cache בכתובת! PostgREST מפרש כל פרמטר לא מוכר כסינון
+    // לפי עמודה שלא קיימת ומחזיר 400. ‏cache:'no-store' שב-timeFetch מספיק.
+    const q = () => timeFetch(SUPA_URL + '/rest/v1/settings?select=key&limit=1',
       { headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY } });
-    try { out.cold = await q(); } catch (e) { }
+    try { out.cold = await q(); } catch (e) { out.dbErr = e && e.message ? e.message : String(e); }
     setCell('r_cold', out.cold, 1200, 3000);
     if (out.cold != null) {
       const times = [];
@@ -79,6 +81,7 @@ async function runTest() {
       if (times.length) out.warm = times.reduce((s, v) => s + v, 0) / times.length;
     }
     setCell('r_warm', out.warm, 300, 800);
+    if (out.dbErr) document.getElementById('r_cold').textContent += ' (' + out.dbErr + ')';
   } else {
     document.getElementById('r_cold').textContent = 'לא הוגדר';
     document.getElementById('r_warm').textContent = 'לא הוגדר';
@@ -89,7 +92,7 @@ async function runTest() {
   const parts = [];
   if (out.static == null || out.bundleMs == null) parts.push('❌ האתר עצמו לא נטען כמו שצריך — נראית בעיית אינטרנט מקומית או חסימה ברשת.');
   else if (out.bundleMs > 6000) parts.push('🐢 <b>האינטרנט שלך איטי</b> (' + fmt(out.bundleMs) + ' ל-1MB) — זו כנראה הסיבה לאיטיות, לא המערכת.');
-  if (out.cold == null && SUPA_URL.indexOf('https://') === 0) parts.push('❌ אין תקשורת למסד הנתונים מהמחשב הזה.');
+  if (out.cold == null && SUPA_URL.indexOf('https://') === 0) parts.push('❌ אין תקשורת למסד הנתונים מהמחשב הזה' + (out.dbErr ? ' (' + out.dbErr + ')' : '') + '.');
   else if (out.warm != null && out.warm > 800) parts.push('🐢 <b>המסד עונה לאט</b> (' + fmt(out.warm) + ' לשאילתה) — הבעיה בצד השרת.');
   else if (out.warm != null && out.warm > 300) parts.push('⚠️ המסד עונה בסדר אבל לא מהר (' + fmt(out.warm) + ') — ייתכן עומס חלקי או מרחק רשת.');
   if (!parts.length) parts.push('✅ הכול מודד מהיר מהמחשב הזה. אם המערכת עדיין מרגישה איטית — הבעיה כנראה בטאב/דפדפן (נסה לסגור את הטאב ולפתוח מחדש) או בפעולה מסוימת ולא בתשתית.');
@@ -102,7 +105,8 @@ function copyResults() {
     ' | אתר-קטן: ' + fmt(out.static) +
     ' | הורדת 1MB: ' + fmt(out.bundleMs) + (out.bundleMbps ? ' (~' + out.bundleMbps + 'Mbps)' : '') +
     ' | מסד-ראשונה: ' + fmt(out.cold) +
-    ' | מסד-ממוצע: ' + fmt(out.warm);
+    ' | מסד-ממוצע: ' + fmt(out.warm) +
+    (out.dbErr ? ' | שגיאת-מסד: ' + out.dbErr : '');
   navigator.clipboard.writeText(txt).then(
     () => { document.getElementById('copyBtn').textContent = '✓ הועתק — הדבק בצ׳אט עם קלוד'; },
     () => { prompt('העתק ידנית:', txt); });
