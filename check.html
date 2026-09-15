@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@@PAPER_NAME@@ — בדיקת חיבור</title>
+<style>
+  body{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:24px;color:#1e293b}
+  .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:#64748b;font-size:14px;margin-bottom:20px}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:12px 8px;border-bottom:1px solid #eef1f7;font-size:16px}
+  .row .st{font-weight:700;white-space:nowrap}
+  .ok{color:#1e7e34}.bad{color:#c0392b}.wait{color:#94a3b8}
+  #verdict{margin-top:20px;padding:14px;border-radius:10px;font-size:16px;line-height:1.6;display:none}
+  .v-bad{background:#fdecea;color:#8c2318;display:block!important}
+  .v-ok{background:#e8f5e9;color:#1b5e20;display:block!important}
+  .nojs{background:#fdecea;color:#8c2318;padding:14px;border-radius:10px;font-size:17px;font-weight:700;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>בדיקת חיבור למערכת</h1>
+  <div class="sub">הדף בודק מה נחסם ברשת שלך. המתן כמה שניות ואז צלם את המסך ושלח.</div>
+
+  <div id="nojs" class="nojs">
+    ❌ אם אתה רואה רק את ההודעה הזו (והשורות למטה נשארות אפורות) —
+    הסינון חוסם הרצת JavaScript באתר הזה לגמרי.
+    יש לבקש מספק הסינון לאשר את האתר: imanuel-sheli.netlify.app
+  </div>
+
+  <div class="row"><span>1. הרצת קוד בדף (JavaScript)</span><span class="st wait" id="t-js">ממתין…</span></div>
+  <div class="row"><span>2. קובץ ספרייה מהאתר (js/vendor)</span><span class="st wait" id="t-vendor">ממתין…</span></div>
+  <div class="row"><span>3. קובץ המערכת (app.bundle.js)</span><span class="st wait" id="t-bundle">ממתין…</span></div>
+  <div class="row"><span>4. עיצוב המערכת (css/style.css)</span><span class="st wait" id="t-css">ממתין…</span></div>
+  <div class="row"><span>5. מסד הנתונים (supabase.co)</span><span class="st wait" id="t-db">ממתין…</span></div>
+  <div class="row"><span>6. גופנים (fonts.googleapis.com)</span><span class="st wait" id="t-fonts">ממתין…</span></div>
+  <div class="row"><span>7. שרת CDN חיצוני (jsdelivr) — לא חובה</span><span class="st wait" id="t-cdn">ממתין…</span></div>
+
+  <div id="verdict"></div>
+  <div class="sub" style="margin-top:16px" id="ua"></div>
+</div>
+
+<script>
+(function(){
+  document.getElementById('nojs').style.display = 'none';
+  mark('t-js', true);
+  document.getElementById('ua').textContent = 'דפדפן: ' + navigator.userAgent;
+
+  function mark(id, ok, extra){
+    var el = document.getElementById(id);
+    el.textContent = (ok ? '✅ עובד' : '❌ נחסם') + (extra ? ' (' + extra + ')' : '');
+    el.className = 'st ' + (ok ? 'ok' : 'bad');
+    el.dataset.done = ok ? '1' : '0';
+  }
+
+  // בדיקת הורדה עם מגבלת זמן — כשל או תקיעה נחשבים חסימה
+  function probe(id, url, opts){
+    var ctl = new AbortController();
+    var timer = setTimeout(function(){ ctl.abort(); }, 10000);
+    return fetch(url, Object.assign({cache:'no-store', signal: ctl.signal}, opts || {}))
+      .then(function(r){ clearTimeout(timer); mark(id, r.ok, 'קוד ' + r.status); return r.ok; })
+      .catch(function(){ clearTimeout(timer); mark(id, false); return false; });
+  }
+
+  var results = {};
+  Promise.all([
+    probe('t-vendor', 'js/vendor/supabase.min.js').then(function(ok){ results.vendor = ok; }),
+    probe('t-bundle', 'app.bundle.js').then(function(ok){ results.bundle = ok; }),
+    probe('t-css', 'css/style.css').then(function(ok){ results.css = ok; }),
+    probe('t-db', '@@SUPABASE_URL@@/auth/v1/health',
+      {headers:{apikey:'@@SUPABASE_KEY@@'}}).then(function(ok){ results.db = ok; }),
+    probe('t-fonts', 'https://fonts.googleapis.com/css2?family=Heebo&display=swap').then(function(ok){ results.fonts = ok; }),
+    probe('t-cdn', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/package.json').then(function(ok){ results.cdn = ok; })
+  ]).then(function(){
+    var v = document.getElementById('verdict');
+    if (results.vendor && results.bundle && results.css && results.db) {
+      v.className = 'v-ok';
+      v.textContent = '✅ כל מה שהמערכת צריכה — עובד ברשת הזו. אם המערכת עדיין לא עולה, נסה רענון כפוי (Ctrl+Shift+R) או ניקוי נתוני האתר.';
+    } else {
+      v.className = 'v-bad';
+      var need = [];
+      if (!results.vendor || !results.bundle || !results.css) need.push('imanuel-sheli.netlify.app (האתר עצמו — כולל קובצי קוד ועיצוב)');
+      if (!results.db) need.push('hkbstegusfdjtkjxkmjc.supabase.co (מסד הנתונים)');
+      v.textContent = '❌ נמצאה חסימה. יש לבקש מספק הסינון לאשר במלואן את הכתובות: ' + need.join(' וגם ') + '. צלם מסך זה ושלח.';
+    }
+  });
+})();
+</script>
+</body>
+</html>
