@@ -263,15 +263,20 @@ document.getElementById('clList').innerHTML = tmpl.map(t => `
 <button class="btn-danger-ghost btn-sm" onclick="checklistTemplateToggle(${t.id}, ${!t.active})">${t.active ? 'כיבוי' : 'הפעלה'}</button>
 </div>`).join('');
 
-/* יומן פעילות */
-const log = await run(db.from('activity_log').select('*').order('created_at', { ascending: false }).limit(40));
+/* יומן פעילות — נקרא מ-audit_log (נכתבת ע"י טריגרי המעקב, מיגרציית 2026-08-30_audit_log).
+   במופע שטרם הריץ את המיגרציה — מציגים הודעה שקטה במקום לשבור את המסך */
+let log = [];
+try {
+const r = await db.from('audit_log').select('*').order('at', { ascending: false }).limit(40);
+if (!r.error) log = r.data || [];
+} catch (e) { }
 const tableNames = { leads: 'ליד', customers: 'לקוח', ads: 'מודעה', charges: 'חיוב', payments: 'תשלום', contracts: 'חוזה', expenses: 'הוצאה', attendance: 'נוכחות', agents: 'סוכן' };
 const actions = { insert: 'יצירה', update: 'עדכון', delete: 'מחיקה' };
 document.getElementById('activityLog').innerHTML = log.length ? `
 <ul class="timeline">${log.map(l => {
 const who = cache.profiles.find(p => p.id === l.user_id);
-return `<li><div class="tl-time">${heDateTime(l.created_at)} · ${esc(who ? who.full_name : 'מערכת')}</div>
-${actions[l.action] || l.action} ${tableNames[l.table_name] || l.table_name} #${esc(l.row_id)}</li>`;
+return `<li><div class="tl-time">${heDateTime(l.at)} · ${esc(who ? who.full_name : 'מערכת')}</div>
+${actions[l.action] || l.action} ${tableNames[l.table_name] || l.table_name} #${esc(l.row_id)}${l.field ? ' · <span class="muted">' + esc(l.field) + '</span>' : ''}</li>`;
 }).join('')}</ul>` : '<p class="muted">אין פעילות עדיין</p>';
 }
 };

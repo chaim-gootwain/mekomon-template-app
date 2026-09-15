@@ -11,6 +11,16 @@
 
 function _piKey(n) { return 'pdfimport_' + n; }
 
+/* מספרי הגיליונות שיש להם רשימת ייבוא ב-settings (pdfimport_<מס'>) —
+   מתגלים דינמית, לא מקודדים בתבנית */
+async function _piPendingNums() {
+  try {
+    const { data } = await db.from('settings').select('key').like('key', 'pdfimport_%');
+    return (data || []).map(r => Number(r.key.slice('pdfimport_'.length)))
+      .filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+  } catch (e) { return []; }
+}
+
 async function pdfImportLoad(issueNum) {
   try {
     const { data } = await db.from('settings').select('value').eq('key', _piKey(issueNum)).single();
@@ -65,7 +75,7 @@ function _piDoneScreen(done, total) {
 
 /* מעבר לגיליון הבא שממתין לייבוא — בלי צורך לרענן */
 async function pdfImportNext(fromNum) {
-  const list = [286, 287, 288, 289, 290, 291, 292, 293, 294];
+  const list = await _piPendingNums();
   const start = list.indexOf(Number(fromNum));
   for (let i = start + 1; i < list.length; i++) {
     const obj = await pdfImportLoad(list[i]);
@@ -225,7 +235,7 @@ async function piSkip() {
 /* בדיקה בכניסה: אם יש ייבוא ממתין — הצעה לפתוח */
 async function pdfImportCheckPending() {
   if (!['admin', 'sales'].includes(profile.role)) return false;
-  for (const num of [286, 287, 288, 289, 290, 291, 292, 293, 294]) {
+  for (const num of await _piPendingNums()) {
     const obj = await pdfImportLoad(num);
     if (obj && Array.isArray(obj.items)) {
       const pend = obj.items.filter(it => !it.done).length;
