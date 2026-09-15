@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>בדיקת מהירות — @@PAPER_NAME@@</title>
+<style>
+  body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#1c2438;margin:0;padding:24px 16px}
+  .card{max-width:640px;margin:0 auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+  h1{font-size:1.3rem;margin:0 0 4px}
+  p.sub{color:#64748b;font-size:.9rem;margin:0 0 18px}
+  table{width:100%;border-collapse:collapse;font-size:.95rem}
+  td{padding:9px 6px;border-bottom:1px solid #eef1f6}
+  td.val{text-align:left;direction:ltr;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ok{color:#16a34a;font-weight:600}.warn{color:#d97706;font-weight:600}.bad{color:#dc2626;font-weight:600}
+  #verdict{margin-top:18px;padding:14px;border-radius:12px;background:#eef2ff;font-size:1rem;line-height:1.5}
+  button{margin-top:16px;padding:10px 18px;border:0;border-radius:10px;background:#2b3990;color:#fff;font-size:.95rem;cursor:pointer}
+  button:disabled{opacity:.5}
+  .muted{color:#94a3b8;font-size:.8rem;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔎 בדיקת מהירות המערכת</h1>
+  <p class="sub">הבדיקה רצה מהדפדפן והרשת <b>שלך</b> — בדיוק כמו שהמערכת עובדת. היא אורכת ~10 שניות.</p>
+  <table id="results"><tbody>
+    <tr><td>טעינת האתר (Netlify) — קובץ קטן</td><td class="val" id="r_static">—</td></tr>
+    <tr><td>הורדת קובץ המערכת (~1MB) — מהירות האינטרנט</td><td class="val" id="r_bundle">—</td></tr>
+    <tr><td>שאילתה ראשונה למסד (כולל יצירת חיבור)</td><td class="val" id="r_cold">—</td></tr>
+    <tr><td>שאילתות למסד בחיבור פתוח (ממוצע 4)</td><td class="val" id="r_warm">—</td></tr>
+  </tbody></table>
+  <div id="verdict">מריץ בדיקה...</div>
+  <button id="copyBtn" onclick="copyResults()" disabled>📋 העתק תוצאות (לשליחה לקלוד)</button>
+  <div class="muted">רענון הדף מריץ את הבדיקה מחדש. הדף לא שומר ולא משנה שום נתון.</div>
+</div>
+<script>
+'use strict';
+const SUPA_URL = '@@SUPABASE_URL@@';
+const SUPA_KEY = '@@SUPABASE_KEY@@';
+const out = { static: null, bundleMs: null, bundleMbps: null, cold: null, warm: null };
+
+function fmt(ms) { return ms == null ? 'נכשל' : (ms >= 1000 ? (ms / 1000).toFixed(1) + ' שנ׳' : Math.round(ms) + 'ms'); }
+function cls(ms, warnAt, badAt) { return ms == null ? 'bad' : ms > badAt ? 'bad' : ms > warnAt ? 'warn' : 'ok'; }
+function setCell(id, ms, warnAt, badAt, extra) {
+  const el = document.getElementById(id);
+  el.textContent = fmt(ms) + (extra || '');
+  el.className = 'val ' + cls(ms, warnAt, badAt);
+}
+async function timeFetch(url, opts) {
+  const t0 = performance.now();
+  const resp = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {}));
+  await resp.arrayBuffer(); // מודדים עד סוף ההורדה, לא רק עד הכותרות
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return performance.now() - t0;
+}
+
+async function runTest() {
+  // 1. קובץ קטן מהאתר — מודד את הדרך ל-Netlify
+  try { out.static = await timeFetch('/css/style.css?st=' + Date.now()); } catch (e) { }
+  setCell('r_static', out.static, 600, 1500);
+
+  // 2. קובץ גדול (~1MB) — מודד רוחב פס אמיתי
+  try {
+    out.bundleMs = await timeFetch('/app.bundle.js?st=' + Date.now());
+    out.bundleMbps = Math.round((8 / (out.bundleMs / 1000)) * 10) / 10; // ‎1MB ≈ 8 מגהביט
+  } catch (e) { }
+  setCell('r_bundle', out.bundleMs, 2000, 6000, out.bundleMbps ? ' (~' + out.bundleMbps + 'Mbps)' : '');
+
+  // 3+4. שאילתות למסד — ראשונה קרה, אחר כך 4 חמות
+  if (SUPA_URL.indexOf('https://') === 0) {
+    const q = () => timeFetch(SUPA_URL + '/rest/v1/settings?select=key&limit=1&st=' + Date.now(),
+      { headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY } });
+    try { out.cold = await q(); } catch (e) { }
+    setCell('r_cold', out.cold, 1200, 3000);
+    if (out.cold != null) {
+      const times = [];
+      for (let i = 0; i < 4; i++) { try { times.push(await q()); } catch (e) { } }
+      if (times.length) out.warm = times.reduce((s, v) => s + v, 0) / times.length;
+    }
+    setCell('r_warm', out.warm, 300, 800);
+  } else {
+    document.getElementById('r_cold').textContent = 'לא הוגדר';
+    document.getElementById('r_warm').textContent = 'לא הוגדר';
+  }
+
+  // פסק דין בעברית פשוטה
+  const v = document.getElementById('verdict');
+  const parts = [];
+  if (out.static == null || out.bundleMs == null) parts.push('❌ האתר עצמו לא נטען כמו שצריך — נראית בעיית אינטרנט מקומית או חסימה ברשת.');
+  else if (out.bundleMs > 6000) parts.push('🐢 <b>האינטרנט שלך איטי</b> (' + fmt(out.bundleMs) + ' ל-1MB) — זו כנראה הסיבה לאיטיות, לא המערכת.');
+  if (out.cold == null && SUPA_URL.indexOf('https://') === 0) parts.push('❌ אין תקשורת למסד הנתונים מהמחשב הזה.');
+  else if (out.warm != null && out.warm > 800) parts.push('🐢 <b>המסד עונה לאט</b> (' + fmt(out.warm) + ' לשאילתה) — הבעיה בצד השרת.');
+  else if (out.warm != null && out.warm > 300) parts.push('⚠️ המסד עונה בסדר אבל לא מהר (' + fmt(out.warm) + ') — ייתכן עומס חלקי או מרחק רשת.');
+  if (!parts.length) parts.push('✅ הכול מודד מהיר מהמחשב הזה. אם המערכת עדיין מרגישה איטית — הבעיה כנראה בטאב/דפדפן (נסה לסגור את הטאב ולפתוח מחדש) או בפעולה מסוימת ולא בתשתית.');
+  v.innerHTML = parts.join('<br>');
+  document.getElementById('copyBtn').disabled = false;
+}
+
+function copyResults() {
+  const txt = 'בדיקת מהירות ' + new Date().toLocaleString('he-IL') +
+    ' | אתר-קטן: ' + fmt(out.static) +
+    ' | הורדת 1MB: ' + fmt(out.bundleMs) + (out.bundleMbps ? ' (~' + out.bundleMbps + 'Mbps)' : '') +
+    ' | מסד-ראשונה: ' + fmt(out.cold) +
+    ' | מסד-ממוצע: ' + fmt(out.warm);
+  navigator.clipboard.writeText(txt).then(
+    () => { document.getElementById('copyBtn').textContent = '✓ הועתק — הדבק בצ׳אט עם קלוד'; },
+    () => { prompt('העתק ידנית:', txt); });
+}
+
+runTest();
+</script>
+</body>
+</html>
