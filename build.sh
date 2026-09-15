@@ -9,6 +9,19 @@ for name in $ORDER; do
   printf '\n\n' >> app.bundle.js
 done
 node -c app.bundle.js
+# הסרת הערות מהקובץ הנפרס: שרתי סינון (אתרוג וכד') מוחקים שורות מהערות
+# עברית עם מרכאות ושוברים את הקוד. ההערות נשארות בקוד המקור — רק לא נשלחות.
+if npx --yes terser@5.44.0 app.bundle.js --format comments=false,beautify=true -o app.bundle.stripped.js 2>/dev/null; then
+  mv app.bundle.stripped.js app.bundle.js
+  node -c app.bundle.js
+  echo "✓ comments stripped"
+else
+  echo "⚠ terser unavailable — deploying with comments"
+fi
+# טביעת אצבע לבדיקת שלמות בדפדפן (check.html בדיקה 8)
+HASH=$(sha256sum app.bundle.js | cut -d' ' -f1)
+BYTES=$(wc -c < app.bundle.js)
+printf '{"sha256":"%s","bytes":%s}' "$HASH" "$BYTES" > bundle.hash.json
 V="${COMMIT_REF:-$(date +%s)}"; V="${V:0:12}"
 sed -i "s#app.bundle.js?v=[A-Za-z0-9]*#app.bundle.js?v=$V#" index.html
 sed -i "s#css/style.css?v=[A-Za-z0-9]*#css/style.css?v=$V#" index.html
