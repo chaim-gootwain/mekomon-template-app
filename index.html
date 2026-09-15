@@ -24,6 +24,44 @@ if (/[#&]type=(invite|recovery)/.test(location.hash)) {
   location.replace('set-password.html' + location.hash);
 }
 </script>
+<script>
+/* רשת ביטחון: אם המערכת לא מציגה שום מסך תוך כמה שניות (קובץ קוד שלא נטען,
+   שגיאה בעלייה, אחסון חסום) — מוצגת הודעה עם פרטי השגיאה במקום מסך לבן אילם. */
+(function () {
+  var errs = [];
+  window.addEventListener('error', function (e) {
+    var f = e.filename ? ' [' + e.filename.split('/').pop() + ':' + e.lineno + ']' : '';
+    errs.push((e.message || 'שגיאה לא ידועה') + f);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason; errs.push('promise: ' + ((r && r.message) || r || '?'));
+  });
+  function anyScreenVisible() {
+    return ['setupScreen', 'authScreen', 'pendingScreen', 'app'].some(function (id) {
+      var el = document.getElementById(id);
+      return el && !el.classList.contains('hidden');
+    });
+  }
+  setTimeout(function check() {
+    if (anyScreenVisible()) return;
+    var box = document.getElementById('bootFailBox');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'bootFailBox';
+      box.dir = 'rtl';
+      box.style.cssText = 'position:fixed;top:16px;right:16px;left:16px;background:#fdecea;color:#8c2318;padding:16px 20px;border-radius:10px;font-family:Arial,sans-serif;font-size:15px;line-height:1.7;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.25)';
+      document.body.appendChild(box);
+    }
+    var lib = (typeof window.supabase === 'undefined') ? 'ספריית המסד לא נטענה (js/vendor/supabase.min.js). ' : '';
+    var detail = errs.length
+      ? 'שגיאה: <span dir="ltr" style="font-family:monospace">' + errs.slice(0, 3).join(' | ').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>'
+      : (lib || 'לא נקלטה שגיאה — ייתכן שקובץ קוד נחסם ברשת. פתח את הדף check.html באתר לבדיקה.');
+    box.innerHTML = '<b>המערכת לא הצליחה לעלות.</b> צלם את המסך הזה ושלח לתמיכה.<br>' + lib + detail;
+    // ממשיכים לבדוק — אם המערכת בכל זאת עלתה מאוחר יותר, ההודעה מוסרת
+    setTimeout(function () { if (anyScreenVisible()) { try { box.remove(); } catch (_) { } } else check(); }, 2000);
+  }, 6000);
+})();
+</script>
 <!-- ספריית Supabase (מסד הנתונים) -->
 <script defer src="js/vendor/supabase.min.js"></script>
 <!-- ספריית קריאת קובצי אקסל (לייבוא לקוחות ולידים) -->
