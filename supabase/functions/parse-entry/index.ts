@@ -1,7 +1,8 @@
 // parse-entry — פענוח מלל חופשי בעברית לבוט הזנת הנתונים (Claude)
 // פונקציה נפרדת מ-parse-invoice-text בכוונה: הפרסר הכספי נשאר יציב
 // ולא נוגעים בו. הפונקציה רק מפענחת — לא כותבת לטבלאות ולא מפיקה דבר.
-// MVP: action=new_deal בלבד (עסקת פרסומים על לקוח קיים); כל השאר → unknown.
+// פעולות: new_deal (עסקת פרסומים על לקוח קיים) + query_publications
+// (שאילתת "מה פורסם ללקוח" / בקשת גזירים — קריאה בלבד); כל השאר → unknown.
 // הסוד ANTHROPIC_API_KEY נשמר בצד השרת בלבד (משותף עם parse-invoice-text).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const cors = {
@@ -25,19 +26,23 @@ const SYSTEM = `אתה מפענח בקשות בעברית של סוכני מכי
 
 מבנה הפלט (בדיוק):
 {
-  "action": "new_deal | unknown",
+  "action": "new_deal | query_publications | unknown",
   "customer_name_raw": "string | null",
   "deal": { "count": number, "start_issue": number, "size_raw": "string | null", "unit_price": number, "price_includes_vat": boolean },
+  "query": { "from_issue": number, "to_issue": number, "want_clips": boolean },
   "confidence": "high | medium | low",
   "missing_fields": ["שמות שדות חסרים קריטיים"]
 }
-(שדה deal מופיע רק כש-action="new_deal"; אחרת deal=null.)
+(שדה deal מופיע רק כש-action="new_deal"; שדה query רק כש-action="query_publications"; אחרת null.)
 
-בשלב זה נתמכת פעולה אחת בלבד:
+הפעולות הנתמכות:
 - action="new_deal": המשתמש סוגר **עסקה/חבילה של כמה פרסומים שפרוסים על גיליונות** — מציין מספר פרסומים, ובדרך כלל גם גיליון-התחלה. סימנים: "עסקה של 5 פרסומים מגיליון 301", "סגרתי עם פסיפס 4 רבעי עמוד מגיליון 12", "חוזה של 6 פרסומים חצי עמוד החל מגיליון 40", "פרסום כל שבוע X פעמים מגיליון Y".
   מלא את "deal": count=מספר הפרסומים, start_issue=מספר הגיליון הראשון (0 אם לא צוין), size_raw=תיאור הגודל אם צוין ("רבע עמוד" / "חצי עמוד" / "עמוד שלם" / "שמינית" / null), unit_price=מחיר לפרסום אחד אם צוין (0 אם לא), price_includes_vat כמפורט למטה.
   missing_fields: הוסף "customer" אם אין שם לקוח, "count" אם אין מספר פרסומים, "start_issue" אם אין גיליון התחלה.
-- כל בקשה אחרת (הפקת מסמך, קבלה, חשבונית, תשלום, פתיחת לקוח/ליד, מודעה בודדת, שאלה כללית) → action="unknown" עם deal=null. אל תנסה לדחוס בקשה כזאת ל-new_deal.
+- action="query_publications": המשתמש **שואל מה פורסם ללקוח** או **מבקש את הגזירים** (קבצי המודעות) של לקוח — לא מזין דבר. סימנים: "מה פורסם ל...", "אילו מודעות היו ל...", "מתי פרסם...", "תן לי את הגזירים של...", "שלח לי את הקבצים של... מגיליונות...".
+  מלא את "query": from_issue=מספר הגיליון הראשון בטווח (0 אם לא צוין), to_issue=מספר הגיליון האחרון (0 אם לא צוין; "בגיליון 300" בלבד → from=to=300; "מגיליון 40" בלי סוף → from=40, to=0; "עד גיליון 45" בלי התחלה → from=0, to=45), want_clips=true אם ביקש גזירים/קבצים/מודעות להורדה, false אם שאל רק מה פורסם.
+  missing_fields: הוסף "customer" אם אין שם לקוח.
+- כל בקשה אחרת (הפקת מסמך, קבלה, חשבונית, תשלום, פתיחת לקוח/ליד, מודעה בודדת) → action="unknown" עם deal=null ו-query=null. אל תנסה לדחוס בקשה כזאת לאחת הפעולות.
 
 כללי הקיצור של המשתמש:
 - מע"מ: "+ מע\"מ" אחרי סכום, או "+" צמוד לסוף הסכום (למשל "250+") → המחיר לפני מע"מ → price_includes_vat=false. נאמר "כולל מע\"מ" → price_includes_vat=true. לא צוין כלום → price_includes_vat=false (ההנחה: לפני מע"מ; הכרטיס יציג זאת לאישור).
@@ -58,6 +63,15 @@ const SYSTEM = `אתה מפענח בקשות בעברית של סוכני מכי
 
 קלט: חוזה של 5 פרסומים לפסיפס
 פלט: {"action":"new_deal","customer_name_raw":"פסיפס","deal":{"count":5,"start_issue":0,"size_raw":null,"unit_price":0,"price_includes_vat":false},"confidence":"medium","missing_fields":["start_issue"]}
+
+קלט: מה פורסם לפסיפס בגיליונות 290 עד 295?
+פלט: {"action":"query_publications","customer_name_raw":"פסיפס","deal":null,"query":{"from_issue":290,"to_issue":295,"want_clips":false},"confidence":"high","missing_fields":[]}
+
+קלט: תן לי את הגזירים של גן ורדים מגיליון 300
+פלט: {"action":"query_publications","customer_name_raw":"גן ורדים","deal":null,"query":{"from_issue":300,"to_issue":0,"want_clips":true},"confidence":"high","missing_fields":[]}
+
+קלט: אילו מודעות היו למכולת השכונה?
+פלט: {"action":"query_publications","customer_name_raw":"מכולת השכונה","deal":null,"query":{"from_issue":0,"to_issue":0,"want_clips":false},"confidence":"high","missing_fields":[]}
 
 קלט: תוציא קבלה לגן ורדים על 500
 פלט: {"action":"unknown","customer_name_raw":"גן ורדים","deal":null,"confidence":"high","missing_fields":[]}
@@ -83,6 +97,7 @@ function extractJson(text) {
 /* אכיפת המבנה וברירות המחדל — לא סומכים על המודל בעיוורון */
 const ACTIONS = [
   'new_deal',
+  'query_publications',
   'unknown'
 ];
 function normalizeParsed(p) {
@@ -91,6 +106,7 @@ function normalizeParsed(p) {
     action,
     customer_name_raw: p && typeof p.customer_name_raw === 'string' && p.customer_name_raw.trim() ? p.customer_name_raw.trim() : null,
     deal: null,
+    query: null,
     confidence: [
       'high',
       'medium',
@@ -99,7 +115,17 @@ function normalizeParsed(p) {
     missing_fields: Array.isArray(p && p.missing_fields) ? p.missing_fields.filter((x)=>typeof x === 'string') : []
   };
   const miss = new Set(out.missing_fields);
-  if (action === 'new_deal') {
+  if (action === 'query_publications') {
+    const q = p && p.query || {};
+    out.query = {
+      from_issue: Number(q.from_issue) > 0 ? Math.floor(Number(q.from_issue)) : 0,
+      to_issue: Number(q.to_issue) > 0 ? Math.floor(Number(q.to_issue)) : 0,
+      want_clips: !!q.want_clips
+    };
+    // שאילתה: חובה רק לקוח — טווח גיליונות אופציונלי
+    miss.clear();
+    if (!out.customer_name_raw) miss.add('customer');
+  } else if (action === 'new_deal') {
     const d = p && p.deal || {};
     out.deal = {
       count: Number(d.count) > 0 ? Math.floor(Number(d.count)) : 0,

@@ -242,19 +242,13 @@ document.getElementById('reportArea').innerHTML = `
 let _custClips = []; // הגזירים של הדוח האחרון — להורדת ה-ZIP
 let _custClipsName = '';
 
-async function reportCustomerRun() {
-const id = Number(document.getElementById('repCust').value);
-if (!id) { toast('בחר לקוח מהחיפוש', true); return; }
-const fromIss = Number(document.getElementById('repCustFrom')?.value) || null;
-const toIss = Number(document.getElementById('repCustTo')?.value) || null;
-if (fromIss && toIss && fromIss > toIss) { toast('טווח גיליונות לא תקין', true); return; }
-const [allAds, charges, payments] = await Promise.all([
-runAll((f, t) => db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).order('id').range(f, t)),
-runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)),
-runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)),
-]);
+/* שליפת הפרסומים + קובץ הגזיר פר מודעה — משמש גם את הדוח וגם את
+   הצ'אט התפעולי (data-entry-chat, נטען אחרי הקובץ הזה בבאנדל) */
+async function custPubsFetch(id, fromIss, toIss) {
+if (!_custIssues.length) _custIssues = await runAll((f, t) => db.from('issues').select('id,issue_number,publish_date').order('issue_number', { ascending: false }).order('id').range(f, t));
+const allAds = await runAll((f, t) => db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).order('id').range(f, t));
 // מספר גיליון פר מודעה — לסינון הטווח ולשמות הקבצים ב-ZIP
-const issNum = {}; (_custIssues.length ? _custIssues : (cache.issues || [])).forEach(i => issNum[i.id] = i.issue_number);
+const issNum = {}; _custIssues.forEach(i => issNum[i.id] = i.issue_number);
 const ranged = fromIss || toIss;
 const ads = allAds.filter(a => {
 if (!ranged) return true;
@@ -270,7 +264,23 @@ const cur = clipOf[f.ad_id];
 if (!cur || (f.kind === 'design' && cur.kind !== 'design')
 || ((f.kind === 'design') === (cur.kind === 'design') && String(f.created_at) > String(cur.created_at))) clipOf[f.ad_id] = f;
 });
-_custClips = ads.filter(a => clipOf[a.id]).map(a => ({ ad: a, file: clipOf[a.id], issue: issNum[a.issue_id] }));
+const clips = ads.filter(a => clipOf[a.id]).map(a => ({ ad: a, file: clipOf[a.id], issue: issNum[a.issue_id] }));
+return { ads, clipOf, issNum, clips, ranged };
+}
+
+async function reportCustomerRun() {
+const id = Number(document.getElementById('repCust').value);
+if (!id) { toast('בחר לקוח מהחיפוש', true); return; }
+const fromIss = Number(document.getElementById('repCustFrom')?.value) || null;
+const toIss = Number(document.getElementById('repCustTo')?.value) || null;
+if (fromIss && toIss && fromIss > toIss) { toast('טווח גיליונות לא תקין', true); return; }
+const [pubs, charges, payments] = await Promise.all([
+custPubsFetch(id, fromIss, toIss),
+runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)),
+runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)),
+]);
+const { ads, clipOf, issNum, ranged } = pubs;
+_custClips = pubs.clips;
 _custClipsName = nameOf('customers', id) || ('לקוח_' + id);
 const billed = charges.filter(c => !['cancelled', 'lost'].includes(c.status)).reduce((s, c) => s + Number(c.amount), 0);
 const paid = payments.reduce((s, p) => s + Number(p.amount), 0);
@@ -282,7 +292,7 @@ ${stat(money(paid) || '₪0', 'סה"כ שולם')}
 ${stat(money(billed - paid) || '₪0', 'יתרה', billed - paid > 0 ? 'red' : '')}
 </div>
 ${ranged ? '<p class="muted" style="font-size:.78rem;margin:0 0 8px">טבלת המודעות מסוננת לפי טווח הגיליונות שנבחר; סיכומי הכספים — כל התקופה.</p>' : ''}
-${_custClips.length ? `<div style="margin-bottom:10px"><button class="btn btn-sm" id="custClipsBtn" onclick="reportCustClipsZip()">⬇ הורדת כל הגזירים (${_custClips.length}) — ZIP</button></div>` : ''}
+${_custClips.length ? `<div style="margin-bottom:10px"><button class="btn btn-sm" id="custClipsBtn" onclick="reportCustClipsZip(this)">⬇ הורדת כל הגזירים (${_custClips.length}) — ZIP</button></div>` : ''}
 <table class="data"><thead><tr><th>תאריך</th><th>מודעה</th><th>גיליון</th><th>סכום</th><th>סטטוס</th><th>גזיר</th></tr></thead><tbody>
 ${ads.map(a => `<tr><td>${heDate(a.created_at)}</td><td>${esc(a.title)}</td>
 <td>${issNum[a.issue_id] != null ? 'גיליון ' + issNum[a.issue_id] : ''}</td><td>${money(a.price - a.discount)}</td><td>${pill('ad', a.status)}</td>
@@ -291,15 +301,18 @@ ${ads.map(a => `<tr><td>${heDate(a.created_at)}</td><td>${esc(a.title)}</td>
 </tbody></table>`;
 }
 
-/* הורדת כל הגזירים של הדוח האחרון כ-ZIP אחד (בלי דחיסה — שיטת store) */
-async function reportCustClipsZip() {
-if (!_custClips.length) { toast('אין גזירים להורדה', true); return; }
-const btn = document.getElementById('custClipsBtn');
+/* הורדת גזירים כ-ZIP אחד (בלי דחיסה — שיטת store). ברירת המחדל —
+   הגזירים של הדוח האחרון; הצ'אט התפעולי מעביר רשימה ושם משלו */
+async function reportCustClipsZip(btnEl, clips, custName) {
+const list = clips || _custClips;
+const zipName = custName || _custClipsName;
+if (!list.length) { toast('אין גזירים להורדה', true); return; }
+const btn = btnEl || document.getElementById('custClipsBtn');
 if (btn) btn.disabled = true;
 const entries = []; const used = {}; const errs = [];
-for (let i = 0; i < _custClips.length; i++) {
-const c = _custClips[i];
-if (btn) btn.textContent = `מוריד ${i + 1}/${_custClips.length}...`;
+for (let i = 0; i < list.length; i++) {
+const c = list[i];
+if (btn) btn.textContent = `מוריד ${i + 1}/${list.length}...`;
 const { data, error } = await db.storage.from('ad-files').download(c.file.storage_path);
 if (error || !data) { errs.push(c.ad.title || c.file.file_name || ''); continue; }
 const extM = String(c.file.file_name || c.file.storage_path).match(/\.[A-Za-z0-9]{1,6}$/);
@@ -311,11 +324,11 @@ name = dot > 0 ? name.slice(0, dot) + '_' + n + name.slice(dot) : name + '_' + n
 } else used[name] = 1;
 entries.push({ name, data: new Uint8Array(await data.arrayBuffer()) });
 }
-if (btn) { btn.disabled = false; btn.textContent = `⬇ הורדת כל הגזירים (${_custClips.length}) — ZIP`; }
+if (btn) { btn.disabled = false; btn.textContent = `⬇ הורדת כל הגזירים (${list.length}) — ZIP`; }
 if (!entries.length) { toast('לא הצלחתי להוריד אף קובץ' + (errs.length ? ': ' + errs[0] : ''), true); return; }
 const a = document.createElement('a');
 a.href = URL.createObjectURL(_zipStore(entries));
-a.download = ('גזירים_' + _custClipsName).replace(/[\\/:*?"<>|]/g, '_') + '.zip';
+a.download = ('גזירים_' + zipName).replace(/[\\/:*?"<>|]/g, '_') + '.zip';
 a.click();
 toast('✓ ירדו ' + entries.length + ' גזירים' + (errs.length ? ' (' + errs.length + ' נכשלו)' : ''));
 }
