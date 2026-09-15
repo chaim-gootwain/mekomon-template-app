@@ -95,9 +95,21 @@ async function notifRefresh() {
 function _notifMailBtn(cid, amt) {
   const c = (cache.customers || []).find(x => x.id === cid);
   if (!c || !c.email) return '';
+  if (typeof _commRender === 'function') {
+    return '<button class="btn btn-sm btn-ghost" onclick="notifDebtEmail(' + cid + ',' + Number(amt || 0) + ')">✉️ מייל</button>';
+  }
+  // מופע בלי מודול התקשורת — נשארים עם mailto (תלוי בתוכנת מייל במחשב)
   const subj = encodeURIComponent('תזכורת יתרת חוב — @@PAPER_NAME@@');
   const body = encodeURIComponent('שלום,\nרצינו להזכיר בעדינות שקיימת יתרת חוב פתוחה של ' + money(amt) + '.\nנשמח להסדרה בהקדם. תודה רבה!\n@@PAPER_NAME@@');
   return '<a class="btn btn-sm btn-ghost" href="mailto:' + esc(encodeURIComponent(c.email)) + '?subject=' + subj + '&body=' + body + '">✉️ מייל</a>';
+}
+
+/* פותח את חלון "שליחת הודעה" של המערכת (send-email + תיעוד בציר הזמן)
+   עם תבנית תזכורת תשלום והסכום שבאיחור — לא mailto */
+function notifDebtEmail(cid, amt) {
+  notifClose();
+  _commBalance = Number(amt) || 0;
+  _commRender(cid, 'email', 'payment');
 }
 
 function notifToggle() {
