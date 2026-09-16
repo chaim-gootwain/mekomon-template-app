@@ -365,7 +365,7 @@ ${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<butto
 <div class="cc-mwrap">
 <button class="cc-tbtn" data-tip="עוד פעולות" aria-label="עוד פעולות" onclick="ccMenu(event,'ccMoreMenu')">${_ccIco('dots')}<span class="cc-cx"></span></button>
 <div id="ccMoreMenu" class="cc-menu hidden">
-${phoneBtn(c.phone)}
+${phoneBtn(c.phone, 'customer', id)}
 ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(c.whatsapp || c.phone)}">💬 וואטסאפ</a>` : ''}
 ${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" onclick="ccMenuClose();ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>

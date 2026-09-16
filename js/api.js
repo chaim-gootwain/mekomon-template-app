@@ -383,12 +383,14 @@ function telephonyOn() {
   const v = cache.settings.telephony_enabled;
   return v === '1' || v === 1 || v === true || v === 'true';
 }
-/* כפתור חייגן — מחזיר '' כשהטלפוניה כבויה */
-function phoneBtn(phone) {
+/* כפתור חייגן — מחזיר '' כשהטלפוניה כבויה.
+   entityType/entityId (רשות): 'customer'/'lead' + id, לייחוס השיחה ביומן */
+function phoneBtn(phone, entityType, entityId) {
   if (!telephonyOn() || !phone) return '';
-  return `<button class="btn btn-sm btn-ghost" title="חייג דרך Voicenter" onclick="event.stopPropagation();phoneCall('${esc(String(phone))}')">📞 חייג</button>`;
+  const ctx = entityType && entityId != null ? `,'${entityType}',${Number(entityId)}` : '';
+  return `<button class="btn btn-sm btn-ghost" title="חייג דרך Voicenter" onclick="event.stopPropagation();phoneCall('${esc(String(phone))}'${ctx})">📞 חייג</button>`;
 }
-async function phoneCall(phone) {
+async function phoneCall(phone, entityType, entityId) {
   const target = normPhone(phone);
   if (!target) { toast('אין מספר תקין לחיוג', true); return; }
   toast('מחייג ל-' + phone + '...');
@@ -399,7 +401,21 @@ async function phoneCall(phone) {
   } catch (e) {
     console.error('call-dial', e);
     toast('החייגן עדיין לא מחובר (ממתין להגדרת Voicenter)', true);
+    return;
   }
+  /* רישום ביומן החיוגים (call_log) — לדשבורד "ביצועי סוכנים".
+     כשל ברישום (למשל: המיגרציה טרם רצה במופע) לא חוסם את החיוג. */
+  try {
+    const rec = {
+      target,
+      agent_id: (cache.agents || []).find(a => a.profile_id === profile?.id)?.id ?? null,
+      entity_type: entityType || null,
+      entity_id: entityId ?? null,
+    };
+    if (profile?.id) rec.user_id = profile.id; // אחרת default auth.uid() בצד המסד
+    const { error: logErr } = await db.from('call_log').insert(rec);
+    if (logErr) console.error('call_log', logErr);
+  } catch (e) { console.error('call_log', e); }
 }
 
 /* ---------- 10. מעקב היסטוריה — Audit (פיצ'ר #11) ----------

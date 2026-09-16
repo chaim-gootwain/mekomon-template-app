@@ -115,7 +115,7 @@ function _wrRender() {
         <option value="">— שנה —</option>${stageOpts}<option value="__clear__">— נקה —</option></select></td>
     </tr>`;
   }).join('');
-  const phoneBtns = (typeof phoneBtn === 'function' && cur.phone) ? phoneBtn(cur.phone) : (cur.phone ? `<span dir="ltr" class="muted">${esc(cur.phone)}</span>` : '');
+  const phoneBtns = (typeof phoneBtn === 'function' && cur.phone) ? phoneBtn(cur.phone, 'customer', cur.customer_id) : (cur.phone ? `<span dir="ltr" class="muted">${esc(cur.phone)}</span>` : '');
 
   document.getElementById('wrOv')?.remove();
   const ov = document.createElement('div');

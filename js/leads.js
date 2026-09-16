@@ -329,7 +329,7 @@ async function openLeadCard(id) {
     <div class="m-actions" style="flex-wrap:wrap">
       ${closed || viewOnly ? '' : `
       ${unassigned && isSales() ? `<button class="btn btn-sm claim-btn" onclick="leadClaim(${id})">🎯 תפוס ליד</button>` : ''}
-      ${phoneBtn(l.phone)}
+      ${phoneBtn(l.phone, 'lead', id)}
       ${leadEditable(l) ? `
       <button class="btn btn-sm" onclick="leadFollowup(${id})">📅 פולו-אפ / עדכון סטטוס</button>
       <button class="btn btn-sm btn-ghost" onclick="leadAddNote(${id})">+ הערה לציר הזמן</button>

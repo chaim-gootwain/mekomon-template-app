@@ -161,7 +161,7 @@ Pages.finhub = {
           <td style="font-weight:700;color:var(--danger)">${money(r.sum)}</td>
           <td>${r.oldest > 0 ? r.oldest + ' ימים' : '<span class="muted">טרם</span>'}</td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
-            ${phoneBtn(custPhone(r.id))}
+            ${phoneBtn(custPhone(r.id), 'customer', r.id)}
             ${typeof collReminderBtn === 'function' ? collReminderBtn(r.id, r.sum) : ''}
             <button class="btn btn-sm btn-ghost" onclick="customerStatement(${r.id})">כרטסת</button>
           </td>
