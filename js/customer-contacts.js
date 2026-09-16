@@ -21,7 +21,7 @@ function custContactsRender(c) {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <b>${esc(ct.name) || '—'}${ct.primary ? ' <span class="ctag" style="background:#dcfce7;color:#166534;border-color:#bbf7d0">ראשי</span>' : ''}</b>
         <span style="display:flex;gap:6px;flex-wrap:wrap">
-          ${phone ? phoneBtn(phone) : ''}
+          ${phone ? phoneBtn(phone, 'customer', c.id) : ''}
           ${wa ? `<a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(wa)}">💬</a>` : ''}
           ${canWrite ? `<button class="btn btn-sm btn-ghost" onclick="custContactEdit(${c.id},${i})">✎</button>
           ${ct.primary ? '' : `<button class="btn btn-sm btn-ghost" title="הפוך לראשי" onclick="custContactPrimary(${c.id},${i})">⭐</button>`}
