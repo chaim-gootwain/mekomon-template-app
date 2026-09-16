@@ -247,7 +247,9 @@ let _custClipsName = '';
    מודעה בלי קובץ ב-ad_files אבל עם מספר עמוד ו-PDF שהועלה לגיליון —
    הגזיר נחתך מה-PDF של הגיליון (proofOf, עם _apBuild של ad-proof.js). */
 async function custPubsFetch(id, fromIss, toIss) {
-if (!_custIssues.length) _custIssues = await runAll((f, t) => db.from('issues').select('id,issue_number,publish_date,pdf_path').order('issue_number', { ascending: false }).order('id').range(f, t));
+// תמיד מרעננים — PDF שהועלה לגיליון אחרי טעינת הדף חייב להיראות מיד
+// (אחרת הצ'אט מציג "אין גזיר" על גיליון שה-PDF שלו כבר קיים)
+_custIssues = await runAll((f, t) => db.from('issues').select('id,issue_number,publish_date,pdf_path').order('issue_number', { ascending: false }).order('id').range(f, t));
 const allAds = await runAll((f, t) => db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).order('id').range(f, t));
 // מספר גיליון פר מודעה — לסינון הטווח ולשמות הקבצים ב-ZIP
 const issNum = {}, issPdf = {};
