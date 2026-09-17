@@ -83,6 +83,7 @@ setTimeout(async () => {
   try { if (typeof subMaybeReminder === 'function' && await subMaybeReminder()) return; } catch (e) { }
   try { if (typeof pvCheckPending === 'function' && await pvCheckPending()) return; } catch (e) { }
   try { if (typeof weeklyReviewCheckPending === 'function' && await weeklyReviewCheckPending()) return; } catch (e) { }
+  try { if (typeof agentBriefCheckPending === 'function' && await agentBriefCheckPending()) return; } catch (e) { }
   try { if (typeof adStatusCheckPending === 'function') await adStatusCheckPending(); } catch (e) { }
   try { if (typeof weeklySummaryAutoCheck === 'function') await weeklySummaryAutoCheck(); } catch (e) { }
   try { if (typeof standingOrdersAutoCheck === 'function') await standingOrdersAutoCheck(); } catch (e) { }
