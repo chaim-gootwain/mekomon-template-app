@@ -25,6 +25,9 @@ verify_jwt = true
 [functions.green-invoice-doc]
 verify_jwt = true
 
+[functions.manager-agent]
+verify_jwt = true
+
 [functions.match-customer]
 verify_jwt = true
 
