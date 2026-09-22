@@ -52,6 +52,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - כמויות ומחירים גם במילים ("פעמיים"=2, "חמש מאות"=500).
 - "לקוח שילם" בלי סכום חדש → propose_pay_existing (הסכום יילקח מחשבון העסקה הפתוח שלו במערכת). אם ננקב סכום מפורש להפקה — זו הפקה רגילה (propose_issue_document).
 - "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
+- שליחת גזירים במייל ללקוח → propose_send_clips עם מספרי הגיליונות. אם המנהל לא ציין גיליונות — בדוק ב-get_customer_publications אילו גיליונות רלוונטיים (למשל האחרון שפורסם) והצע. המייל נשלח לכתובת שבכרטיס הלקוח, והמנהל מאשר בכרטיס לפני שליחה.
 - עסקה/חבילה של כמה פרסומים עם גיליון התחלה או רצף גיליונות → propose_new_deal.
 - תיאור שורה (description): השירות בלבד, בלי שם הלקוח ובלי הסכום. אין תיאור → "פרסום".
 
@@ -121,6 +122,19 @@ const TOOLS = [
         issue_to: { type: 'number', description: 'מספר גיליון סיום (אופציונלי)' }
       },
       required: ['customer_id', 'customer_name']
+    }
+  },
+  {
+    name: 'propose_send_clips',
+    description: 'הצעת שליחת גזירים במייל ללקוח: עמודי המודעות של הלקוח נחתכים מ-PDF של כל גיליון ונשלחים לכתובת המייל שבכרטיס הלקוח. פותח כרטיס אישור — שום מייל לא נשלח בלי אישור המנהל. מחייב לקוח קיים ומספרי גיליונות.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח מ-search_customers' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        issue_numbers: { type: 'array', items: { type: 'number' }, description: 'מספרי הגיליונות שמהם לשלוח את הגזירים (עד 12)' }
+      },
+      required: ['customer_id', 'customer_name', 'issue_numbers']
     }
   },
   {
