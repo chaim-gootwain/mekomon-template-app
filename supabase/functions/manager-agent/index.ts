@@ -51,6 +51,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - אמצעי תשלום: אשראי → credit · מזומן → cash · העברה → transfer · צ'ק/שיק → check. קבלה ומס-קבלה מחייבות אמצעי תשלום.
 - כמויות ומחירים גם במילים ("פעמיים"=2, "חמש מאות"=500).
 - "לקוח שילם" בלי סכום חדש → propose_pay_existing (הסכום יילקח מחשבון העסקה הפתוח שלו במערכת). אם ננקב סכום מפורש להפקה — זו הפקה רגילה (propose_issue_document).
+- "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
 - עסקה/חבילה של כמה פרסומים עם גיליון התחלה או רצף גיליונות → propose_new_deal.
 - תיאור שורה (description): השירות בלבד, בלי שם הלקוח ובלי הסכום. אין תיאור → "פרסום".
 
@@ -106,6 +107,20 @@ const TOOLS = [
       type: 'object',
       properties: { issue_number: { type: 'number', description: 'מספר גיליון (אופציונלי — בלעדיו: כל הפתוחות)' } },
       required: []
+    }
+  },
+  {
+    name: 'show_customer_clips',
+    description: 'הצגת הפרסומים והגזירים (תמונות המודעות שפורסמו) של לקוח קיים למנהל, כולל כפתור הורדת ZIP. ההצגה נעשית בדפדפן — אתה תקבל בחזרה סיכום כמה מודעות וגזירים הוצגו. אופציונלי: טווח גיליונות.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח מ-search_customers' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        issue_from: { type: 'number', description: 'מספר גיליון התחלה (אופציונלי)' },
+        issue_to: { type: 'number', description: 'מספר גיליון סיום (אופציונלי)' }
+      },
+      required: ['customer_id', 'customer_name']
     }
   },
   {
@@ -460,8 +475,9 @@ Deno.serve(async (req) => {
         return json({ ok: true, reply: replyText || '(אין תשובה)', messages, usage });
       }
 
-      // הצעת פעולה — עוצרים ומחזירים לדפדפן; ה-tool_result יגיע אחרי האישור/הביטול
-      if (toolUse.name.startsWith('propose_')) {
+      // כלי דפדפן (הצעת פעולה / הצגת גזירים) — עוצרים ומחזירים לדפדפן;
+      // ה-tool_result יגיע משם (אחרי אישור/ביטול, או מיד אחרי ההצגה)
+      if (toolUse.name.startsWith('propose_') || toolUse.name === 'show_customer_clips') {
         return json({
           ok: true, reply: replyText,
           proposal: { tool_use_id: toolUse.id, name: toolUse.name, input: toolUse.input || {} },
