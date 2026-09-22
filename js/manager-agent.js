@@ -46,7 +46,7 @@ function mgrTrimMessages(msgs, maxLen) {
 /* ---------- מצב השיחה ---------- */
 let _mgrState = null;
 function mgrResetState() {
-  _mgrState = { chatId: null, messages: [], busy: false, pending: null, lastUserText: '', title: null };
+  _mgrState = { chatId: null, messages: [], busy: false, pending: null, lastUserText: '', title: null, usage: { input: 0, output: 0 }, model: null };
 }
 
 /* ---------- הדף ---------- */
@@ -249,6 +249,12 @@ async function mgrCallAgent() {
   }
   const r = { data: res };
   _mgrState.messages = r.data.messages || _mgrState.messages;
+  // צבירת שימוש לחישוב עלות (billed_input = קלט משוקלל מטמון, מהשרת)
+  if (r.data.usage) {
+    _mgrState.usage.input += Number(r.data.usage.billed_input_tokens || r.data.usage.input_tokens) || 0;
+    _mgrState.usage.output += Number(r.data.usage.output_tokens) || 0;
+  }
+  if (r.data.model) _mgrState.model = r.data.model;
   if (r.data.reply) mgrSayReply(r.data.reply);
   if (r.data.proposal) {
     if (r.data.proposal.name === 'show_customer_clips') {
@@ -739,17 +745,28 @@ async function mgrAfterCard(fnName, reqId) {
 })();
 
 /* ---------- שמירת השיחה (המשכיות וביקורת) ---------- */
+let _mgrNoUsageCols = false; // המיגרציה 2026-09-22 טרם רצה במופע — שומרים בלי עמודות השימוש
 async function mgrSaveChat() {
   try {
     if (!_mgrState || !_mgrState.messages.length) return;
     if (!_mgrState.title) _mgrState.title = (_mgrState.lastUserText || 'שיחה').slice(0, 80);
     const rec = { user_id: profile.id, title: _mgrState.title, messages: _mgrState.messages, updated_at: new Date().toISOString() };
-    if (_mgrState.chatId) {
-      await db.from('agent_chats').update(rec).eq('id', _mgrState.chatId);
-    } else {
-      const { data } = await db.from('agent_chats').insert(rec).select('id').single();
-      if (data) _mgrState.chatId = data.id;
+    if (!_mgrNoUsageCols) {
+      rec.input_tokens = Math.round(_mgrState.usage.input);
+      rec.output_tokens = Math.round(_mgrState.usage.output);
+      if (_mgrState.model) rec.model = _mgrState.model;
     }
+    const write = (r) => _mgrState.chatId
+      ? db.from('agent_chats').update(r).eq('id', _mgrState.chatId).select('id').single()
+      : db.from('agent_chats').insert(r).select('id').single();
+    let { data, error } = await write(rec);
+    if (error && /input_tokens|output_tokens|model/.test(String(error.message))) {
+      _mgrNoUsageCols = true;
+      delete rec.input_tokens; delete rec.output_tokens; delete rec.model;
+      ({ data, error } = await write(rec));
+    }
+    if (error) throw error;
+    if (data && !_mgrState.chatId) _mgrState.chatId = data.id;
   } catch (e) { console.error('mgr save chat', e); }
 }
 
@@ -767,12 +784,15 @@ async function mgrShowChats() {
 }
 async function mgrLoadChat(id) {
   try {
-    const { data, error } = await db.from('agent_chats').select('id,title,messages').eq('id', id).single();
+    // select('*') בכוונה — עמודות השימוש אולי עוד לא קיימות במופע
+    const { data, error } = await db.from('agent_chats').select('*').eq('id', id).single();
     if (error || !data) throw error || new Error('לא נמצאה');
     mgrResetState();
     _mgrState.chatId = data.id;
     _mgrState.title = data.title || null;
     _mgrState.messages = Array.isArray(data.messages) ? data.messages : [];
+    _mgrState.usage = { input: Number(data.input_tokens) || 0, output: Number(data.output_tokens) || 0 };
+    _mgrState.model = data.model || null;
     const log = document.getElementById('icLog');
     if (log) log.innerHTML = '';
     icSay('⤴ ממשיכים את השיחה: <b>' + esc(String(data.title || '')) + '</b>');
@@ -868,6 +888,50 @@ function mgrInjectNav() {
   }
 })();
 
+/* ---------- שימוש ועלות (מסך הגדרות) ----------
+   תמחור לפי מיליון טוקנים (דולר), לפי המודל שנשמר על כל שיחה.
+   input_tokens כבר משוקלל-מטמון בצד השרת, כך שהחישוב פשוט. */
+const MGR_PRICES = [
+  { re: /fable/i, inp: 10, out: 50 },
+  { re: /opus/i, inp: 5, out: 25 },
+  { re: /sonnet-4/i, inp: 3, out: 15 },
+  { re: /sonnet/i, inp: 2, out: 10 },
+  { re: /haiku/i, inp: 1, out: 5 },
+];
+function mgrPriceFor(model) {
+  const hit = MGR_PRICES.find(p => p.re.test(String(model || '')));
+  return hit || { inp: 5, out: 25 }; // ברירת מחדל: תמחור Opus
+}
+async function mgrUsageCalc() {
+  const el = document.getElementById('mgrUsageOut');
+  if (el) el.textContent = 'מחשב...';
+  try {
+    const monthStart = today().slice(0, 8) + '01';
+    const { data, error } = await db.from('agent_chats')
+      .select('input_tokens,output_tokens,model')
+      .gte('updated_at', monthStart).limit(1000);
+    if (error) throw error;
+    let cost = 0, chats = 0;
+    (data || []).forEach(r => {
+      chats++;
+      const p = mgrPriceFor(r.model);
+      cost += (Number(r.input_tokens) || 0) / 1e6 * p.inp + (Number(r.output_tokens) || 0) / 1e6 * p.out;
+    });
+    if (el) el.innerHTML = 'החודש: <b>' + chats + '</b> שיחות · עלות משוערת <b>$' + (Math.round(cost * 100) / 100).toFixed(2) + '</b>' +
+      '<span class="muted" style="font-size:.78rem"> (הערכה לפי מחירון ה-API; שיחות מלפני המיגרציה נספרות בלי עלות)</span>';
+  } catch (e) {
+    if (el) el.innerHTML = /input_tokens|column/.test(String(e && e.message))
+      ? 'דורש את מיגרציית 2026-09-22_manager_agent_usage — הרץ אותה ב-SQL Editor'
+      : 'שגיאה: ' + esc(String(e && e.message || e));
+  }
+}
+async function mgrNotesSave() {
+  const v = ((document.getElementById('mgrNotes') || {}).value || '').trim().slice(0, 2000);
+  await run(db.from('settings').upsert({ key: 'manager_agent_notes', value: v }));
+  cache.settings.manager_agent_notes = v;
+  toast(v ? 'ההוראות הקבועות נשמרו — ייכנסו לתוקף מהפנייה הבאה' : 'ההוראות הקבועות נמחקו');
+}
+
 /* ---------- כרטיס במסך ההגדרות (עטיפת Pages.settings) ---------- */
 async function mgrToggleSave(on) {
   await run(db.from('settings').upsert({ key: 'manager_agent_enabled', value: on ? '1' : '0' }));
@@ -902,8 +966,16 @@ async function mgrProbe() {
           <input type="checkbox" ${mgrAgentOn() ? 'checked' : ''} onchange="mgrToggleSave(this.checked)" style="width:18px;height:18px">
           סוכן המקומון פעיל (מוסיף "🤖 סוכן המקומון" לתפריט)
         </label>
-        <button class="btn btn-sm btn-ghost" style="margin-top:8px" onclick="mgrProbe()">🔌 בדיקת חיבור הסוכן</button>
-        <div id="mgrProbeOut" class="muted" style="font-size:.83rem;margin-top:6px"></div>`;
+        <div class="field" style="margin-top:10px"><label>הוראות קבועות לסוכן (נטענות לכל שיחה)</label>
+          <textarea id="mgrNotes" rows="3" placeholder='למשל: "תמיד תציע לשלוח גזיר אחרי הפקת חשבונית" · "אצלנו רבע עמוד נקרא גם רבע"'
+            style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit">${esc((cache.settings || {}).manager_agent_notes || '')}</textarea>
+          <button class="btn btn-sm" style="margin-top:6px" onclick="mgrNotesSave()">שמור הוראות</button></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn btn-sm btn-ghost" onclick="mgrProbe()">🔌 בדיקת חיבור הסוכן</button>
+          <button class="btn btn-sm btn-ghost" onclick="mgrUsageCalc()">📊 שימוש ועלות החודש</button>
+        </div>
+        <div id="mgrProbeOut" class="muted" style="font-size:.83rem;margin-top:6px"></div>
+        <div id="mgrUsageOut" class="muted" style="font-size:.83rem;margin-top:4px"></div>`;
         const anchor = el.querySelector('#activityLog');
         const anchorCard = anchor ? anchor.closest('.card') : null;
         if (anchorCard) el.insertBefore(card, anchorCard); else el.appendChild(card);
