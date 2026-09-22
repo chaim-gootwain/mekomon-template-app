@@ -101,9 +101,13 @@ function mgrSetBusy(b) {
   if (_mgrState) _mgrState.busy = b;
 }
 
-/* תשובת הסוכן: escape + שורות חדשות + הדגשות **טקסט** בלבד */
+/* תשובת הסוכן: escape + שורות חדשות + הדגשות **טקסט** + קישורי markdown
+   [טקסט](https://...) — כך הסוכן יכול לצרף קישור PDF של מסמך שנפתח בלחיצה.
+   הקלט עובר esc קודם, כך שה-URL בתוך href לא יכול לשבור את המאפיין. */
 function mgrFormatReply(text) {
   return esc(String(text || ''))
+    .replace(/\[([^\]\n]{1,100})\]\((https?:[^\s)<]{1,600})\)/g,
+      '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
     .replace(/\n/g, '<br>');
 }
