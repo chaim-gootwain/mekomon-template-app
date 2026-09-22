@@ -54,6 +54,8 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
 - שליחת גזירים במייל ללקוח → propose_send_clips עם מספרי הגיליונות. אם המנהל לא ציין גיליונות — בדוק ב-get_customer_publications אילו גיליונות רלוונטיים (למשל האחרון שפורסם) והצע. המייל נשלח לכתובת שבכרטיס הלקוח, והמנהל מאשר בכרטיס לפני שליחה.
 - "צרף לי את החשבונית" / "תראה לי את המסמך" → get_customer_documents, ותן את הקישור בפורמט markdown: [חשבונית מס 10009 — PDF](pdf_url). הקישור נפתח בלחיצה אצל המנהל. מסמך בלי pdf_url — אמור שהקובץ לא זמין במערכת (הופק מחוץ למסלול הרגיל).
+- תזכורות חוב: "מי חייב" / "שלח תזכורות למי שחייב מעל X" → get_debtors, הצג את הרשימה, ואז propose_debt_reminders עם הלקוחות שנבחרו וערוץ (whatsapp או email — שאל אם לא צוין). וואטסאפ נפתח לשליחה ידנית אצל המנהל; מייל נשלח מהמערכת. שום תזכורת לא יוצאת בלי אישור בכרטיס.
+- משימות: "תזכיר לי ל..." / "מה המשימות שלי" → get_customer_tasks לקריאה, propose_add_task להוספה (משימה יושבת על כרטיס לקוח — חובה customer_id). תאריכים יחסיים ("יום חמישי", "עוד שבוע") — חשב לתאריך לפי התאריך של היום.
 - עסקה/חבילה של כמה פרסומים עם גיליון התחלה או רצף גיליונות → propose_new_deal.
 - תיאור שורה (description): השירות בלבד, בלי שם הלקוח ובלי הסכום. אין תיאור → "פרסום".
 
@@ -112,6 +114,29 @@ const TOOLS = [
     }
   },
   {
+    name: 'get_debtors',
+    description: 'רשימת הלקוחות עם חוב פתוח (חיובים פתוחים פחות תשלומים), ממוינת מהגדול לקטן: סכום, מספר חיובים, החוב הוותיק ביותר, והאם יש טלפון/מייל בכרטיס. השתמש ל"מי חייב", "גיול חובות", ולפני propose_debt_reminders.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        min_balance: { type: 'number', description: 'סינון: רק חוב מעל סכום זה (אופציונלי)' },
+        limit: { type: 'number', description: 'כמה לקוחות (ברירת מחדל 20, עד 50)' }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'get_customer_tasks',
+    description: 'משימות פתוחות: של לקוח מסוים (customer_id), או כולן (בלי פרמטר) — כולל שם הלקוח ותאריך יעד. "מה המשימות שלי" = בלי פרמטרים.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'סינון ללקוח מסוים (אופציונלי)' }
+      },
+      required: []
+    }
+  },
+  {
     name: 'get_customer_documents',
     description: 'המסמכים הכספיים של לקוח (חשבוניות מס, מס-קבלות, קבלות, חשבונות עסקה, זיכויים) כולל קישור PDF לכל מסמך. השתמש כשמבקשים לצרף/לראות/למצוא מסמך.',
     input_schema: {
@@ -136,6 +161,43 @@ const TOOLS = [
         issue_to: { type: 'number', description: 'מספר גיליון סיום (אופציונלי)' }
       },
       required: ['customer_id', 'customer_name']
+    }
+  },
+  {
+    name: 'propose_debt_reminders',
+    description: 'הצעת שליחת תזכורות חוב ללקוחות חייבים: פותח כרטיס עם הרשימה והיתרות המעודכנות, והמנהל שולח משם (וואטסאפ נפתח לשליחה ידנית; מייל נשלח מהמערכת). שום תזכורת לא יוצאת בלי הכרטיס. השתמש אחרי get_debtors.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customers: {
+          type: 'array', maxItems: 30,
+          items: {
+            type: 'object',
+            properties: {
+              customer_id: { type: 'number' },
+              customer_name: { type: 'string' }
+            },
+            required: ['customer_id', 'customer_name']
+          },
+          description: 'הלקוחות לתזכורת (מ-get_debtors)'
+        },
+        channel: { type: 'string', enum: ['whatsapp', 'email'], description: 'ערוץ השליחה' }
+      },
+      required: ['customers', 'channel']
+    }
+  },
+  {
+    name: 'propose_add_task',
+    description: 'הצעת הוספת משימה/תזכורת על כרטיס לקוח (למשל "להתקשר לגן ורדים ביום חמישי"). פותח כרטיס אישור קטן; המשימה מופיעה בכרטיס הלקוח ובתזכורות של המערכת.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח מ-search_customers' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        title: { type: 'string', description: 'נוסח המשימה, קצר וברור' },
+        due_date: { type: 'string', description: 'תאריך יעד YYYY-MM-DD (אופציונלי)' }
+      },
+      required: ['customer_id', 'customer_name', 'title']
     }
   },
   {
@@ -312,6 +374,77 @@ async function runReadTool(caller, name, input) {
       .map(d => ({ doc_number: d.doc_number, total: d.total, created_at: (d.created_at || '').slice(0, 10) }));
 
     return { debt_total: debtTotal, open_charges: openCharges.slice(0, 15), active_contracts: activeContracts, open_proformas: openProformas };
+  }
+
+  if (name === 'get_debtors') {
+    const { data: charges, error } = await caller.from('charges')
+      .select('id,customer_id,amount,due_date')
+      .in('status', ['pending', 'invoiced', 'partial', 'overdue']).limit(2000);
+    if (error) return { error: error.message };
+    // תשלומים — בנתחים, כדי לא לחרוג מאורך ה-URL של PostgREST
+    const paid = {};
+    const ids = (charges || []).map(c => c.id);
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data: pays } = await caller.from('payments').select('charge_id,amount').in('charge_id', ids.slice(i, i + 150));
+      (pays || []).forEach(p => { paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount); });
+    }
+    const byCust = {};
+    (charges || []).forEach(c => {
+      const bal = Number(c.amount) - (paid[c.id] || 0);
+      if (bal <= 0.001 || !c.customer_id) return;
+      if (!byCust[c.customer_id]) byCust[c.customer_id] = { customer_id: c.customer_id, total: 0, open_charges: 0, oldest_due: null };
+      const r = byCust[c.customer_id];
+      r.total += bal;
+      r.open_charges += 1;
+      if (c.due_date && (!r.oldest_due || c.due_date < r.oldest_due)) r.oldest_due = c.due_date;
+    });
+    const custIds = Object.keys(byCust).map(Number);
+    const info = {};
+    for (let i = 0; i < custIds.length; i += 150) {
+      const { data: custs } = await caller.from('customers').select('id,name,phone,whatsapp,email').in('id', custIds.slice(i, i + 150));
+      (custs || []).forEach(c => info[c.id] = c);
+    }
+    const minBal = Number(input && input.min_balance) || 0;
+    const lim = Math.min(50, Math.max(1, Number(input && input.limit) || 20));
+    const rows = Object.values(byCust)
+      .map(r => ({
+        customer_id: r.customer_id,
+        customer: (info[r.customer_id] && info[r.customer_id].name) || 'לא ידוע',
+        total: Math.round(r.total * 100) / 100,
+        open_charges: r.open_charges,
+        oldest_due: r.oldest_due,
+        has_phone: !!(info[r.customer_id] && (info[r.customer_id].whatsapp || info[r.customer_id].phone)),
+        has_email: !!(info[r.customer_id] && String(info[r.customer_id].email || '').trim())
+      }))
+      .filter(r => r.total >= minBal)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, lim);
+    return { debtors: rows, note: 'has_phone/has_email — האם אפשר לשלוח תזכורת בוואטסאפ/מייל' };
+  }
+
+  if (name === 'get_customer_tasks') {
+    let q = caller.from('customer_tasks').select('id,customer_id,title,due_date,created_at')
+      .eq('done', false).order('due_date', { ascending: true, nullsFirst: false }).limit(30);
+    const cid = Number(input && input.customer_id) || 0;
+    if (cid) q = q.eq('customer_id', cid);
+    const { data, error } = await q;
+    if (error) {
+      // הטבלה אולי לא קיימת במופע (המיגרציה טרם רצה)
+      if (/customer_tasks/.test(String(error.message))) return { error: 'טבלת המשימות עדיין לא הופעלה במופע הזה' };
+      return { error: error.message };
+    }
+    const tIds = [...new Set((data || []).map(t => t.customer_id).filter(Boolean))];
+    const names = {};
+    if (tIds.length) {
+      const { data: custs } = await caller.from('customers').select('id,name').in('id', tIds);
+      (custs || []).forEach(c => names[c.id] = c.name);
+    }
+    return {
+      tasks: (data || []).map(t => ({
+        customer_id: t.customer_id, customer: names[t.customer_id] || null,
+        title: t.title, due_date: t.due_date
+      }))
+    };
   }
 
   if (name === 'get_customer_documents') {

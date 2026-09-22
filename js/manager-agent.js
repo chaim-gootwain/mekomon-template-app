@@ -69,8 +69,8 @@ Pages.mgragent = {
         <div class="muted" style="font-size:.83rem;margin-top:2px">
           כתוב מה שאתה צריך — שאלה על נתונים או פעולה. למשל:
           <i>"כמה חוב יש לגן ורדים?"</i> · <i>"מי עוד לא חויב על גיליון 300?"</i> ·
-          <i>"תן לי את הגזירים של פסיפס"</i> · <i>"שלח לגן ורדים במייל את הגזיר מגיליון 300"</i> ·
-          <i>"תבדוק מה פתוח לפסיפס ותוציא לו מס-קבלה"</i>.
+          <i>"תן לי את הגזירים של פסיפס"</i> · <i>"שלח תזכורת לכל מי שחייב מעל 1,000 ₪"</i> ·
+          <i>"תזכיר לי להתקשר לגן ורדים ביום חמישי"</i> · <i>"תבדוק מה פתוח לפסיפס ותוציא לו מס-קבלה"</i>.
           שום מסמך לא מופק בלי אישור שלך בכרטיס.
         </div>
       </div>
@@ -159,6 +159,12 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_send_clips') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_clips' };
       await mgrProposeSendClips(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_debt_reminders') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'debt_reminders' };
+      await mgrProposeReminders(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_add_task') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_task' };
+      await mgrProposeTask(r.data.proposal);
     } else {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'invoice' };
       await mgrOpenProposal(r.data.proposal);
@@ -323,6 +329,204 @@ async function mgrSendClipsCancel() {
     _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'המשתמש ביטל — לא נשלח מייל.' }] });
     await mgrCallAgent();
   }
+}
+
+/* ---------- סגירת הצעה מול הסוכן (משותף לכרטיסים החדשים) ---------- */
+async function mgrResolveProposal(toolUseId, outcome) {
+  const stillPending = _mgrState && _mgrState.pending && _mgrState.pending.tool_use_id === toolUseId;
+  if (!stillPending) { mgrSaveChat(); return; }
+  _mgrState.pending = null;
+  _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: outcome }] });
+  await mgrCallAgent();
+}
+
+/* ---------- תזכורות חוב (כרטיס אישור ושליחה) ----------
+   וואטסאפ: אותו מנגנון של מסך הגבייה — debtReminderSend פותח wa.me
+   לשליחה ידנית ורושם לוג. מייל: send-email מהמערכת + לוג ב-debt_reminders.
+   שום תזכורת לא יוצאת בלי לחיצה בכרטיס. */
+let _mgrRem = null;
+async function mgrProposeReminders(p) {
+  const inp = p.input || {};
+  const channel = inp.channel === 'email' ? 'email' : 'whatsapp';
+  const list = (inp.customers || []).filter(c => Number(c.customer_id) > 0).slice(0, 30);
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!list.length) { await fail('לא הועברו לקוחות לתזכורת.'); return; }
+  if (channel === 'whatsapp' && typeof waRemindersOn === 'function' && !waRemindersOn()) {
+    await fail('תזכורות הוואטסאפ כבויות במופע הזה — מדליקים במסך הגדרות, או שולחים במייל.');
+    return;
+  }
+  mgrSetBusy(true);
+  const wait = icSay('מחשב יתרות עדכניות ל-' + list.length + ' לקוחות... ⏳');
+  const info = {};
+  try {
+    const { data: custs } = await db.from('customers').select('id,name,email,phone,whatsapp')
+      .in('id', list.map(c => Number(c.customer_id)));
+    (custs || []).forEach(c => info[c.id] = c);
+  } catch (e) { }
+  const rows = [];
+  for (const c of list) {
+    const cid = Number(c.customer_id);
+    const cust = info[cid] || {};
+    let bal = { total: 0, count: 0, oldestDue: null };
+    try { bal = await customerOpenBalance(cid); } catch (e) { }
+    let skip = '';
+    if (!(bal.total > 0)) skip = 'אין חוב פתוח';
+    else if (channel === 'email' && !String(cust.email || '').trim()) skip = 'אין מייל בכרטיס';
+    else if (channel === 'whatsapp' && !String(cust.whatsapp || cust.phone || '').trim()) skip = 'אין טלפון בכרטיס';
+    rows.push({
+      cid, name: cust.name || c.customer_name || '', total: bal.total, count: bal.count,
+      oldestDue: bal.oldestDue, email: String(cust.email || '').trim(), skip, sent: false
+    });
+  }
+  wait && wait.remove();
+  mgrSetBusy(false);
+  _mgrRem = { toolUseId: p.tool_use_id, channel, rows };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrRemCard';
+  card.innerHTML = `
+    <div class="hd">${channel === 'email' ? '📧' : '💬'} תזכורות חוב ב${channel === 'email' ? 'מייל' : 'וואטסאפ'} — לאישור לפני שליחה</div>
+    ${channel === 'whatsapp' ? '<div class="ic-warn">וואטסאפ נפתח עם הודעה מוכנה לכל לקוח — הלחיצה על "שלח" בוואטסאפ היא שלך (בלי API, בלי סיכון חסימה).</div>' : ''}
+    <div class="table-wrap" style="max-height:300px;overflow:auto"><table class="data"><thead>
+      <tr><th>לקוח</th><th>יתרה</th><th></th></tr></thead>
+      <tbody>${rows.map((r, i) => `<tr>
+        <td>${esc(r.name)}</td>
+        <td>${r.skip ? '<span class="muted">' + esc(r.skip) + '</span>' : money(r.total)}</td>
+        <td id="mgrRemBtn${i}">${r.skip ? '—' : `<button class="btn btn-sm" onclick="mgrRemSend(${i}, this)">${channel === 'email' ? '✉ שלח' : '💬 שלח'}</button>`}</td>
+      </tr>`).join('')}</tbody></table></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px;flex-wrap:wrap">
+      ${channel === 'email' && rows.some(r => !r.skip) ? '<button class="btn" id="mgrRemAllBtn" onclick="mgrRemSendAll(this)">✉ שלח לכל הרשימה</button>' : ''}
+      <button class="btn btn-ghost" onclick="mgrRemFinish()">סיים ועדכן את הסוכן</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function _mgrRemEmailSend(r) {
+  const ageTxt = r.oldestDue ? ' (הוותיק שבהם מ-' + heDate(r.oldestDue) + ')' : '';
+  const body = 'שלום ' + (r.name || '') + ',\n\n' +
+    'תזכורת ידידותית: קיימת יתרת חוב פתוחה של ' + money(r.total) + ' על ' + r.count + ' חיובים' + ageTxt + '.\n' +
+    'נשמח להסדרה בהקדם. לפירוט מלא או לתיאום תשלום: @@PAPER_PHONE@@.\n\nתודה רבה,\n@@PAPER_NAME@@';
+  const { data, error } = await db.functions.invoke('send-email', {
+    body: { to: r.email, subject: 'תזכורת יתרה פתוחה — @@PAPER_NAME@@', body, customer_id: r.cid }
+  });
+  if (error || !data || !data.ok) {
+    let msg = '';
+    try { if (error && error.context && typeof error.context.json === 'function') { const j = await error.context.json(); msg = j.detail || j.error || ''; } } catch (e) { }
+    if (!msg && data) msg = data.detail || data.error || '';
+    throw new Error(msg || 'שליחת המייל נכשלה');
+  }
+  try {
+    await db.from('debt_reminders').insert({
+      customer_id: r.cid, amount: Math.round(r.total * 100) / 100,
+      channel: 'email', message: body, status: 'sent', created_by: profile.id
+    });
+  } catch (e) { }
+  try { await addInteraction('customer', r.cid, '📧 נשלחה תזכורת חוב במייל (' + money(r.total) + ')'); } catch (e) { }
+}
+async function mgrRemSend(i, btn) {
+  const s = _mgrRem;
+  const r = s && s.rows[i];
+  if (!r || r.skip || r.sent) return;
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    if (s.channel === 'email') await _mgrRemEmailSend(r);
+    else await debtReminderSend(r.cid); // פותח wa.me + לוג — כמו במסך הגבייה
+    r.sent = true;
+    const cell = document.getElementById('mgrRemBtn' + i);
+    if (cell) cell.innerHTML = s.channel === 'email' ? '✅ נשלח' : '✅ נפתח';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = s.channel === 'email' ? '✉ שלח' : '💬 שלח'; }
+    toast('נכשל: ' + String(e && e.message || e), true);
+    r.err = String(e && e.message || e).slice(0, 120);
+  }
+}
+async function mgrRemSendAll(btn) {
+  const s = _mgrRem;
+  if (!s || s.channel !== 'email') return;
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  for (let i = 0; i < s.rows.length; i++) {
+    if (!s.rows[i].skip && !s.rows[i].sent) await mgrRemSend(i, document.querySelector('#mgrRemBtn' + i + ' button'));
+  }
+  if (btn) { btn.textContent = '✉ שלח לכל הרשימה'; btn.disabled = false; }
+}
+async function mgrRemFinish() {
+  const s = _mgrRem;
+  if (!s) return;
+  document.getElementById('mgrRemCard')?.remove();
+  const sent = s.rows.filter(r => r.sent), skipped = s.rows.filter(r => r.skip), failed = s.rows.filter(r => r.err && !r.sent);
+  if (sent.length) icSayOk('✅ נשלחו תזכורות ' + (s.channel === 'email' ? 'במייל' : 'בוואטסאפ') + ' ל-<b>' + sent.length + '</b> לקוחות: ' + sent.map(r => esc(r.name)).join(', '));
+  else icSay('לא נשלחו תזכורות.');
+  const outcome = (sent.length ? 'נשלחו תזכורות ' + (s.channel === 'email' ? 'במייל' : 'בוואטסאפ (נפתחו לשליחה ידנית)') + ' ל: ' + sent.map(r => r.name + ' (' + money(r.total) + ')').join(', ') + '. ' : 'לא נשלחו תזכורות. ') +
+    (skipped.length ? 'דולגו: ' + skipped.map(r => r.name + ' — ' + r.skip).join(', ') + '. ' : '') +
+    (failed.length ? 'נכשלו: ' + failed.map(r => r.name + ' — ' + r.err).join(', ') : '');
+  const id = s.toolUseId;
+  _mgrRem = null;
+  await mgrResolveProposal(id, outcome.trim());
+}
+
+/* ---------- הוספת משימה על כרטיס לקוח (כרטיס אישור) ---------- */
+let _mgrTask = null;
+async function mgrProposeTask(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  if (!cid || !String(inp.title || '').trim()) {
+    icSayErr('חסר לקוח או נוסח משימה.');
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: חסר לקוח או נוסח משימה.');
+    return;
+  }
+  _mgrTask = { toolUseId: p.tool_use_id, cid, name: String(inp.customer_name || '') };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrTaskCard';
+  card.innerHTML = `
+    <div class="hd">✅ משימה חדשה — לאישור</div>
+    <div class="grid2">
+      <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrTask.name)}" disabled></div>
+      <div class="field"><label>תאריך יעד</label><input id="mgrTaskDue" type="date" value="${esc(String(inp.due_date || '').slice(0, 10))}"></div>
+    </div>
+    <div class="field"><label>המשימה</label><input id="mgrTaskTitle" type="text" value="${esc(String(inp.title || '').trim())}"></div>
+    <div class="muted" style="font-size:.78rem">המשימה תופיע בכרטיס הלקוח ובתזכורות המערכת.</div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrTaskBtn" onclick="mgrTaskApprove()">✅ הוסף משימה</button>
+      <button class="btn btn-ghost" onclick="mgrTaskCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrTaskApprove() {
+  const t = _mgrTask;
+  if (!t) return;
+  const title = ((document.getElementById('mgrTaskTitle') || {}).value || '').trim();
+  const due = (document.getElementById('mgrTaskDue') || {}).value || null;
+  if (!title) { toast('נא להזין נוסח משימה', true); return; }
+  const btn = document.getElementById('mgrTaskBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'מוסיף...'; }
+  const { error } = await db.from('customer_tasks').insert({
+    customer_id: t.cid, title, due_date: due, done: false, created_by: profile.id
+  });
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ הוסף משימה'; }
+    toast('שגיאה: ' + error.message, true);
+    return;
+  }
+  try { await addInteraction('customer', t.cid, '✅ נוספה משימה מהסוכן: ' + title + (due ? ' (עד ' + heDate(due) + ')' : '')); } catch (e) { }
+  document.getElementById('mgrTaskCard')?.remove();
+  icSayOk('✅ נוספה משימה ל<b>' + esc(t.name) + '</b>: ' + esc(title) + (due ? ' · עד ' + heDate(due) : ''));
+  const id = t.toolUseId;
+  _mgrTask = null;
+  await mgrResolveProposal(id, 'המשימה נוספה: "' + title + '"' + (due ? ' עד ' + due : '') + '.');
+}
+async function mgrTaskCancel() {
+  const t = _mgrTask;
+  if (!t) return;
+  document.getElementById('mgrTaskCard')?.remove();
+  icSay('המשימה בוטלה — לא נוסף דבר.');
+  const id = t.toolUseId;
+  _mgrTask = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — המשימה לא נוספה.');
 }
 
 /* ---------- הצעת פעולה → כרטיס האישור הקיים של צ'אט החשבוניות ---------- */
