@@ -630,28 +630,40 @@ Deno.serve(async (req) => {
     const messages = sanitizeMessages(body.messages);
     if (!messages) return json({ error: 'תמליל לא תקין — פתח שיחה חדשה' }, 400);
 
-    // בלוק דינמי: תאריך + מע"מ מההגדרות (יציב בתוך היום — לא שובר מטמון)
-    let vat = '18';
+    // בלוק דינמי: תאריך + מע"מ + הוראות קבועות של המנהל מההגדרות
+    // (יציב בתוך היום — לא שובר את מטמון הבלוק הקבוע)
+    let vat = '18', notes = '';
     try {
-      const { data: s } = await caller.from('settings').select('value').eq('key', 'vat_rate').single();
-      if (s && s.value) vat = String(s.value);
+      const { data: st } = await caller.from('settings').select('key,value').in('key', ['vat_rate', 'manager_agent_notes']);
+      (st || []).forEach(s => {
+        if (s.key === 'vat_rate' && s.value) vat = String(s.value);
+        if (s.key === 'manager_agent_notes') notes = String(s.value || '').slice(0, 2000);
+      });
     } catch (_) { }
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }); // YYYY-MM-DD
     const systemBlocks = [
       { type: 'text', text: SYSTEM_STABLE, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: 'התאריך היום: ' + today + '. שיעור המע"מ במערכת: ' + vat + '%.' }
+      {
+        type: 'text', text: 'התאריך היום: ' + today + '. שיעור המע"מ במערכת: ' + vat + '%.' +
+          (notes.trim() ? '\nהוראות קבועות מהמנהל (כבד אותן תמיד): ' + notes.trim() : '')
+      }
     ];
 
     // ==================== לולאת הסוכן ====================
     // emit מקבל עדכוני התקדמות (לזרימת ה-SSE); מחזיר את גוף התשובה כאובייקט
     const runLoop = async (emit) => {
-      let usage = { input_tokens: 0, output_tokens: 0 };
+      let usage = { input_tokens: 0, output_tokens: 0, billed_input_tokens: 0 };
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const { resp, err } = await callClaude(systemBlocks, messages);
         if (err) return { error: err, _status: 502 };
         if (resp.usage) {
-          usage.input_tokens += Number(resp.usage.input_tokens) || 0;
-          usage.output_tokens += Number(resp.usage.output_tokens) || 0;
+          const u = resp.usage;
+          usage.input_tokens += Number(u.input_tokens) || 0;
+          usage.output_tokens += Number(u.output_tokens) || 0;
+          // שווה-ערך קלט לחישוב עלות: כתיבת מטמון ×1.25, קריאה ממטמון ×0.1
+          usage.billed_input_tokens += Math.round((Number(u.input_tokens) || 0) +
+            1.25 * (Number(u.cache_creation_input_tokens) || 0) +
+            0.1 * (Number(u.cache_read_input_tokens) || 0));
         }
         const content = resp.content || [];
         messages.push({ role: 'assistant', content });
@@ -659,7 +671,7 @@ Deno.serve(async (req) => {
         const toolUse = content.find(b => b.type === 'tool_use');
 
         if (resp.stop_reason !== 'tool_use' || !toolUse) {
-          return { ok: true, reply: replyText || '(אין תשובה)', messages, usage };
+          return { ok: true, reply: replyText || '(אין תשובה)', messages, usage, model: MODEL };
         }
 
         // כלי דפדפן (הצעת פעולה / הצגת גזירים) — עוצרים ומחזירים לדפדפן;
@@ -668,7 +680,7 @@ Deno.serve(async (req) => {
           return {
             ok: true, reply: replyText,
             proposal: { tool_use_id: toolUse.id, name: toolUse.name, input: toolUse.input || {} },
-            messages, usage
+            messages, usage, model: MODEL
           };
         }
 
