@@ -60,6 +60,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - תיאור שורה (description): השירות בלבד, בלי שם הלקוח ובלי הסכום. אין תיאור → "פרסום".
 
 סגנון: ענה בעברית, קצר ולעניין. סכומים בש"ח עם שני ספרות עשרוניות לכל היותר. כשאתה מציג רשימות — שורות קצרות, לא טבלאות ענק. אחרי שהמנהל אישר כרטיס (tool_result עם "אושר") — אשר בקצרה והמשך אם נשארו שלבים; אחרי ביטול — קבל את זה בלי להתווכח.
+הצעות המשך: כשיש המשך טבעי ומועיל, סיים את התשובה בשורה נפרדת אחרונה בפורמט המדויק: הצעות: אפשרות א | אפשרות ב (עד 3, קצרות, כל אחת ניסוח שאפשר לשלוח כמו-שהוא). בלי המשך מתבקש — אל תוסיף את השורה.
 בקשות מורכבות מותרות ומעודדות: "תבדוק כמה פסיפס חייב ותוציא לו מס-קבלה" = קודם search_customers + get_customer_status, הצג את המצב, ואז propose_pay_existing.`;
 
 /* ==================== הגדרות הכלים ==================== */
@@ -642,43 +643,70 @@ Deno.serve(async (req) => {
     ];
 
     // ==================== לולאת הסוכן ====================
-    let usage = { input_tokens: 0, output_tokens: 0 };
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
-      const { resp, err } = await callClaude(systemBlocks, messages);
-      if (err) return json({ error: err }, 502);
-      if (resp.usage) {
-        usage.input_tokens += Number(resp.usage.input_tokens) || 0;
-        usage.output_tokens += Number(resp.usage.output_tokens) || 0;
-      }
-      const content = resp.content || [];
-      messages.push({ role: 'assistant', content });
-      const replyText = content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-      const toolUse = content.find(b => b.type === 'tool_use');
+    // emit מקבל עדכוני התקדמות (לזרימת ה-SSE); מחזיר את גוף התשובה כאובייקט
+    const runLoop = async (emit) => {
+      let usage = { input_tokens: 0, output_tokens: 0 };
+      for (let turn = 0; turn < MAX_TURNS; turn++) {
+        const { resp, err } = await callClaude(systemBlocks, messages);
+        if (err) return { error: err, _status: 502 };
+        if (resp.usage) {
+          usage.input_tokens += Number(resp.usage.input_tokens) || 0;
+          usage.output_tokens += Number(resp.usage.output_tokens) || 0;
+        }
+        const content = resp.content || [];
+        messages.push({ role: 'assistant', content });
+        const replyText = content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+        const toolUse = content.find(b => b.type === 'tool_use');
 
-      if (resp.stop_reason !== 'tool_use' || !toolUse) {
-        return json({ ok: true, reply: replyText || '(אין תשובה)', messages, usage });
-      }
+        if (resp.stop_reason !== 'tool_use' || !toolUse) {
+          return { ok: true, reply: replyText || '(אין תשובה)', messages, usage };
+        }
 
-      // כלי דפדפן (הצעת פעולה / הצגת גזירים) — עוצרים ומחזירים לדפדפן;
-      // ה-tool_result יגיע משם (אחרי אישור/ביטול, או מיד אחרי ההצגה)
-      if (toolUse.name.startsWith('propose_') || toolUse.name === 'show_customer_clips') {
-        return json({
-          ok: true, reply: replyText,
-          proposal: { tool_use_id: toolUse.id, name: toolUse.name, input: toolUse.input || {} },
-          messages, usage
+        // כלי דפדפן (הצעת פעולה / הצגת גזירים) — עוצרים ומחזירים לדפדפן;
+        // ה-tool_result יגיע משם (אחרי אישור/ביטול, או מיד אחרי ההצגה)
+        if (toolUse.name.startsWith('propose_') || toolUse.name === 'show_customer_clips') {
+          return {
+            ok: true, reply: replyText,
+            proposal: { tool_use_id: toolUse.id, name: toolUse.name, input: toolUse.input || {} },
+            messages, usage
+          };
+        }
+
+        // כלי קריאה — מבצעים כאן וממשיכים בלולאה
+        emit({ type: 'status', tool: toolUse.name });
+        let result;
+        try { result = await runReadTool(caller, toolUse.name, toolUse.input || {}); }
+        catch (e) { result = { error: String(e && e.message || e) }; }
+        messages.push({
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(result) }]
         });
       }
+      return { error: 'הבקשה מורכבת מדי (יותר מדי שלבים) — נסה לפצל אותה', _status: 500 };
+    };
 
-      // כלי קריאה — מבצעים כאן וממשיכים בלולאה
-      let result;
-      try { result = await runReadTool(caller, toolUse.name, toolUse.input || {}); }
-      catch (e) { result = { error: String(e && e.message || e) }; }
-      messages.push({
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(result) }]
-      });
+    // מצב רגיל (JSON) — נשאר כנפילה חזרה ולתאימות
+    if (body.stream !== true) {
+      const payload = await runLoop(() => { });
+      const status = payload._status || 200;
+      delete payload._status;
+      return json(payload, status);
     }
-    return json({ error: 'הבקשה מורכבת מדי (יותר מדי שלבים) — נסה לפצל אותה' }, 500);
+
+    // מצב זרימה (SSE): אירועי status תוך כדי עבודה, ואז final עם אותו גוף תשובה
+    const enc = new TextEncoder();
+    const sse = new ReadableStream({
+      start(controller) {
+        const send = (obj) => { try { controller.enqueue(enc.encode('data: ' + JSON.stringify(obj) + '\n\n')); } catch (_) { } };
+        runLoop(send)
+          .then((payload) => { delete payload._status; send({ type: 'final', payload }); })
+          .catch((e) => send({ type: 'final', payload: { error: String(e && e.message || e) } }))
+          .finally(() => { try { controller.close(); } catch (_) { } });
+      }
+    });
+    return new Response(sse, {
+      headers: { ...cors, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' }
+    });
   } catch (e) {
     return json({ error: e && e.message ? e.message : String(e) }, 500);
   }
