@@ -69,7 +69,8 @@ Pages.mgragent = {
         <div class="muted" style="font-size:.83rem;margin-top:2px">
           כתוב מה שאתה צריך — שאלה על נתונים או פעולה. למשל:
           <i>"כמה חוב יש לגן ורדים?"</i> · <i>"מי עוד לא חויב על גיליון 300?"</i> ·
-          <i>"תן לי את הגזירים של פסיפס"</i> · <i>"תבדוק מה פתוח לפסיפס ותוציא לו מס-קבלה"</i>.
+          <i>"תן לי את הגזירים של פסיפס"</i> · <i>"שלח לגן ורדים במייל את הגזיר מגיליון 300"</i> ·
+          <i>"תבדוק מה פתוח לפסיפס ותוציא לו מס-קבלה"</i>.
           שום מסמך לא מופק בלי אישור שלך בכרטיס.
         </div>
       </div>
@@ -151,8 +152,11 @@ async function mgrCallAgent() {
     if (r.data.proposal.name === 'show_customer_clips') {
       // הצגה בדפדפן בלבד — אין מה לאשר; מציגים, מדווחים לסוכן וממשיכים
       await mgrShowClips(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_send_clips') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_clips' };
+      await mgrProposeSendClips(r.data.proposal);
     } else {
-      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id };
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'invoice' };
       await mgrOpenProposal(r.data.proposal);
     }
   }
@@ -214,6 +218,107 @@ function mgrClipsZip(qid, btn) {
   const d = _mgrClips[qid];
   if (!d || typeof reportCustClipsZip !== 'function') { toast('הגזירים לא זמינים — בקש שוב', true); return; }
   reportCustClipsZip(btn, d.clips, d.name);
+}
+
+/* ---------- שליחת גזירים במייל (כרטיס אישור) ----------
+   אותו מנגנון של "שלח גזיר" בחיוב הגיליון: Edge Function ‏send-clip
+   חותכת את עמודי המודעות מ-PDF הגיליון ושולחת לכתובת שבכרטיס הלקוח,
+   גיליון אחד בכל קריאה. שום מייל לא נשלח בלי [שלח במייל] בכרטיס. */
+let _mgrSend = null; // הצעת השליחה הממתינה לאישור
+async function mgrProposeSendClips(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const name = String(inp.customer_name || '');
+  const nums = [...new Set((inp.issue_numbers || []).map(Number).filter(n => n > 0))].sort((a, b) => a - b).slice(0, 12);
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: p.tool_use_id, content: 'הכרטיס לא נפתח: ' + why }] });
+    _mgrState.pending = null;
+    await mgrCallAgent();
+  };
+  if (!cid || !nums.length) { await fail('חסר לקוח או מספרי גיליונות לשליחה.'); return; }
+  let email = '';
+  try {
+    const { data } = await db.from('customers').select('email').eq('id', cid).single();
+    email = String(data && data.email || '').trim();
+  } catch (e) { }
+  if (!email) { await fail('ללקוח ' + name + ' אין כתובת מייל בכרטיס — יש להשלים אותה בכרטיס הלקוח לפני שליחה.'); return; }
+  // מיפוי מספרי גיליון לרשומות קיימות
+  const byNum = {};
+  (cache.issues || []).forEach(i => { byNum[Number(i.issue_number)] = i; });
+  const issues = nums.filter(n => byNum[n]).map(n => ({ num: n, id: byNum[n].id }));
+  const missing = nums.filter(n => !byNum[n]);
+  if (!issues.length) { await fail('הגיליונות ' + nums.join(', ') + ' לא נמצאו במערכת.'); return; }
+  _mgrSend = { toolUseId: p.tool_use_id, customerId: cid, name, email, issues };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrSendCard';
+  card.innerHTML = `
+    <div class="hd">📧 שליחת גזירים במייל — לאישור לפני שליחה</div>
+    ${missing.length ? `<div class="ic-warn">⚠ גיליונות ${missing.join(', ')} לא קיימים במערכת — ידולגו.</div>` : ''}
+    <div class="grid2">
+      <div class="field"><label>לקוח</label><input type="text" value="${esc(name)}" disabled></div>
+      <div class="field"><label>אל (מכרטיס הלקוח)</label><input type="text" value="${esc(email)}" disabled dir="ltr"></div>
+    </div>
+    <div class="field"><label>גזירים מגיליונות</label>
+      <input type="text" value="${issues.map(i => i.num).join(', ')} (${issues.length})" disabled dir="ltr"></div>
+    <div class="muted" style="font-size:.78rem">כל גיליון נשלח כמייל נפרד עם עמודי המודעות של הלקוח מצורפים כ-PDF.</div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrSendBtn" onclick="mgrSendClipsApprove()">✅ שלח במייל</button>
+      <button class="btn btn-ghost" onclick="mgrSendClipsCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrSendClipsApprove() {
+  const s = _mgrSend;
+  if (!s) return;
+  const btn = document.getElementById('mgrSendBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  mgrSetBusy(true);
+  const sent = [], failed = [];
+  for (const iss of s.issues) {
+    try {
+      const { data, error } = await db.functions.invoke('send-clip', { body: { customer_id: s.customerId, issue_id: iss.id } });
+      if (!error && data && data.ok) { sent.push(iss.num); continue; }
+      let msg = '';
+      try { if (error && error.context && typeof error.context.json === 'function') { const j = await error.context.json(); msg = j.detail || j.error || ''; } } catch (e) { }
+      if (!msg && data) msg = data.detail || data.error || '';
+      failed.push({ num: iss.num, msg: msg || 'שגיאה' });
+    } catch (e) { failed.push({ num: iss.num, msg: String(e && e.message || e) }); }
+  }
+  mgrSetBusy(false);
+  document.getElementById('mgrSendCard')?.remove();
+  if (sent.length) icSayOk('✅ נשלחו הגזירים במייל ל<b>' + esc(s.name) + '</b> (' + esc(s.email) + ') — גיליונות <b>' + sent.join(', ') + '</b>.');
+  if (failed.length) icSayErr('חלק מהשליחות נכשלו: ' + failed.map(f => 'גיליון ' + f.num + ' (' + esc(f.msg) + ')').join(' · '));
+  const outcome = 'המשתמש אישר. ' +
+    (sent.length ? 'נשלחו גזירים לגיליונות ' + sent.join(', ') + ' לכתובת ' + s.email + '. ' : '') +
+    (failed.length ? 'נכשלו: ' + failed.map(f => 'גיליון ' + f.num + ' — ' + f.msg).join('; ') : '');
+  const id = s.toolUseId;
+  _mgrSend = null;
+  // אם המנהל המשיך בשיחה בינתיים, ההצעה כבר נסגרה מול הסוכן — לא שולחים tool_result כפול
+  const stillPending = _mgrState.pending && _mgrState.pending.tool_use_id === id;
+  if (stillPending) {
+    _mgrState.pending = null;
+    _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: outcome.trim() }] });
+    await mgrCallAgent();
+  } else {
+    mgrSaveChat();
+  }
+}
+async function mgrSendClipsCancel() {
+  const s = _mgrSend;
+  if (!s) return;
+  document.getElementById('mgrSendCard')?.remove();
+  icSay('השליחה בוטלה — לא נשלח מייל.');
+  const id = s.toolUseId;
+  _mgrSend = null;
+  const stillPending = _mgrState.pending && _mgrState.pending.tool_use_id === id;
+  if (stillPending) {
+    _mgrState.pending = null;
+    _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'המשתמש ביטל — לא נשלח מייל.' }] });
+    await mgrCallAgent();
+  }
 }
 
 /* ---------- הצעת פעולה → כרטיס האישור הקיים של צ'אט החשבוניות ---------- */
@@ -290,6 +395,7 @@ async function mgrOpenProposal(p) {
 function mgrOnPage() { return !!document.getElementById('mgrWrap'); }
 async function mgrAfterCard(fnName, reqId) {
   if (!mgrOnPage() || !_mgrState || !_mgrState.pending) return;
+  if (_mgrState.pending.kind && _mgrState.pending.kind !== 'invoice') return; // כרטיס אחר (שליחת גזירים) — יש לו מאשרים משלו
   if (reqId && document.getElementById('icCard-' + reqId)) return; // הכרטיס עוד פתוח
   let outcome;
   if (fnName === 'invChatCancel') {
