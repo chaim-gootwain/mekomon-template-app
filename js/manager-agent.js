@@ -69,7 +69,7 @@ Pages.mgragent = {
         <div class="muted" style="font-size:.83rem;margin-top:2px">
           כתוב מה שאתה צריך — שאלה על נתונים או פעולה. למשל:
           <i>"כמה חוב יש לגן ורדים?"</i> · <i>"מי עוד לא חויב על גיליון 300?"</i> ·
-          <i>"תבדוק מה פתוח לפסיפס ותוציא לו מס-קבלה"</i>.
+          <i>"תן לי את הגזירים של פסיפס"</i> · <i>"תבדוק מה פתוח לפסיפס ותוציא לו מס-קבלה"</i>.
           שום מסמך לא מופק בלי אישור שלך בכרטיס.
         </div>
       </div>
@@ -148,11 +148,72 @@ async function mgrCallAgent() {
   _mgrState.messages = r.data.messages || _mgrState.messages;
   if (r.data.reply) icSay(mgrFormatReply(r.data.reply));
   if (r.data.proposal) {
-    _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id };
-    await mgrOpenProposal(r.data.proposal);
+    if (r.data.proposal.name === 'show_customer_clips') {
+      // הצגה בדפדפן בלבד — אין מה לאשר; מציגים, מדווחים לסוכן וממשיכים
+      await mgrShowClips(r.data.proposal);
+    } else {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id };
+      await mgrOpenProposal(r.data.proposal);
+    }
   }
   mgrSaveChat();
   document.getElementById('icInput')?.focus();
+}
+
+/* ---------- הצגת גזירים (כלי דפדפן, קריאה בלבד) ----------
+   נשען על העוזרים של דוח היסטוריית לקוח (reports.js, נטען לפנינו
+   בבאנדל): custPubsFetch לשליפה ו-reportCustClipsZip להורדת ה-ZIP —
+   אותו מנגנון כמו בבוט הזנת הנתונים. אחרי ההצגה נשלח לסוכן tool_result
+   עם סיכום, כדי שיוכל להגיב ולהמשיך. */
+let _mgrClipsSeq = 0;
+const _mgrClips = {};
+async function mgrShowClips(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const name = String(inp.customer_name || '');
+  let summary;
+  try {
+    if (!cid) throw new Error('חסר מזהה לקוח');
+    if (typeof custPubsFetch !== 'function') throw new Error('מודול הדוחות לא נטען — רענן את הדף');
+    const wait = icSay('שולף את הגזירים של <b>' + esc(name) + '</b>... ⏳');
+    const pubs = await custPubsFetch(cid, Number(inp.issue_from) || null, Number(inp.issue_to) || null);
+    wait && wait.remove();
+    const { ads, clipOf, proofOf, issNum } = pubs;
+    if (!ads.length) {
+      icSay('לא נמצאו מודעות ל<b>' + esc(name) + '</b>' + ((inp.issue_from || inp.issue_to) ? ' בטווח המבוקש' : '') + '.');
+      summary = 'לא נמצאו מודעות ללקוח בטווח המבוקש.';
+    } else {
+      const qid = ++_mgrClipsSeq;
+      _mgrClips[qid] = { clips: pubs.clips, name: name || ('לקוח_' + cid) };
+      const published = ads.filter(a => a.status === 'published').length;
+      const SHOW = 40;
+      const rows = ads.slice(0, SHOW).map(a => `<tr>
+        <td>${issNum[a.issue_id] != null ? 'גיליון ' + issNum[a.issue_id] : heDate(a.created_at)}</td>
+        <td>${esc(a.title)}</td><td>${pill('ad', a.status)}</td>
+        <td>${clipOf[a.id] ? `<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${escJs(clipOf[a.id].storage_path)}')">📎</button>`
+          : (proofOf && proofOf[a.id]) ? `<button class="btn btn-sm btn-ghost" onclick="adProofOpen(${a.issue_id}, ${a.customer_id})">🗞️</button>` : '—'}</td>
+      </tr>`).join('');
+      icSay('ל<b>' + esc(name) + '</b>: <b>' + ads.length + '</b> מודעות, מהן <b>' + published + '</b> פורסמו · <b>' + pubs.clips.length + '</b> גזירים זמינים.' +
+        '<div class="table-wrap" style="margin-top:8px;max-height:280px;overflow:auto"><table class="data"><thead><tr><th>גיליון</th><th>מודעה</th><th>סטטוס</th><th>גזיר</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        (ads.length > SHOW ? '<div class="muted" style="font-size:.78rem">מוצגות ' + SHOW + ' מתוך ' + ads.length + ' — הרשימה המלאה בדוח היסטוריית לקוח.</div>' : '') +
+        '<div class="ic-choices" style="margin-top:8px">' +
+        (pubs.clips.length ? `<button class="btn btn-sm" onclick="mgrClipsZip(${qid}, this)">⬇ הורדת הגזירים (${pubs.clips.length}) — ZIP</button>` : '') +
+        '<button class="btn btn-sm btn-ghost" onclick="openPage(\'reports\')">📊 לדוח המלא</button></div>');
+      summary = 'הוצגו למנהל ' + ads.length + ' מודעות ו-' + pubs.clips.length + ' גזירים' +
+        (pubs.clips.length ? ', כולל כפתור הורדת ZIP.' : '. אין גזירים זמינים להורדה.');
+    }
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    icSayErr('שליפת הגזירים נכשלה: ' + esc(msg));
+    summary = 'שגיאה בשליפת הגזירים: ' + msg.slice(0, 200);
+  }
+  _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: p.tool_use_id, content: summary }] });
+  await mgrCallAgent();
+}
+function mgrClipsZip(qid, btn) {
+  const d = _mgrClips[qid];
+  if (!d || typeof reportCustClipsZip !== 'function') { toast('הגזירים לא זמינים — בקש שוב', true); return; }
+  reportCustClipsZip(btn, d.clips, d.name);
 }
 
 /* ---------- הצעת פעולה → כרטיס האישור הקיים של צ'אט החשבוניות ---------- */
