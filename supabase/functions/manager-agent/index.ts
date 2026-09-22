@@ -53,6 +53,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - "לקוח שילם" בלי סכום חדש → propose_pay_existing (הסכום יילקח מחשבון העסקה הפתוח שלו במערכת). אם ננקב סכום מפורש להפקה — זו הפקה רגילה (propose_issue_document).
 - "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
 - שליחת גזירים במייל ללקוח → propose_send_clips עם מספרי הגיליונות. אם המנהל לא ציין גיליונות — בדוק ב-get_customer_publications אילו גיליונות רלוונטיים (למשל האחרון שפורסם) והצע. המייל נשלח לכתובת שבכרטיס הלקוח, והמנהל מאשר בכרטיס לפני שליחה.
+- "צרף לי את החשבונית" / "תראה לי את המסמך" → get_customer_documents, ותן את הקישור בפורמט markdown: [חשבונית מס 10009 — PDF](pdf_url). הקישור נפתח בלחיצה אצל המנהל. מסמך בלי pdf_url — אמור שהקובץ לא זמין במערכת (הופק מחוץ למסלול הרגיל).
 - עסקה/חבילה של כמה פרסומים עם גיליון התחלה או רצף גיליונות → propose_new_deal.
 - תיאור שורה (description): השירות בלבד, בלי שם הלקוח ובלי הסכום. אין תיאור → "פרסום".
 
@@ -108,6 +109,19 @@ const TOOLS = [
       type: 'object',
       properties: { issue_number: { type: 'number', description: 'מספר גיליון (אופציונלי — בלעדיו: כל הפתוחות)' } },
       required: []
+    }
+  },
+  {
+    name: 'get_customer_documents',
+    description: 'המסמכים הכספיים של לקוח (חשבוניות מס, מס-קבלות, קבלות, חשבונות עסקה, זיכויים) כולל קישור PDF לכל מסמך. השתמש כשמבקשים לצרף/לראות/למצוא מסמך.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח מ-search_customers' },
+        doc_kind: { type: 'string', enum: ['tax_invoice', 'invoice_receipt', 'receipt', 'proforma', 'credit'], description: 'סינון לסוג מסמך (אופציונלי)' },
+        limit: { type: 'number', description: 'כמה מסמכים אחרונים (ברירת מחדל 10, עד 30)' }
+      },
+      required: ['customer_id']
     }
   },
   {
@@ -298,6 +312,29 @@ async function runReadTool(caller, name, input) {
       .map(d => ({ doc_number: d.doc_number, total: d.total, created_at: (d.created_at || '').slice(0, 10) }));
 
     return { debt_total: debtTotal, open_charges: openCharges.slice(0, 15), active_contracts: activeContracts, open_proformas: openProformas };
+  }
+
+  if (name === 'get_customer_documents') {
+    const cid = Number(input && input.customer_id);
+    if (!cid) return { error: 'חסר customer_id' };
+    const lim = Math.min(30, Math.max(1, Number(input && input.limit) || 10));
+    // select('*') בכוונה — עמודות אופציונליות (settled_at) אולי לא קיימות בכל מופע
+    let q = caller.from('documents').select('*').eq('customer_id', cid)
+      .order('created_at', { ascending: false }).limit(lim);
+    const kind = String(input && input.doc_kind || '');
+    if (['tax_invoice', 'invoice_receipt', 'receipt', 'proforma', 'credit'].includes(kind)) q = q.eq('doc_kind', kind);
+    const { data, error } = await q;
+    if (error) return { error: error.message };
+    const docs = (data || []).map(d => ({
+      doc_number: d.doc_number || null,
+      doc_kind: d.doc_kind,
+      total: d.total,
+      status: d.status,
+      date: (d.created_at || '').slice(0, 10),
+      settled: !!d.settled_at,
+      pdf_url: d.pdf_url || null
+    }));
+    return { documents: docs, note: 'doc_kind: tax_invoice=חשבונית מס, invoice_receipt=מס-קבלה, receipt=קבלה, proforma=חשבון עסקה, credit=זיכוי. תן קישורי PDF בפורמט markdown.' };
   }
 
   if (name === 'get_customer_publications') {
