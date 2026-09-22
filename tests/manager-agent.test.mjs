@@ -11,7 +11,7 @@ global.Pages = {};
 global.window = {};
 global.cache = { settings: {} };
 
-const { mgrBuildUserContent, mgrTrimMessages } = require('../js/manager-agent.js');
+const { mgrBuildUserContent, mgrTrimMessages, mgrSplitSuggestions } = require('../js/manager-agent.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -59,6 +59,26 @@ t('mgrTrimMessages: הראשונה שנשארת לעולם לא tool_result', ()
 t('mgrTrimMessages: ריק/לא-מערך → ריק', () => {
   assert.deepStrictEqual(mgrTrimMessages([], 10), []);
   assert.deepStrictEqual(mgrTrimMessages(null, 10), []);
+});
+
+/* ---------- mgrSplitSuggestions ---------- */
+t('mgrSplitSuggestions: בלי שורת הצעות → טקסט כמו שהוא', () => {
+  const r = mgrSplitSuggestions('תשובה רגילה\nעם שתי שורות');
+  assert.strictEqual(r.text, 'תשובה רגילה\nעם שתי שורות');
+  assert.deepStrictEqual(r.suggestions, []);
+});
+t('mgrSplitSuggestions: שורת הצעות בסוף → מופרדת מהטקסט', () => {
+  const r = mgrSplitSuggestions('יש לו חוב של 590 ₪.\nהצעות: הוצא קבלה | שלח תזכורת');
+  assert.strictEqual(r.text, 'יש לו חוב של 590 ₪.');
+  assert.deepStrictEqual(r.suggestions, ['הוצא קבלה', 'שלח תזכורת']);
+});
+t('mgrSplitSuggestions: יותר משלוש → נחתך לשלוש', () => {
+  const r = mgrSplitSuggestions('טקסט\nהצעות: א | ב | ג | ד');
+  assert.deepStrictEqual(r.suggestions, ['א', 'ב', 'ג']);
+});
+t('mgrSplitSuggestions: "הצעות:" באמצע שורה לא נתפס', () => {
+  const r = mgrSplitSuggestions(' יש כמה הצעות: אחת ושתיים בטקסט רגיל');
+  assert.deepStrictEqual(r.suggestions, []);
 });
 
 console.log('\n' + passed + ' בדיקות עברו');

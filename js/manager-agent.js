@@ -64,7 +64,10 @@ Pages.mgragent = {
       <div class="card card-pad" style="padding:12px 16px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
           <b>🤖 סוכן המקומון</b>
-          <button class="btn btn-sm btn-ghost" onclick="mgrNewChat()">🗨 שיחה חדשה</button>
+          <span style="display:flex;gap:6px">
+            <button class="btn btn-sm btn-ghost" onclick="mgrShowChats()">🕘 שיחות אחרונות</button>
+            <button class="btn btn-sm btn-ghost" onclick="mgrNewChat()">🗨 שיחה חדשה</button>
+          </span>
         </div>
         <div class="muted" style="font-size:.83rem;margin-top:2px">
           כתוב מה שאתה צריך — שאלה על נתונים או פעולה. למשל:
@@ -112,6 +115,35 @@ function mgrFormatReply(text) {
     .replace(/\n/g, '<br>');
 }
 
+/* פירוק שורת "הצעות: א | ב" מסוף התשובה — טקסט נקי + רשימת הצעות */
+function mgrSplitSuggestions(text) {
+  const t = String(text || '');
+  const m = t.match(/(?:^|\n)הצעות:\s*(.+?)\s*$/);
+  if (!m) return { text: t, suggestions: [] };
+  return {
+    text: t.slice(0, m.index).trim(),
+    suggestions: m[1].split('|').map(s => s.trim()).filter(Boolean).slice(0, 3),
+  };
+}
+/* בועת תשובה של הסוכן + כפתורי המשך מהיר אם הציע */
+function mgrSayReply(text) {
+  const { text: clean, suggestions } = mgrSplitSuggestions(text);
+  const el = icSay(mgrFormatReply(clean || text));
+  if (suggestions.length && el) {
+    const d = document.createElement('div');
+    d.className = 'ic-choices';
+    suggestions.forEach(s => {
+      const b = document.createElement('button');
+      b.className = 'btn btn-sm btn-ghost';
+      b.textContent = s;
+      b.onclick = () => { const inp = document.getElementById('icInput'); if (inp) inp.value = s; mgrAgentSend(); };
+      d.appendChild(b);
+    });
+    el.appendChild(d);
+  }
+  return el;
+}
+
 /* ---------- שליחה ---------- */
 async function mgrAgentSend() {
   const inp = document.getElementById('icInput');
@@ -138,20 +170,86 @@ async function mgrAgentSend() {
   await mgrCallAgent();
 }
 
-/* ---------- קריאה לסוכן וטיפול בתשובה ---------- */
+/* ---------- קריאה לסוכן וטיפול בתשובה ----------
+   מסלול ראשי: זרימת SSE — עדכוני "מה הסוכן עושה עכשיו" מופיעים חיים
+   בבועת ההמתנה. נפילה חזרה: הקריאה הרגילה דרך invoke (למשל כשהפונקציה
+   במופע עדיין ישנה או שהזרימה נחסמה בדרך). */
+const MGR_TOOL_LABELS = {
+  search_customers: '🔎 מחפש לקוח...',
+  get_customer_status: '💰 בודק מצב כספי...',
+  get_customer_publications: '🗞️ בודק פרסומים...',
+  list_issues: '🗓️ בודק גיליונות...',
+  get_unbilled_ads: '🧾 בודק מי טרם חויב...',
+  get_debtors: '💰 שולף רשימת חייבים...',
+  get_customer_tasks: '✅ בודק משימות...',
+  get_customer_documents: '📄 מחפש מסמכים...',
+};
+/* פרטי החיבור — אותה רזולוציה של initSupabase (api.js) */
+function mgrConn() {
+  if (BUILT_IN_URL.startsWith('https://')) return { url: BUILT_IN_URL, key: BUILT_IN_KEY };
+  try {
+    const cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '');
+    if (cfg && cfg.url && cfg.key) return { url: cfg.url, key: cfg.key };
+  } catch (e) { }
+  return null;
+}
+async function mgrCallStream(statusEl) {
+  const conn = mgrConn();
+  if (!conn || typeof ReadableStream === 'undefined') return null;
+  const { data: sess } = await db.auth.getSession();
+  const token = sess && sess.session && sess.session.access_token;
+  if (!token) return null;
+  const resp = await fetch(conn.url + '/functions/v1/manager-agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'apikey': conn.key },
+    body: JSON.stringify({ messages: _mgrState.messages, stream: true }),
+  });
+  const ctype = resp.headers.get('Content-Type') || '';
+  if (!ctype.includes('text/event-stream')) {
+    // פונקציה ישנה במופע / שגיאה — התשובה היא JSON רגיל
+    const j = await resp.json().catch(() => null);
+    return j || { error: 'שגיאת רשת (' + resp.status + ')' };
+  }
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', final = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = chunk.split('\n').find(l => l.startsWith('data: '));
+      if (!line) continue;
+      let ev = null;
+      try { ev = JSON.parse(line.slice(6)); } catch (e) { continue; }
+      if (ev.type === 'status' && statusEl) statusEl.innerHTML = esc(MGR_TOOL_LABELS[ev.tool] || 'עובד... ⏳');
+      else if (ev.type === 'final') final = ev.payload;
+    }
+  }
+  return final || { error: 'הזרימה נקטעה — נסה שוב' };
+}
 async function mgrCallAgent() {
   mgrSetBusy(true);
   const thinking = icSay('חושב... ⏳');
-  const r = await invChatFn('manager-agent', { messages: _mgrState.messages });
+  let res = null;
+  try { res = await mgrCallStream(thinking); } catch (e) { res = null; }
+  if (!res) {
+    const r = await invChatFn('manager-agent', { messages: _mgrState.messages });
+    res = r.errMsg ? { error: r.errMsg || (r.data && r.data.error) } : r.data;
+  }
   thinking && thinking.remove();
   mgrSetBusy(false);
-  if (r.errMsg || !r.data || !r.data.ok) {
+  if (!res || res.error || !res.ok) {
     // ההודעה נשארת בתמליל — שליחה נוספת תנסה שוב עם אותו הקשר
-    icSayErr('שגיאה: ' + esc(r.errMsg || (r.data && r.data.error) || 'תשובה ריקה'));
+    icSayErr('שגיאה: ' + esc((res && res.error) || 'תשובה ריקה'));
     return;
   }
+  const r = { data: res };
   _mgrState.messages = r.data.messages || _mgrState.messages;
-  if (r.data.reply) icSay(mgrFormatReply(r.data.reply));
+  if (r.data.reply) mgrSayReply(r.data.reply);
   if (r.data.proposal) {
     if (r.data.proposal.name === 'show_customer_clips') {
       // הצגה בדפדפן בלבד — אין מה לאשר; מציגים, מדווחים לסוכן וממשיכים
@@ -655,6 +753,92 @@ async function mgrSaveChat() {
   } catch (e) { console.error('mgr save chat', e); }
 }
 
+/* ---------- שיחות אחרונות — המשך שיחה שמורה ---------- */
+async function mgrShowChats() {
+  try {
+    const { data } = await db.from('agent_chats').select('id,title,updated_at')
+      .order('updated_at', { ascending: false }).limit(10);
+    if (!data || !data.length) { icSay('אין שיחות שמורות עדיין.'); return; }
+    icSay('שיחות אחרונות — לחיצה ממשיכה מאיפה שהפסקת:' +
+      '<div class="ic-choices">' +
+      data.map(c => `<button class="btn btn-sm btn-ghost" onclick="mgrLoadChat(${c.id})">${esc(String(c.title || 'שיחה').slice(0, 40))} <span class="muted">· ${heDate(c.updated_at)}</span></button>`).join('') +
+      '</div>');
+  } catch (e) { icSayErr('שגיאה בטעינת השיחות'); }
+}
+async function mgrLoadChat(id) {
+  try {
+    const { data, error } = await db.from('agent_chats').select('id,title,messages').eq('id', id).single();
+    if (error || !data) throw error || new Error('לא נמצאה');
+    mgrResetState();
+    _mgrState.chatId = data.id;
+    _mgrState.title = data.title || null;
+    _mgrState.messages = Array.isArray(data.messages) ? data.messages : [];
+    const log = document.getElementById('icLog');
+    if (log) log.innerHTML = '';
+    icSay('⤴ ממשיכים את השיחה: <b>' + esc(String(data.title || '')) + '</b>');
+    // שחזור התצוגה מהתמליל — טקסטים בלבד (כרטיסים ישנים לא משוחזרים)
+    for (const m of _mgrState.messages) {
+      if (m.role === 'user') {
+        const t = typeof m.content === 'string' ? m.content
+          : (m.content || []).filter(b => b && b.type === 'text').map(b => b.text).join('\n');
+        if (t && t.trim()) { icBubble(esc(t), 'ic-msg ic-user'); _mgrState.lastUserText = t; }
+      } else if (m.role === 'assistant') {
+        const t = (m.content || []).filter(b => b && b.type === 'text').map(b => b.text).join('\n').trim();
+        if (t) mgrSayReply(t);
+      }
+    }
+    // הצעה שנשארה פתוחה בסוף השיחה — תיסגר אוטומטית עם ההודעה הבאה
+    const last = _mgrState.messages[_mgrState.messages.length - 1];
+    const tu = last && last.role === 'assistant' && (last.content || []).find(b => b && b.type === 'tool_use');
+    if (tu) {
+      _mgrState.pending = { tool_use_id: tu.id, kind: 'restored' };
+      icSay('בשיחה הזו נשארה הצעה שלא אושרה — אם היא עדיין רלוונטית, פשוט בקש אותה שוב.');
+    }
+    document.getElementById('icInput')?.focus();
+  } catch (e) { icSayErr('שגיאה בטעינת השיחה'); }
+}
+
+/* ---------- כניסה מכרטיס הלקוח: "שאל את הסוכן" (תפריט "עוד") ---------- */
+function mgrAskAbout(customerId) {
+  const c = (cache.customers || []).find(x => x.id === customerId);
+  const name = (c && c.name) || '';
+  try { if (typeof ccMenuClose === 'function') ccMenuClose(); } catch (e) { }
+  document.getElementById('viewBack')?.classList.remove('open');
+  openPage('mgragent');
+  // הדף נטען אסינכרונית — ממלאים את השדה כשהוא מופיע
+  let tries = 0;
+  const fill = () => {
+    const inp = document.getElementById('icInput');
+    if (inp && document.getElementById('mgrWrap')) { inp.value = 'לגבי הלקוח "' + name + '": '; inp.focus(); }
+    else if (++tries < 10) setTimeout(fill, 150);
+  };
+  setTimeout(fill, 150);
+}
+(function () {
+  const orig = window.openCustomerCard;
+  if (typeof orig === 'function' && !orig._mgrWrapped) {
+    const wrapped = async function (id) {
+      const r = await orig.apply(this, arguments);
+      try {
+        if (profile && profile.role === 'admin' && mgrAgentOn()) {
+          const menu = document.getElementById('ccMoreMenu');
+          if (menu && !document.getElementById('mgrAskBtn')) {
+            const b = document.createElement('button');
+            b.id = 'mgrAskBtn';
+            b.className = 'btn';
+            b.textContent = '🤖 שאל את הסוכן';
+            b.onclick = () => mgrAskAbout(id);
+            menu.appendChild(b);
+          }
+        }
+      } catch (e) { }
+      return r;
+    };
+    wrapped._mgrWrapped = true;
+    window.openCustomerCard = wrapped;
+  }
+})();
+
 /* ---------- הזרקה לתפריט (בלי לגעת ב-app.js) ---------- */
 function mgrInjectNav() {
   const nav = document.getElementById('sideNav');
@@ -733,5 +917,5 @@ async function mgrProbe() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mgrBuildUserContent, mgrTrimMessages };
+  module.exports = { mgrBuildUserContent, mgrTrimMessages, mgrSplitSuggestions };
 }
