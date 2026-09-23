@@ -906,6 +906,7 @@ async function invChatStartNewDeal() {
     start_issue: Number(d.start_issue) || 0,
     unit_price: (Number(d.unit_price) > 0) ? Number(d.unit_price) : (sizeHit ? Number(sizeHit.price) || 0 : 0),
     price_includes_vat: !!d.price_includes_vat,
+    same_issue: !!d.same_issue, // כל הפרסומים באותו גיליון (למשל "8 עמודים בגיליון 305")
     size_id: sizeHit ? sizeHit.id : ((cache.priceList || [])[0] ? cache.priceList[0].id : null),
     opts: { contract: true, ads: true, autoIssues: true, proforma: true },
   };
@@ -914,6 +915,7 @@ async function invChatStartNewDeal() {
 function _icDealNums() {
   const d = _icState.deal;
   const n = Math.max(0, Number(d.count) || 0), s = Number(d.start_issue) || 0;
+  if (d.same_issue) return (n > 0 && s > 0) ? [s] : []; // גיליון אחד — כל המודעות בו
   const out = []; for (let i = 0; i < n && s > 0; i++) out.push(s + i); return out;
 }
 function invChatNewDealCard() {
@@ -958,13 +960,14 @@ function invChatNewDealCard() {
       <div class="field"><label>מחיר לפרסום</label>
         <input type="number" step="any" value="${Number(d.unit_price) || ''}" onchange="invChatDealSet('unit_price',this.value)"></div>
       <div class="field"><label>גיליונות</label>
-        <input type="text" value="${esc(rangeTxt)} (${nums.length})" disabled dir="ltr"></div>
+        <input type="text" value="${d.same_issue ? esc(rangeTxt) + ' (כל ה-' + (Number(d.count) || 0) + ' בגיליון אחד)' : esc(rangeTxt) + ' (' + nums.length + ')'}" disabled dir="ltr"></div>
     </div>
     <label class="vat" style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" ${d.price_includes_vat ? 'checked' : ''} onchange="invChatDealSet('price_includes_vat',this.checked)" style="width:15px;height:15px">המחיר כולל מע"מ</label>
+    <label class="vat" style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" ${d.same_issue ? 'checked' : ''} onchange="invChatDealSet('same_issue',this.checked)" style="width:15px;height:15px">כל הפרסומים באותו גיליון (לא פרוסים ברצף)</label>
     <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px;display:flex;flex-direction:column;gap:6px">
       <div class="muted" style="font-size:.8rem">מה להקים (אפשר לבחור):</div>
       ${cb('contract', 'חוזה/עסקה (' + (Number(d.count) || 0) + ' פרסומים)')}
-      ${cb('ads', 'מודעות פר גיליון (' + nums.length + ')')}
+      ${cb('ads', d.same_issue ? ((Number(d.count) || 0) + ' מודעות בגיליון ' + (Number(d.start_issue) || '—')) : 'מודעות פר גיליון (' + nums.length + ')')}
       ${cb('autoIssues', 'השלמת גיליונות חסרים אוטומטית')}
       ${cb('proforma', 'חשבון עסקה (על כל החבילה)')}
     </div>
@@ -983,6 +986,7 @@ function invChatNewDealCard() {
 function invChatDealSet(k, v) {
   const d = _icState.deal;
   if (k === 'price_includes_vat') d.price_includes_vat = !!v;
+  else if (k === 'same_issue') d.same_issue = !!v;
   else if (k === 'count' || k === 'start_issue') d[k] = Math.max(0, Math.floor(Number(v) || 0));
   else if (k === 'unit_price') d.unit_price = Math.max(0, Number(v) || 0);
   invChatNewDealCard();
@@ -1050,9 +1054,11 @@ async function invChatNewDealApprove() {
     // ----- שלב 3: מודעות פר גיליון (לא נוצרות שוב אם כבר הוקמו) -----
     if (d.opts.ads && !d._adsDone) {
       const targets = issueMap.existing; // רק גיליונות שקיימים בפועל
-      const missingSkipped = nums.length - targets.length; // גיליונות שלא קיימים בכלל
+      // same_issue: כל המודעות באותו גיליון — עותקים מרובים על יעד אחד
+      const copies = d.same_issue ? Math.max(1, Number(d.count) || 1) : 1;
+      const missingSkipped = d.same_issue ? (targets.length ? 0 : copies) : (nums.length - targets.length);
       let made = 0, failed = 0;
-      for (const t of targets) {
+      for (const t of targets) for (let _copy = 0; _copy < copies; _copy++) {
         const price = unitNet;
         const rec = {
           customer_id: f.customer_id, title: (c && c.name) || f.customer_name || 'לקוח',
@@ -1080,7 +1086,7 @@ async function invChatNewDealApprove() {
     let docNum = null, pdfUrl = null;
     if (d.opts.proforma) {
       const sizeName = (cache.priceList || []).find(p => p.id === d.size_id);
-      const label = 'פרסום' + (sizeName ? ' ' + sizeName.name : '') + ' — גיליונות ' + (nums[0] + (nums.length > 1 ? '–' + nums[nums.length - 1] : '')) + ' (' + (Number(d.count) || nums.length) + ' פרסומים)';
+      const label = 'פרסום' + (sizeName ? ' ' + sizeName.name : '') + (nums.length > 1 ? ' — גיליונות ' + nums[0] + '–' + nums[nums.length - 1] : ' — גיליון ' + nums[0]) + ' (' + (Number(d.count) || nums.length) + ' פרסומים)';
       const body = {
         customer_id: f.customer_id, doc_kind: 'proforma',
         items: [{ details: label, amount: Number(d.count) || nums.length, price: Number(d.unit_price) || 0 }],
