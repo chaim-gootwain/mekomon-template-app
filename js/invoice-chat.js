@@ -908,7 +908,8 @@ async function invChatStartNewDeal() {
     price_includes_vat: !!d.price_includes_vat,
     same_issue: !!d.same_issue, // כל הפרסומים באותו גיליון (למשל "8 עמודים בגיליון 305")
     size_id: sizeHit ? sizeHit.id : ((cache.priceList || [])[0] ? cache.priceList[0].id : null),
-    opts: { contract: true, ads: true, autoIssues: true, proforma: true },
+    // הקורא (למשל סוכן המקומון) יכול לכבות מראש רכיבים — "בלי חשבון עסקה"
+    opts: Object.assign({ contract: true, ads: true, autoIssues: true, proforma: true }, d.opts || {}),
   };
   invChatNewDealCard();
 }
@@ -1116,6 +1117,8 @@ async function invChatNewDealApprove() {
       try { await addInteraction('customer', f.customer_id, 'עסקת פרסומים מהצ׳אט: ' + (szName ? szName.name + ' × ' : '') + (Number(d.count) || nums.length) + ' פרסומים · גיליונות ' + (nums[0] + (nums.length > 1 ? '–' + nums[nums.length - 1] : '')) + (docNum ? ' · חשבון עסקה #' + docNum : '')); } catch (e) { }
     }
     if (typeof refreshCache === 'function') { try { await refreshCache(); } catch (e) { } }
+    // סיכום אמת למי שעוטף את המאשר (סוכן המקומון) — מה הוקם בפועל
+    try { window._icLastNewDealSummary = done.join(' · '); } catch (e) { }
     document.getElementById('icCard-' + _icState.reqId)?.remove();
     icSayOk('✅ הוקם ל<b>' + esc(f.customer_name || '') + '</b>: ' + done.map(x => '<b>' + esc(x) + '</b>').join(' · ') +
       (pdfUrl ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(pdfUrl)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
