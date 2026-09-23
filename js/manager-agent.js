@@ -690,6 +690,11 @@ async function mgrOpenProposal(p) {
         unit_price: Number(inp.unit_price) || 0,
         price_includes_vat: !!inp.price_includes_vat,
         same_issue: !!inp.same_issue,
+        // "בלי מסמך" / "בלי חוזה" — מכבה מראש את הרכיב בכרטיס (אפשר להדליק חזרה ידנית)
+        opts: {
+          ...(inp.include_proforma === false ? { proforma: false } : {}),
+          ...(inp.include_contract === false ? { contract: false } : {}),
+        },
       };
       invChatStartNewDeal();
     } else {
@@ -724,6 +729,11 @@ async function mgrAfterCard(fnName, reqId) {
         outcome = 'המשתמש אישר אבל ההפקה נכשלה: ' + String(data.error_message || 'שגיאה').slice(0, 200);
       }
     } catch (e) { }
+    // עסקת פרסומים: סיכום האמת ממאשר הכרטיס — מה הוקם בפועל (חוזה/מודעות/מסמך)
+    if (fnName === 'invChatNewDealApprove' && window._icLastNewDealSummary) {
+      outcome = 'המשתמש אישר. הוקם בפועל: ' + window._icLastNewDealSummary + '. דווח למנהל בדיוק את זה — אל תניח מעבר לכך.';
+      window._icLastNewDealSummary = null;
+    }
   }
   const id = _mgrState.pending.tool_use_id;
   _mgrState.pending = null;
