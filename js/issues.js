@@ -26,6 +26,8 @@ if (/חצי\s+עמוד/.test(n)) return 0.5;
 return 1;
 }
 function _adFraction(a) {
+// מפת הגדלים של השיבוץ האוטומטי (אם הוגדר לפריט) גוברת — כך מד המילוי תואם למנוע
+if (a && a.price_item_id && typeof alMappedFraction === 'function') { const mf = alMappedFraction(a.price_item_id); if (mf != null) return mf; }
 if (!a || !a.price_item_id) return 0.25;
 return _plFraction((cache.priceList || []).find(p => p.id === a.price_item_id));
 }
@@ -70,6 +72,7 @@ return '<div style="margin-bottom:14px;padding:10px 14px;border-radius:10px;back
 /* שיבוץ אוטומטי לפי מיקומי הגיליון הקודם (אותו לקוח + אותו גודל) */
 async function fpPlaceLikePrev() {
 if (!['admin', 'editor'].includes(profile.role)) return;
+if (_alBusyGuard()) return;
 const prev = (cache.issues || []).filter(i => i.issue_number < _fpIssue.issue_number).sort((a, b) => b.issue_number - a.issue_number)[0];
 if (!prev) { toast('אין גיליון קודם במטמון', true); return; }
 const prevAds = await run(db.from('ads').select('customer_id,price_item_id,page_number').eq('issue_id', prev.id).not('page_number', 'is', null));
@@ -194,6 +197,7 @@ run(db.from('articles').select('*').eq('issue_id', issueId).not('status', 'in', 
 ]);
 _fpChecklist = await run(db.from('issue_checklist').select('*, checklist_template(label)').eq('issue_id', issueId).order('template_id'));
 _fpSelChip = null;
+_alPreview = null; // הצעת שיבוץ שלא אושרה לא שורדת טעינה מחדש (לא נכתב דבר)
 _fpPaint();
 }
 
@@ -252,7 +256,9 @@ ${_fpToolbarMenu('fpMenuEntry', 'מודעות ושיבוץ', [
   canEdit && _fpDealsN ? `<button class="btn" onclick="ccMenuClose();dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpDealsN})</button>` : '',
   canEdit ? `<button class="btn" onclick="ccMenuClose();fpPrevAdsList()">📋 מגיליון קודם</button>` : '',
   canEdit ? `<button class="btn" onclick="ccMenuClose();fpPlaceLikePrev()">↩ כמו קודם</button>` : '',
-  canEdit ? `<button class="btn" onclick="ccMenuClose();fpAutoArrange()">🧩 סידור אוטומטי</button>` : ''
+  canEdit ? (autoLayoutOn()
+    ? `<button class="btn" onclick="ccMenuClose();fpAutoLayout()">🧩 שיבוץ אוטומטי (הצעה)</button>`
+    : `<button class="btn" onclick="ccMenuClose();fpAutoArrange()">🧩 סידור אוטומטי</button>`) : ''
 ], canEdit && _fpDealsN ? _fpDealsN : 0)}
 ${_fpToolbarMenu('fpMenuPrint', 'הפקה ודפוס', [
   `<button class="btn" onclick="ccMenuClose();fpPrint()">🖨 הדפסה</button>`,
@@ -271,6 +277,7 @@ ${_fpToolbarMenu('fpMenuManage', 'ניהול', [
 </div>
 
 ${_fpDeadlineBanner()}
+${_alPreviewBanner()}
 
 <div class="stats">
 ${stat(money(soldAmount) || '₪0', 'שטח פרסום שנמכר')}
@@ -365,10 +372,10 @@ html += `<div class="fp-page ${hasItems ? 'full' : ''}" data-page="${p}" style="
 ${canEdit ? `ondragover="event.preventDefault();this.classList.add('drag-over')"
 ondragleave="this.classList.remove('drag-over')"
 ondrop="fpDrop(event, ${p})" onclick="fpTapPage(${p})"` : ''}>
-<div class="fp-num" style="display:flex;justify-content:space-between;align-items:center;gap:4px"><span>עמוד ${p}${special ? ` <span style="color:#b45309;font-size:.6rem">${special}</span>` : ''}</span>${ads.length ? `<span style="font-size:.68rem;font-weight:700;color:${barCol}">${pct}%${over ? ' ⚠' : ''}</span>` : ''}</div>
+<div class="fp-num" style="display:flex;justify-content:space-between;align-items:center;gap:4px"><span>עמוד ${p}${special ? ` <span style="color:#b45309;font-size:.6rem">${special}</span>` : ''}${_alPreview ? ` <span style="color:#7c3aed;font-size:.6rem" title="קיבולת פרסום לשיבוץ האוטומטי (יחידות)">${_alPreview.used[p] || 0}/${_alPreview.caps[p] || 0}</span>` : ''}</span>${ads.length ? `<span style="font-size:.68rem;font-weight:700;color:${barCol}">${pct}%${over ? ' ⚠' : ''}</span>` : ''}</div>
 ${ads.length ? `<div style="height:3px;background:#eef2f7;border-radius:2px;overflow:hidden"><div style="height:3px;width:${Math.min(100, pct)}%;background:${barCol}"></div></div>` : ''}
 <div class="fp-items">
-${ads.map(a => `<div class="fp-item ad" draggable="${canEdit}" ondragstart="event.stopPropagation();event.dataTransfer.setData('text/plain','ad:${a.id}')" title="${esc(_adLabel(a))} — ${Math.round(_adFraction(a) * 100)}% מעמוד">${canEdit ? `<span onclick="event.stopPropagation();fpMarkInvoiced(${a.id})" style="cursor:pointer;font-weight:700;${['invoiced', 'paid'].includes(a.deal_stage) ? 'color:#9333ea' : 'opacity:.4'}" title="${['invoiced', 'paid'].includes(a.deal_stage) ? 'חשבונית הופקה — בטל סימון' : 'סמן: חשבונית הופקה'}">🧾</span> <span onclick="event.stopPropagation();fpEditAd(${a.id})" style="cursor:pointer;color:#2563eb;font-weight:700" title="עריכה">✎</span> <span onclick="event.stopPropagation();fpUnplace('ad',${a.id})" style="cursor:pointer;color:#b91c1c;font-weight:700" title="הסרה">✕</span> ` : ''}${esc(_adLabel(a).slice(0, 24))}</div>`).join('')}
+${ads.map(a => `<div class="fp-item ad" style="${a._alProposed ? 'outline:2px dashed #7c3aed;outline-offset:1px' : ''}" draggable="${canEdit}" ondragstart="event.stopPropagation();event.dataTransfer.setData('text/plain','ad:${a.id}')" title="${esc(_adLabel(a))} — ${Math.round(_adFraction(a) * 100)}% מעמוד">${canEdit ? `<span onclick="event.stopPropagation();fpMarkInvoiced(${a.id})" style="cursor:pointer;font-weight:700;${['invoiced', 'paid'].includes(a.deal_stage) ? 'color:#9333ea' : 'opacity:.4'}" title="${['invoiced', 'paid'].includes(a.deal_stage) ? 'חשבונית הופקה — בטל סימון' : 'סמן: חשבונית הופקה'}">🧾</span> <span onclick="event.stopPropagation();fpEditAd(${a.id})" style="cursor:pointer;color:#2563eb;font-weight:700" title="עריכה">✎</span> <span onclick="event.stopPropagation();fpUnplace('ad',${a.id})" style="cursor:pointer;color:#b91c1c;font-weight:700" title="הסרה">✕</span> ` : ''}${a._alProposed ? '<span style="color:#7c3aed;font-size:.62rem;font-weight:700">מוצע</span> ' : ''}${esc(_adLabel(a).slice(0, 24))}</div>`).join('')}
 ${arts.map(a => `<div class="fp-item article" draggable="${canEdit}" ondragstart="event.stopPropagation();event.dataTransfer.setData('text/plain','article:${a.id}')" title="${esc(a.title)}">${canEdit ? `<span onclick="event.stopPropagation();fpUnplace('article',${a.id})" style="cursor:pointer;color:#b91c1c;font-weight:700">✕</span> ` : ''}✍ ${esc(a.title.slice(0, 22))}</div>`).join('')}
 </div></div>`;
 }
@@ -378,6 +385,7 @@ return html;
 /* עריכת מודעה מתוך הפלטפלן — עדכון מקומי + ציור מחדש (בלי לצאת) */
 function fpEditAd(id) {
 if (!['admin', 'editor'].includes(profile.role)) return;
+if (_alBusyGuard()) return;
 const a = _fpAds.find(x => x.id === id); if (!a) return;
 const stageOpts = (typeof DEAL_STAGES !== 'undefined') ? [{ v: '', t: '(ללא)' }].concat(Object.entries(DEAL_STAGES).map(([v, t]) => ({ v, t: t[0] }))) : [{ v: '', t: '(ללא)' }];
 openForm('עריכת מודעה — ' + (nameOf('customers', a.customer_id) || ''), [
@@ -509,6 +517,8 @@ if (typeof _fpPaint === 'function') _fpPaint();
 /* שיבוץ פריט לעמוד — משותף לגרירה ולהקשה. עדכון מקומי + שמירה ברקע */
 async function _fpPlace(kind, id, page) {
 if (!['admin', 'editor'].includes(profile.role)) return;
+// בזמן הצעת שיבוץ אוטומטי: הזזת מודעה מההצעה היא מקומית בלבד (נכתבת רק ב"אשר שיבוץ")
+if (_alPreview) { _alPreviewMove(kind, id, page); return; }
 if (kind === 'ad') {
 const a = _fpAds.find(x => x.id === id); if (!a) return;
 if (a.page_number === page) { _fpSelChip = null; _fpPaint(); return; }
@@ -556,6 +566,7 @@ _fpPlace(s.kind, s.id, page);
 /* הסרת פריט מעמוד — עדכון מקומי + שמירה ברקע */
 function fpUnplace(kind, id) {
 if (!['admin', 'editor'].includes(profile.role)) return;
+if (_alPreview) { _alPreviewMove(kind, id, null); return; }
 if (kind === 'ad') { const a = _fpAds.find(x => x.id === id); const patch = (a && a.status === 'published') ? { page_number: null } : { page_number: null, status: 'approved' }; if (a) { a.page_number = null; if (patch.status) a.status = patch.status; } run(db.from('ads').update(patch).eq('id', id)).catch(() => openFlatplan(_fpIssue.id)); }
 else { const a = _fpArticles.find(x => x.id === id); if (a) { a.page_number = null; a.status = 'ready'; } run(db.from('articles').update({ page_number: null, status: 'ready' }).eq('id', id)).catch(() => openFlatplan(_fpIssue.id)); }
 _fpPaint();
@@ -564,6 +575,7 @@ _fpPaint();
 /* סידור אוטומטי — ממלא עמודים לפי מקום פנוי (הגדול קודם) */
 async function fpAutoArrange() {
 if (!['admin', 'editor'].includes(profile.role)) return;
+if (_alBusyGuard()) return;
 const unplaced = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status)).sort((a, b) => _adFraction(b) - _adFraction(a));
 if (!unplaced.length) { toast('אין מודעות ממתינות לשיבוץ', true); return; }
 const plan = [];
@@ -589,6 +601,7 @@ toast(`✓ שובצו ${plan.length} מודעות`);
 ('publish') פר מודעה — יצירת החיובים זהה אחד-לאחד לכפתור הידני. */
 async function fpPublishAll() {
 if (profile.role !== 'admin') { toast('פרסום מרוכז — מנהל בלבד', true); return; }
+if (_alBusyGuard()) return;
 const placed = _fpAds.filter(a => a.status === 'placed');
 if (!placed.length) { toast('אין מודעות משובצות שממתינות לפרסום'); return; }
 const total = placed.reduce((s, a) => s + (Number(a.price) || 0) - (Number(a.discount) || 0), 0);
@@ -1499,3 +1512,320 @@ window.recAdToggle = async function (id, on) {
   toast(on ? 'המודעה הקבועה הופעלה' : 'המודעה הקבועה הושבתה');
   recAdsManage();
 };
+
+
+/* ============================================================
+   שיבוץ אוטומטי (הצעה + אישור עורך)
+   ------------------------------------------------------------
+   כפתור "🧩 שיבוץ אוטומטי (הצעה)" בפלטפלן של גיליון פתוח מחשב הצעת
+   שיבוץ לכל המודעות המאושרות שטרם שובצו — ומציג אותה על מפת העמודים.
+   שום דבר לא נכתב למסד עד "אשר שיבוץ"; "בטל" מחזיר את המצב הקודם.
+   - שטח העמוד נמדד ביחידות: layout_units_per_page (ברירת מחדל 8 —
+     עמוד=8, חצי=4, רבע=2, שמינית=1).
+   - גודל כל פריט מחירון ביחידות: layout_size_map (JSON {price_item_id: units}).
+     פריט בלי מיפוי — הערכה לפי area_fraction/שם הגודל, ואחרת יחידה אחת;
+     מסומן ⚠ עד שמגדירים אותו בכרטיס ההגדרות.
+   - קיבולת עמודים: כל עמוד = יחידות-לעמוד, פרט לעמוד 1 (שער) = 0.
+     דריסה גלובלית: layout_page_capacity (טקסט "1:0, 5:4, אחרון:0"),
+     ודריסה לגיליון: layout_page_capacity_issue_<id> (גוברת על הגלובלית).
+   - מודעה משובצת/שפורסמה לא זזה; מודעה קבועה (recurring_ads) עם עמוד
+     קבוע מוצמדת לעמוד שלה; השאר — first-fit-decreasing (הגדולה קודם,
+     לעמוד הראשון שיש בו מקום). מה שלא נכנס — ברשימת "לא שובצו" עם סיבה.
+   - מאחורי דגל: auto_layout_enabled ('0' כברירת מחדל). כשכבוי — נשאר
+     כפתור "סידור אוטומטי" הישן.
+   ============================================================ */
+
+let _alPreview = null; // { candIds:Set, snap:{}, overflow:[], caps:{}, used:{}, unmapped:[] }
+
+function autoLayoutOn() { return String((cache.settings || {}).auto_layout_enabled || '0') === '1'; }
+
+function _alUnitsPerPage() {
+  const n = parseInt((cache.settings || {}).layout_units_per_page, 10);
+  return n > 0 ? n : 8;
+}
+
+function _alSizeMap() {
+  try { const v = JSON.parse((cache.settings || {}).layout_size_map || '{}'); return v && typeof v === 'object' ? v : {}; }
+  catch (e) { return {}; }
+}
+
+/* חלק-עמוד לפי מפת הגדלים — null אם הפריט לא מופה (ואז _adFraction ממשיך כרגיל) */
+function alMappedFraction(priceItemId) {
+  const v = _alSizeMap()[priceItemId];
+  if (v == null || v === '' || isNaN(v)) return null;
+  return Math.max(0, Number(v)) / _alUnitsPerPage();
+}
+
+/* יחידות של פריט מחירון: { units, mapped } — mapped=false פירושו הערכה (לסימון ⚠) */
+function alItemUnits(priceItemId, U, sizeMap, priceList) {
+  const v = sizeMap[priceItemId];
+  if (priceItemId && v != null && v !== '' && !isNaN(v)) return { units: Math.max(0, Math.round(Number(v))), mapped: true };
+  if (!priceItemId) return { units: Math.max(1, Math.round(U / 4)), mapped: false };
+  const pl = (priceList || []).find(p => p.id === priceItemId);
+  let frac = null;
+  if (pl && pl.area_fraction != null && !isNaN(pl.area_fraction)) frac = Number(pl.area_fraction);
+  else {
+    const n = (pl && pl.name) || '';
+    if (/שמינית/.test(n)) frac = 0.125;
+    else if (/רבע\s+עמוד/.test(n)) frac = 0.25;
+    else if (/חצי\s+עמוד/.test(n)) frac = 0.5;
+    else if (/עמוד\s+(שלם|מלא)/.test(n)) frac = 1;
+  }
+  return { units: frac != null ? Math.max(1, Math.round(frac * U)) : 1, mapped: false };
+}
+
+/* פענוח טקסט קיבולת: "1:0, 5:4, אחרון:0" → { '1':0, '5':4, last:0 } */
+function alParseCapacity(txt) {
+  const out = {};
+  String(txt || '').split(/[,\n;]+/).forEach(part => {
+    const m = part.trim().match(/^(\d+|last|אחרון)\s*[:=]\s*(\d+)$/i);
+    if (m) out[/^\d+$/.test(m[1]) ? String(Number(m[1])) : 'last'] = Number(m[2]);
+  });
+  return out;
+}
+
+/* קיבולת פרסום לכל עמוד: ברירת מחדל U, עמוד 1 = 0; דריסה גלובלית ואז לגיליון */
+function alPageCapacities(pages, U, globalOv, issueOv) {
+  const caps = {};
+  for (let p = 1; p <= pages; p++) caps[p] = p === 1 ? 0 : U;
+  [globalOv || {}, issueOv || {}].forEach(ov => {
+    Object.keys(ov).forEach(k => {
+      const p = k === 'last' ? pages : Number(k);
+      if (p >= 1 && p <= pages && !isNaN(ov[k])) caps[p] = Math.max(0, Math.min(U, Number(ov[k])));
+    });
+  });
+  return caps;
+}
+
+/* מנוע השיבוץ — פונקציה טהורה (נבדקת ב-tests/auto-layout.test.mjs)
+   in:  pages, pageUnits (U), caps {page: units},
+        fixed      [{id, page, units}]  — משובצות כבר; לא זזות, רק תופסות מקום
+        pinned     [{id, page, units}]  — לא משובצות אך עם עמוד קבוע (מודעה קבועה)
+        candidates [{id, units}]        — לשיבוץ חופשי
+   out: { placements:[{id,page}], overflow:[{id,units,reason}], used:{page:units} } */
+function alLayoutEngine({ pages, pageUnits, caps, fixed, pinned, candidates }) {
+  const used = {};
+  for (let p = 1; p <= pages; p++) used[p] = 0;
+  (fixed || []).forEach(f => { if (used[f.page] != null) used[f.page] += f.units; });
+  const placements = [], overflow = [];
+  // עמוד קבוע: ההחלטה העריכית גוברת על "עמוד ללא פרסום", אבל לא על גודל העמוד הפיזי
+  (pinned || []).slice().sort((a, b) => a.id - b.id).forEach(a => {
+    if (!(a.page >= 1 && a.page <= pages)) { overflow.push({ id: a.id, units: a.units, reason: `עמוד קבוע ${a.page} לא קיים בגיליון` }); return; }
+    if (used[a.page] + a.units > pageUnits) { overflow.push({ id: a.id, units: a.units, reason: `עמוד קבוע ${a.page} מלא` }); return; }
+    used[a.page] += a.units; placements.push({ id: a.id, page: a.page });
+  });
+  // first-fit-decreasing: הגדולה קודם; שוויון — לפי מזהה (דטרמיניסטי)
+  (candidates || []).slice().sort((a, b) => (b.units - a.units) || (a.id - b.id)).forEach(a => {
+    for (let p = 1; p <= pages; p++) {
+      const cap = caps[p] || 0;
+      if (cap > 0 && used[p] + a.units <= cap) { used[p] += a.units; placements.push({ id: a.id, page: p }); return; }
+    }
+    overflow.push({ id: a.id, units: a.units, reason: a.units > pageUnits ? `גדולה מעמוד (${a.units} יחידות)` : `אין עמוד עם ${a.units} יחידות פנויות` });
+  });
+  return { placements, overflow, used };
+}
+
+/* חסימת פעולות שכותבות למסד בזמן שהצעה פתוחה */
+function _alBusyGuard() {
+  if (!_alPreview) return false;
+  toast('יש הצעת שיבוץ פתוחה — אשר/י או בטל/י אותה קודם', true);
+  return true;
+}
+
+/* יצירת ההצעה — לא כותבת כלום למסד */
+async function fpAutoLayout() {
+  if (!['admin', 'editor'].includes(profile.role)) return;
+  if (!autoLayoutOn()) { toast('השיבוץ האוטומטי כבוי בהגדרות', true); return; }
+  if (!_fpIssue) return;
+  if (['closed', 'published'].includes(_fpIssue.status)) { toast('הגיליון סגור — שיבוץ אוטומטי רק בגיליון פתוח', true); return; }
+  if (_alBusyGuard()) return;
+  const U = _alUnitsPerPage(), map = _alSizeMap(), pl = cache.priceList || [];
+  const pages = Number(_fpIssue.pages_count) || 0;
+  if (!pages) { toast('לגיליון לא הוגדר מספר עמודים', true); return; }
+  const s = cache.settings || {};
+  const caps = alPageCapacities(pages, U, alParseCapacity(s.layout_page_capacity), alParseCapacity(s['layout_page_capacity_issue_' + _fpIssue.id]));
+  const unitsOf = a => alItemUnits(a.price_item_id, U, map, pl);
+
+  const fixed = _fpAds.filter(a => a.page_number).map(a => ({ id: a.id, page: a.page_number, units: unitsOf(a).units }));
+  const cands = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status));
+  if (!cands.length) { toast('אין מודעות מאושרות שממתינות לשיבוץ', true); return; }
+  let recs = [];
+  if (cands.some(a => a.recurring_id)) { try { recs = await recAdsLoad(); } catch (e) { } }
+  const pinPage = a => { const r = a.recurring_id && recs.find(x => x.id === a.recurring_id); return r && r.page_number ? r.page_number : null; };
+  const pinned = [], free = [];
+  cands.forEach(a => { const pp = pinPage(a); (pp ? pinned : free).push({ id: a.id, page: pp, units: unitsOf(a).units }); });
+
+  const res = alLayoutEngine({ pages, pageUnits: U, caps, fixed, pinned, candidates: free });
+
+  const snap = {};
+  cands.forEach(a => { snap[a.id] = { page_number: a.page_number, status: a.status }; });
+  res.placements.forEach(x => { const a = _fpAds.find(y => y.id === x.id); if (a) { a.page_number = x.page; a._alProposed = true; } });
+  const unmapped = [...new Set(_fpAds.filter(a => !unitsOf(a).mapped).map(a => a.price_item_id || 0))];
+  _alPreview = { candIds: new Set(cands.map(a => a.id)), snap, overflow: res.overflow, caps, used: {}, unmapped };
+  _alRecalcUsed();
+  _fpSelChip = null;
+  _fpPaint();
+  toast(`הוצעו ${res.placements.length} שיבוצים${res.overflow.length ? ` · ${res.overflow.length} לא נכנסו` : ''} — שום דבר לא נשמר עד "אשר שיבוץ"`);
+}
+
+function _alRecalcUsed() {
+  if (!_alPreview) return;
+  const U = _alUnitsPerPage(), map = _alSizeMap(), pl = cache.priceList || [];
+  const used = {};
+  _fpAds.forEach(a => { if (a.page_number) used[a.page_number] = (used[a.page_number] || 0) + alItemUnits(a.price_item_id, U, map, pl).units; });
+  _alPreview.used = used;
+}
+
+/* התאמה ידנית בזמן ההצעה — רק מודעות מההצעה, רק מקומית */
+function _alPreviewMove(kind, id, page) {
+  if (kind !== 'ad' || !_alPreview.candIds.has(id)) {
+    toast('בזמן הצעת שיבוץ אפשר להזיז רק מודעות שממתינות לשיבוץ — אשר/י או בטל/י קודם', true);
+    return;
+  }
+  const a = _fpAds.find(x => x.id === id); if (!a) return;
+  if (page) {
+    const U = _alUnitsPerPage();
+    const units = alItemUnits(a.price_item_id, U, _alSizeMap(), cache.priceList || []).units;
+    const cur = (_alPreview.used[page] || 0) - (a.page_number === page ? units : 0);
+    if (cur + units > U && !confirm(`עמוד ${page} יחרוג מגודל העמוד (${cur + units}/${U} יחידות). לשבץ בכל זאת?`)) return;
+  }
+  a.page_number = page || null;
+  a._alProposed = !!page;
+  _alRecalcUsed();
+  _fpSelChip = null;
+  _fpPaint();
+}
+
+/* אישור — כותב page_number + status='placed' רק למודעות ההצעה שעדיין לא שובצו במסד */
+async function fpAutoLayoutConfirm(btn) {
+  if (!_alPreview || !['admin', 'editor'].includes(profile.role)) return;
+  const todo = _fpAds.filter(a => _alPreview.candIds.has(a.id) && a.page_number);
+  if (!todo.length) { toast('אין שיבוצים לאישור', true); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'שומר...'; }
+  let ok = 0, skipped = 0, failed = 0;
+  for (const a of todo) {
+    try {
+      // .is(page_number,null) — אם מישהו שיבץ בינתיים, לא דורסים
+      const r = await db.from('ads').update({ page_number: a.page_number, status: 'placed' })
+        .eq('id', a.id).is('page_number', null).in('status', ['approved', 'placed']).select('id');
+      if (r.error) { failed++; console.error('auto-layout', r.error); continue; }
+      if (!(r.data || []).length) { skipped++; continue; }
+      ok++;
+      try { addInteraction('ad', a.id, `שובצה לעמוד ${a.page_number} בגיליון ${_fpIssue.issue_number} (שיבוץ אוטומטי)`); } catch (e) { }
+    } catch (e) { failed++; }
+  }
+  _alPreview = null;
+  toast(`✓ שובצו ${ok} מודעות` + (skipped ? ` · ${skipped} כבר שובצו בינתיים` : '') + (failed ? ` · ${failed} נכשלו` : ''), failed > 0);
+  openFlatplan(_fpIssue.id);
+}
+
+/* ביטול — מחזיר את המצב המקומי, בלי שום כתיבה */
+function fpAutoLayoutCancel() {
+  if (!_alPreview) return;
+  _fpAds.forEach(a => {
+    const o = _alPreview.snap[a.id];
+    if (o) { a.page_number = o.page_number; a.status = o.status; }
+    delete a._alProposed;
+  });
+  _alPreview = null;
+  _fpPaint();
+  toast('הצעת השיבוץ בוטלה — לא נשמר דבר');
+}
+
+/* דריסת קיבולת לגיליון הנוכחי (מנהל) */
+async function fpAutoLayoutIssueCaps() {
+  if (profile.role !== 'admin' || !_fpIssue) return;
+  const key = 'layout_page_capacity_issue_' + _fpIssue.id;
+  const cur = (cache.settings || {})[key] || '';
+  const v = prompt('קיבולת עמודים לגיליון ' + _fpIssue.issue_number + ' (יחידות לעמוד, גובר על ההגדרה הכללית)\nלמשל: 1:0, אחרון:0, 12:4 — ריק = לפי ההגדרה הכללית', cur);
+  if (v == null) return;
+  await run(db.from('settings').upsert({ key, value: v.trim() }));
+  cache.settings[key] = v.trim();
+  toast('נשמר — מחשב הצעה מחדש');
+  if (_alPreview) { fpAutoLayoutCancel(); fpAutoLayout(); }
+}
+
+/* באנר ההצעה בראש הפלטפלן */
+function _alPreviewBanner() {
+  if (!_alPreview) return '';
+  const pv = _alPreview;
+  const proposed = _fpAds.filter(a => a._alProposed && a.page_number).length;
+  const byId = id => _fpAds.find(a => a.id === id);
+  const stillOut = pv.overflow.filter(o => { const a = byId(o.id); return a && !a.page_number; });
+  const pl = cache.priceList || [];
+  const unm = pv.unmapped.map(id => id ? (nameOf('priceList', id) || ((pl.find(p => p.id === id) || {}).name) || ('#' + id)) : 'ללא גודל');
+  return `<div class="card card-pad" style="border-right:4px solid #7c3aed;margin-bottom:14px;background:#faf5ff">
+<b style="color:#6d28d9">🧩 הצעת שיבוץ אוטומטי — טרם נשמרה</b>
+<p style="font-size:.86rem;margin:6px 0">${proposed} מודעות מוצעות (מסומנות <span style="outline:2px dashed #7c3aed;padding:0 4px">מוצע</span>). אפשר לגרור/להסיר לפני האישור. מספר סגול ליד כל עמוד = יחידות בשימוש / קיבולת פרסום.</p>
+${stillOut.length ? `<div style="font-size:.84rem;color:#b91c1c;margin:4px 0"><b>לא נכנסו (${stillOut.length}):</b>
+<ul style="margin:2px 18px 0">${stillOut.map(o => `<li>${esc(_adLabel(byId(o.id)))} — ${esc(o.reason)}</li>`).join('')}</ul></div>` : ''}
+${unm.length ? `<div style="font-size:.8rem;color:#92400e;margin:4px 0">⚠ גדלים ללא מיפוי יחידות (הוערכו): ${unm.map(esc).join(', ')}${profile.role === 'admin' ? ' — להגדרה בהגדרות ← שיבוץ אוטומטי' : ''}</div>` : ''}
+<div class="m-actions" style="margin-top:8px">
+<button class="btn" onclick="fpAutoLayoutConfirm(this)">✓ אשר שיבוץ</button>
+<button class="btn btn-ghost" onclick="fpAutoLayoutCancel()">בטל</button>
+${profile.role === 'admin' ? `<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="fpAutoLayoutIssueCaps()">⚙ קיבולת עמודים לגיליון זה</button>` : ''}
+</div></div>`;
+}
+
+/* ==================== כרטיס הגדרות (מנהל) ==================== */
+function autoLayoutCard() {
+  if (profile.role !== 'admin') return '';
+  const s = cache.settings || {}, U = _alUnitsPerPage(), map = _alSizeMap();
+  const rows = (cache.priceList || []).map(p => {
+    const g = alItemUnits(p.id, U, map, cache.priceList);
+    return `<tr><td>${esc(p.name || '')}</td>
+<td><input type="number" min="0" max="${U}" class="al-size" data-id="${p.id}" value="${g.mapped ? g.units : ''}" placeholder="${g.units}" dir="ltr" style="width:70px"></td>
+<td>${g.mapped ? '<span class="muted">✓</span>' : '<span style="color:var(--warn)" title="לא הוגדר — משתמשים בהערכה">⚠ משוער</span>'}</td></tr>`;
+  }).join('');
+  return `<div class="card card-pad">
+<b>🧩 שיבוץ אוטומטי</b>
+<p class="muted" style="font-size:.82rem">כפתור בפלטפלן שמציע שיבוץ של המודעות המאושרות לעמודים (הגדולה קודם, לעמוד הראשון שיש בו מקום). ההצעה מוצגת על המפה ונשמרת רק אחרי "אשר שיבוץ". מודעות שכבר שובצו לא זזות.</p>
+<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
+<input type="checkbox" id="setAutoLayout" ${autoLayoutOn() ? 'checked' : ''} onchange="autoLayoutToggle(this.checked)" style="width:18px;height:18px">
+שיבוץ אוטומטי פעיל
+</label>
+<div class="grid2" style="margin-top:10px">
+<div class="field"><label>יחידות בעמוד (עמוד=8, חצי=4, רבע=2, שמינית=1)</label>
+<input id="setAlUnits" type="number" min="1" value="${esc(s.layout_units_per_page || '8')}" dir="ltr"></div>
+<div class="field"><label>קיבולת פרסום לעמודים (ברירת מחדל: כל עמוד מלא, עמוד 1 = 0)</label>
+<input id="setAlCaps" value="${esc(s.layout_page_capacity || '')}" placeholder="1:0, אחרון:0, 12:4"></div>
+</div>
+<p class="muted" style="font-size:.78rem;margin:2px 0 8px">קיבולת: "עמוד:יחידות" מופרד בפסיקים. 0 = עמוד ללא פרסום (מערכת בלבד). "אחרון" = העמוד האחורי. אפשר לדרוס לגיליון מסוים מתוך הצעת השיבוץ בפלטפלן.</p>
+${rows ? `<div class="table-wrap" style="max-height:45vh;overflow:auto"><table class="data">
+<thead><tr><th>גודל (מחירון)</th><th>יחידות</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">אין פריטים במחירון</p>'}
+<div class="m-actions" style="margin-top:8px"><button class="btn btn-sm" onclick="autoLayoutSave()">שמירה</button></div>
+</div>`;
+}
+
+async function autoLayoutToggle(on) {
+  await run(db.from('settings').upsert({ key: 'auto_layout_enabled', value: on ? '1' : '0' }));
+  cache.settings.auto_layout_enabled = on ? '1' : '0';
+  toast(on ? 'השיבוץ האוטומטי הופעל' : 'השיבוץ האוטומטי כובה');
+}
+
+async function autoLayoutSave() {
+  if (profile.role !== 'admin') return;
+  const units = parseInt(document.getElementById('setAlUnits')?.value, 10);
+  if (!(units > 0)) { toast('יחידות בעמוד — מספר חיובי', true); return; }
+  const capsTxt = (document.getElementById('setAlCaps')?.value || '').trim();
+  const bad = capsTxt.split(/[,\n;]+/).map(x => x.trim()).filter(x => x && !/^(\d+|last|אחרון)\s*[:=]\s*\d+$/i.test(x));
+  if (bad.length) { toast('קיבולת לא תקינה: ' + bad.join(', '), true); return; }
+  const map = {};
+  document.querySelectorAll('.al-size').forEach(inp => {
+    const v = inp.value.trim();
+    if (v !== '' && !isNaN(v)) map[inp.dataset.id] = Math.max(0, Math.round(Number(v)));
+  });
+  const updates = [
+    { key: 'layout_units_per_page', value: String(units) },
+    { key: 'layout_page_capacity', value: capsTxt },
+    { key: 'layout_size_map', value: JSON.stringify(map) },
+  ];
+  for (const u of updates) { await run(db.from('settings').upsert(u)); cache.settings[u.key] = u.value; }
+  toast('הגדרות השיבוץ נשמרו');
+  openPage('settings');
+}
+
+/* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { alLayoutEngine, alPageCapacities, alParseCapacity, alItemUnits };
+}
