@@ -689,6 +689,7 @@ async function mgrOpenProposal(p) {
         size_raw: inp.size_raw || null,
         unit_price: Number(inp.unit_price) || 0,
         price_includes_vat: !!inp.price_includes_vat,
+        same_issue: !!inp.same_issue,
       };
       invChatStartNewDeal();
     } else {
