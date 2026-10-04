@@ -6,7 +6,7 @@
       שלא שובצה, מודעה משובצת בלי קובץ עיצוב, עמוד שגולש מעל 100%.
    2. רזולוציה (עם ה-PDF הסופי מהגרפיקאית): לכל תמונה בגיליון מחושבת
       הרזולוציה האפקטיבית לפי הגודל שבו היא מודפסת בפועל (pdf.js operator
-      list + מטריצת הטרנספורמציה). מתחת ל-150 DPI = מפוקסלת.
+      list + מטריצת הטרנספורמציה). ספים מכוילים לגיליון 306 (ר' למטה).
    3. זיהוי מודעה בעמוד: חיפוש שם הלקוח / הטלפון בטקסט של העמוד, וסקירה
       ויזואלית של העמוד מול קבצי העיצוב שהמערכת מצפה להם.
    תוצר: דוח מוכן/לא מוכן + רשימת תיקונים להעתקה לגרפיקאית.
@@ -16,8 +16,14 @@
    ============================================================ */
 'use strict';
 
-const PP_DPI_BAD = 150;   // מתחת לזה — מפוקסל בדפוס
-const PP_DPI_WARN = 200;  // מתחת לזה — גבולי
+/* כיול לפי גיליון 306 (תקין, נקבע כסטנדרט 4.10.2026): דפוס עיתון סופג 100–140 DPI
+   בלי פגיעה נראית. רקעים (מטושטשים מטבעם) ופסים דקים לא נבדקים כתמונות תוכן. */
+const PP_DPI_BAD = 80;          // מתחת לזה — מפוקסל בדפוס
+const PP_DPI_WARN = 95;         // מתחת לזה — גבולי
+const PP_DPI_BG_BAD = 40;       // רקע: רק אם נמוך באופן קיצוני
+const PP_DPI_COMPRESSED = 150;  // רוב התמונות מתחת לזה = קובץ דחוס ולא קובץ דפוס
+const PP_BG_COVER = 0.6;        // תמונה שמכסה יותר מזה מהעמוד = רקע
+const PP_STRIP_CM = 1;          // צלע קצרה מזה = פס/קישוט
 const PP_MIN_AREA_PT2 = 28 * 28; // מתעלמים מתמונות זעירות (~1x1 ס"מ): אייקונים, קישוטים
 const PP_OK_STATUSES = ['approved', 'placed', 'published'];
 
@@ -93,8 +99,24 @@ async function _ppAnalyzeFile() {
       for (const im of await _ppPageImages(page)) {
         const cx = (im.cx - page.view[0]) / vp.width;
         const h = halves.length === 1 ? halves[0] : halves[cx >= 0.5 ? 0 : 1]; // RTL: ימין = העמוד הנמוך
-        images.push({ ...im, page: h.n, idx });
+        // סיווג: פס דקורטיבי / רקע / תמונת תוכן (שטח העמוד = חצי דף בכפולה)
+        const pageArea = (vp.width / halves.length) * vp.height;
+        const cover = ((im.x1 - im.x0) * (im.y1 - im.y0)) / pageArea;
+        const beyond = im.x0 < page.view[0] - 14 || im.y0 < page.view[1] - 14 || im.x1 > page.view[2] + 14 || im.y1 > page.view[3] + 14;
+        const kind = Math.min(+im.cmW, +im.cmH) < PP_STRIP_CM ? 'strip' : (cover > PP_BG_COVER || beyond) ? 'background' : 'content';
+        images.push({ ...im, page: h.n, idx, kind });
       }
+      // שכבת רקע: תמונה שתמונה אחרת צוירה מעליה על 25%+ משטחה (רקע של מודעה, לא תוכן)
+      const onPage = images.filter(x => x.idx === idx);
+      onPage.forEach((a, i) => {
+        if (a.kind !== 'content') return;
+        const area = (a.x1 - a.x0) * (a.y1 - a.y0);
+        const covered = onPage.slice(i + 1).some(b => {
+          const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), hh = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+          return w > 0 && hh > 0 && (w * hh) / area >= 0.25;
+        });
+        if (covered) a.kind = 'background';
+      });
       const tc = await page.getTextContent();
       tc.items.forEach(it => {
         const x = ((it.transform ? it.transform[4] : 0) - page.view[0]) / vp.width;
@@ -182,16 +204,18 @@ function _ppFindings() {
     const placed = st.ads.filter(a => a.page_number > 0);
     const maxPage = Math.max(0, ...placed.map(a => a.page_number));
     if (maxPage > st.pdf.pageCount) bad.push({ page: maxPage, label: '', msg: `בעימוד יש ${maxPage} עמודים אבל בקובץ רק ${st.pdf.pageCount}` });
-    const imgs = st.pdf.images, low = imgs.filter(im => im.dpi < PP_DPI_BAD);
+    const imgs = st.pdf.images, low = imgs.filter(im => im.dpi < PP_DPI_COMPRESSED);
     if (imgs.length >= 10 && low.length / imgs.length > 0.5) {
       // רוב הקובץ ברזולוציה נמוכה — כמעט בוודאות גרסה דחוסה (לקוראים/מייל) ולא קובץ הדפוס
-      bad.push({ page: 0, label: '', msg: `${low.length} מתוך ${imgs.length} התמונות בקובץ מתחת ל-${PP_DPI_BAD} DPI — נראה שזה קובץ דחוס ולא קובץ הדפוס. בקש מהגרפיקאית את קובץ הדפוס המלא ובדוק שוב` });
+      bad.push({ page: 0, label: '', msg: `${low.length} מתוך ${imgs.length} התמונות בקובץ מתחת ל-${PP_DPI_COMPRESSED} DPI — נראה שזה קובץ דחוס ולא קובץ הדפוס. בקש מהגרפיקאית את קובץ הדפוס המלא ובדוק שוב` });
     } else {
       // שורה אחת לכל עמוד: כמה תמונות בעייתיות והגרועה שבהן
       const perPage = {};
-      imgs.filter(im => im.dpi < PP_DPI_WARN).forEach(im => {
+      const isBad = im => im.kind === 'background' ? im.dpi < PP_DPI_BG_BAD : im.dpi < PP_DPI_BAD;
+      const isWarn = im => im.kind === 'content' && im.dpi < PP_DPI_WARN;
+      imgs.filter(im => im.kind !== 'strip' && (isBad(im) || isWarn(im))).forEach(im => {
         const g = perPage[im.page] || (perPage[im.page] = { bad: 0, warn: 0, worst: im });
-        if (im.dpi < PP_DPI_BAD) g.bad++; else g.warn++;
+        if (isBad(im)) g.bad++; else g.warn++;
         if (im.dpi < g.worst.dpi) g.worst = im;
       });
       Object.keys(perPage).forEach(pg => {
@@ -271,7 +295,7 @@ async function _ppPagesView() {
   let cells = '';
   for (let p = 1; p <= st.pdf.pageCount; p++) {
     const exp = st.ads.filter(a => a.page_number === p);
-    const flagged = st.pdf.images.some(im => im.page === p && im.dpi < PP_DPI_BAD);
+    const flagged = st.pdf.images.some(im => im.page === p && im.kind !== 'strip' && im.dpi < (im.kind === 'background' ? PP_DPI_BG_BAD : PP_DPI_BAD));
     cells += `<div style="border:1px solid ${flagged ? '#ef4444' : 'var(--line,#e5e7eb)'};border-radius:10px;padding:8px;background:#fff">
       <div style="font-weight:700;margin-bottom:6px">עמוד ${p}${flagged ? ' ⛔' : ''}</div>
       <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
