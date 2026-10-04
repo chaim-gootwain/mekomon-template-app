@@ -24,10 +24,21 @@ const PP_OK_STATUSES = ['approved', 'placed', 'published'];
 let _ppState = null;
 
 function _ppKey(n) { return 'pp_ok_' + n; }
-function _ppClose() { document.getElementById('viewBack').classList.remove('open'); }
+function _ppClose() { _ppRelease(); document.getElementById('viewBack').classList.remove('open'); }
+
+/* שחרור הקובץ אחרי כל בדיקה: קבצי גיליון שוקלים עשרות מ"ב, ולא נשמרים בשום מקום.
+   הורסים את מסמך pdf.js (משחרר את ה-worker והזיכרון) ומאפסים את המצב. */
+function _ppRelease() {
+  const st = _ppState; if (!st) return;
+  if (st.pdf && st.pdf.doc) { try { st.pdf.doc.destroy(); } catch (e) { } }
+  if (st.pdf) { st.pdf.thumbs = null; st.pdf = null; }
+  const f = document.getElementById('ppFile'); if (f) f.value = '';
+  _ppState = null;
+}
 
 /* ---------- כניסה ---------- */
 async function openPreprintCheck(issueId) {
+  _ppRelease();
   try {
     toast('טוען את נתוני הגיליון...');
     const issue = (cache.issues || []).find(i => i.id === issueId) || await run(db.from('issues').select('*').eq('id', issueId).single());
@@ -275,7 +286,8 @@ async function _ppPagesView() {
     <p class="muted" style="font-size:.83rem;margin-top:-6px">מסגרת אדומה = יש בעמוד תמונה מפוקסלת. השווה בעין שהמודעה בעמוד היא הגרסה שבקובץ.</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;max-height:66vh;overflow:auto">${cells}</div>
     <div class="m-actions" style="margin-top:12px"><button class="btn" onclick="_ppRender()">← חזרה לדוח</button></div>`;
-  for (let p = 1; p <= st.pdf.pageCount; p++) {
+  for (let p = 1; st.pdf && p <= st.pdf.pageCount; p++) {
+    if (_ppState !== st) return;
     try {
       const url = st.pdf.thumbs[p] || (st.pdf.thumbs[p] = await _ppThumb(p));
       const el = document.getElementById('ppth_' + p);
@@ -286,7 +298,7 @@ async function _ppPagesView() {
 }
 
 async function _ppThumb(n) {
-  const st = _ppState; const e = st.pdf.map.byPage[n]; if (!e) return null;
+  const st = _ppState; if (!st || !st.pdf) return null; const e = st.pdf.map.byPage[n]; if (!e) return null;
   const page = await st.pdf.doc.getPage(e.idx + 1);
   const vp = page.getViewport({ scale: 0.6 });
   const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
@@ -298,7 +310,7 @@ async function _ppThumb(n) {
 }
 
 async function _ppDesignThumb(a) {
-  const f = _ppState.design[a.id]; const el = document.getElementById('ppad_' + a.id); if (!f || !el) return;
+  if (!_ppState) return; const f = _ppState.design[a.id]; const el = document.getElementById('ppad_' + a.id); if (!f || !el) return;
   try {
     const { data } = await db.storage.from('ad-files').createSignedUrl(f.storage_path, 600);
     if (!data) return;
@@ -311,6 +323,7 @@ async function _ppDesignThumb(a) {
       const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
       await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
       el.innerHTML = `<a href="${data.signedUrl}" target="_blank"><img src="${c.toDataURL('image/png')}"></a>`;
+      try { d.destroy(); } catch (e) { }
     } else el.innerHTML = `<a href="${data.signedUrl}" target="_blank" style="font-size:.72rem">${esc(f.file_name || 'קובץ')}</a>`;
   } catch (e) { }
 }
