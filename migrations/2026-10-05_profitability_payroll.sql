@@ -38,8 +38,8 @@
 --
 -- הרשאות (RLS):
 --   מנהל — הכל. סוכן (sales) — רק את השורות של עצמו ב-agent_comp
---   וב-revenue_recognition (קריאה בלבד). agent_manager_cut ו-payroll_bonus —
---   מנהל בלבד. אף משתמש שאינו מנהל לא כותב לשום טבלה כאן.
+--   וב-revenue_recognition (קריאה בלבד). agent_manager_cut, payroll_bonus ו-
+--   staff_hourly_rate — מנהל בלבד. אף משתמש שאינו מנהל לא כותב לשום טבלה כאן.
 --   המדיניות עצמאית (בודקת profiles/agents ישירות) — לא תלויה ב-emu_is_admin.
 --
 -- הרצה: Supabase Dashboard → SQL Editor → הדבק והרץ את כל הקובץ,
@@ -145,7 +145,7 @@ begin
   execute 'drop policy if exists pf_sales_own_read on public.revenue_recognition';
   execute format('create policy pf_sales_own_read on public.revenue_recognition for select to authenticated using (%s and %s)', v_sales, v_mine);
 
-  -- סוכן: רואה אילו חודשים נסגרו (בלי סכומים — אין בטבלה סכומים)
+  -- סוכן: רואה אילו חודשים נסגרו + עלות הגרפיקה למודעה (בלי שעות ושכר)
   execute 'drop policy if exists pf_sales_read on public.revenue_month_close';
   execute format('create policy pf_sales_read on public.revenue_month_close for select to authenticated using (%s)', v_sales);
 end $mig$;
