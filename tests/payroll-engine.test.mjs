@@ -32,10 +32,10 @@ const contracts = [
 ];
 const ads = [
   // רחל — בודדת באוקטובר, מעוצבת אצלנו
-  { id: 1, agent_id: 1, customer_id: 500, issue_id: 12, price: 9000, discount: 1000, status: 'published' },
+  { id: 1, agent_id: 1, customer_id: 500, issue_id: 12, price: 9000, discount: 1000, status: 'published', design_fee_net: 50 },
   // רחל — חבילת 3 חודשים (ספט׳/אוק׳/נוב׳)
   { id: 2, agent_id: 1, customer_id: 501, contract_id: 100, issue_id: 11, price: 4000, discount: 0, status: 'published' },
-  { id: 3, agent_id: 1, customer_id: 501, contract_id: 100, issue_id: 12, price: 4000, discount: 0, status: 'published' },
+  { id: 3, agent_id: 1, customer_id: 501, contract_id: 100, issue_id: 12, price: 4000, discount: 0, status: 'published', design_fee_net: 50 },
   { id: 4, agent_id: 1, customer_id: 501, contract_id: 100, issue_id: 13, price: 4000, discount: 0, status: 'placed' },
   // לאה — בודדת מוכנה (בלי עיצוב) + חוזה של פרסום אחד, באוקטובר
   { id: 5, agent_id: 2, customer_id: 502, issue_id: 14, price: 3000, discount: 0, status: 'published' },
@@ -43,14 +43,15 @@ const ads = [
   // לאה — מבוטלת: לא נספרת
   { id: 7, agent_id: 2, customer_id: 502, issue_id: 12, price: 9999, discount: 0, status: 'cancelled' },
   // שרה — מכירה משלה, מעוצבת
-  { id: 8, agent_id: 3, customer_id: 503, issue_id: 12, price: 1000, discount: 0, status: 'published' },
-  // מודעת מערכת עם קובץ design — לא עלות עיצוב
-  { id: 9, agent_id: null, customer_id: 504, issue_id: 12, price: 0, discount: 0, status: 'placed', is_system: true },
+  { id: 8, agent_id: 3, customer_id: 503, issue_id: 12, price: 1000, discount: 0, status: 'published', design_fee_net: 50 },
+  // מודעה מבוטלת שסומנה עיצוב — לא עלות
+  { id: 9, agent_id: 3, customer_id: 503, issue_id: 12, price: 0, discount: 0, status: 'cancelled', design_fee_net: 50 },
+  // בלי סוכן במודעה ובלי סוכן ללקוח → נזקפת למנהל (סוכן ברירת מחדל 4)
+  { id: 11, agent_id: null, customer_id: 506, issue_id: 12, price: 700, discount: 0, status: 'published' },
   // מודעה בלי סוכן — הכנסה ל"ללא סוכן" דרך הלקוח (customer 505 → agent 2)
   { id: 10, agent_id: null, customer_id: 505, issue_id: 12, price: 500, discount: 0, status: 'published' },
 ];
-const customers = [{ id: 505, agent_id: 2 }];
-const designedAdIds = [1, 3, 8, 9];
+const customers = [{ id: 505, agent_id: 2 }, { id: 506, agent_id: null }];
 const comps = [
   { agent_id: 1, base_salary: 6000, monthly_target: 10000, commission_pct_base: 5, commission_pct_above: 10, active: true },
   { agent_id: 2, base_salary: null, monthly_target: 5000, commission_pct_base: 10, commission_pct_above: 15, active: true },
@@ -58,7 +59,7 @@ const comps = [
 ];
 const managerCuts = [{ manager_agent_id: 3, source_agent_ids: [1, 2], pct: 10, active: true }];
 
-const base = { issues, contracts, ads, customers, designedAdIds, comps, managerCuts, graphicsFee: 50 };
+const base = { issues, contracts, ads, customers, comps, managerCuts, defaultAgentId: 4 };
 
 /* ---------- מדרגות ---------- */
 t('pfTiers: בסיס/מעל-יעד → שתי מדרגות', () => {
@@ -151,8 +152,20 @@ t('נתח המנהלת לא מנכה מהעמלה של הנציגות', () => {
   eq(noCut.agents[1].commission, r1.commission);
   eq(noCut.agents[2].commission, r2.commission);
 });
-t('מודעת מערכת עם קובץ design אינה עלות עיצוב', () => {
-  eq(oct.totals.graphics, 50 * 3); // 1, 3, 8 — לא 9
+t('עיצוב לפי הכפתור במודעה: רק מודעות שסומנו ולא מבוטלות', () => {
+  eq(oct.totals.graphics, 50 * 3); // 1, 3, 8 — לא 9 (מבוטלת)
+});
+t('נשמר הסכום שסומן במודעה (תעריף שהשתנה לא משנה עבר)', () => {
+  const a2 = ads.map(a => a.id === 1 ? { ...a, design_fee_net: 40 } : a);
+  eq(E.pfComputeMonth('2026-10', { ...base, ads: a2, recognition: recOct }).agents[1].graphics, 90);
+});
+t('מודעה בלי סוכן וללקוח אין סוכן → על שם המנהל (סוכן ברירת מחדל)', () => {
+  eq(oct.agents[4].revenue, 700);
+  assert.strictEqual(oct.agents[0], undefined);
+});
+t('בלי סוכן ברירת מחדל → נשארת "ללא סוכן"', () => {
+  const m = E.pfComputeMonth('2026-10', { ...base, defaultAgentId: null, recognition: recOct });
+  eq(m.agents[0].revenue, 700);
 });
 
 /* ---------- חודש שהוחרג בסגירה ---------- */
@@ -175,16 +188,36 @@ t('pfClassifyExpenses: גרפיקה/גיליון/כללי לפי תיוג, נט�
     { amount: 118, notes: '#issue:12;#cat:גרפיקה;#net:100;' },
     { amount: 300, notes: 'שכירות' },
   ]);
-  assert.deepStrictEqual(ex, { issue_print: 3100, issue_graphics: 100, other: 300 });
+  assert.deepStrictEqual(ex, { issue_print: 3100, issue_graphics: 100, other: 300, payroll_synced: 0, payroll_manual: 0 });
+});
+t('שכר לא נספר פעמיים: שורות #payroll ושכר בקטגוריית שכר מוחרגים מההוצאות הכלליות', () => {
+  const ex = E.pfClassifyExpenses([
+    { amount: 6700, notes: '#payroll:2026-10;#agent:1;#net:6700;' },
+    { amount: 8000, notes: 'משכורת שרה', category_id: 7 },
+    { amount: 300, notes: 'שכירות', category_id: 2 },
+  ], [7]);
+  assert.deepStrictEqual(ex, { issue_print: 0, issue_graphics: 0, other: 300, payroll_synced: 6700, payroll_manual: 8000 });
+  const p = E.pfPnl(oct, ex);
+  eq(p.net, p.operating - 300);
+});
+t('סנכרון שכר: שורה מתויגת לכל עובד עם סכום, סכום = לתשלום', () => {
+  const rows = E.pfPayrollSyncRows(oct);
+  assert.deepStrictEqual(rows.map(r => r.agent_id).sort(), [1, 2, 3]);
+  const r1s = rows.find(r => r.agent_id === 1);
+  eq(r1s.amount, oct.agents[1].pay_total);
+  assert.strictEqual(r1s.tag, '#payroll:2026-10;#agent:1;');
+  assert.ok(r1s.notes.startsWith(r1s.tag) && r1s.notes.includes('#net:' + r1s.amount + ';'));
+  // והשורה הזו מזוהה בדוח כשכר מסונכרן
+  eq(E.pfClassifyExpenses([{ amount: r1s.amount, notes: r1s.notes }]).payroll_synced, r1s.amount);
 });
 t('רווח והפסד: השכבות נסגרות בדיוק ומתאימות לסכום העובדים', () => {
   const ex = { issue_print: 3100, issue_graphics: 100, other: 300 };
   const p = E.pfPnl(oct, ex);
-  // הכנסה כוללת: רחל 12,000 + לאה 5,500 + שרה 1,000
-  eq(p.revenue, 18500);
+  // הכנסה כוללת: רחל 12,000 + לאה 5,500 + שרה 1,000 + מנהל 700
+  eq(p.revenue, 19200);
   eq(p.revenue, Object.values(oct.agents).reduce((s, r) => s + r.revenue, 0));
   eq(p.graphics, 150 + 100);
-  eq(p.gross, 18500 - 250);
+  eq(p.gross, 19200 - 250);
   eq(p.after_issue, p.gross - 3100);
   eq(p.commissions, 700 + 575 + 40 + 1750);
   eq(p.after_commissions, p.after_issue - p.commissions);

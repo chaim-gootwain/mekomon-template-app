@@ -14,8 +14,10 @@
      בחודש הגיליון שלה.
    • עסקה רב-גיליונית (חוזה עם יותר מפרסום אחד) — מוכרת רק דרך
      revenue_recognition (סגירת חודש). חודש שלא נסגר = 0 מהעסקה.
-   • עיצוב: מודעה שיש לה קובץ kind='design' ושאינה מודעת מערכת/קבועה
-     → עלות graphics_fee_net, בחודש הגיליון שלה.
+   • עיצוב: לפי הכפתור "🎨 עיצוב ₪50 + מע"מ" בכרטיס המודעה —
+     ads.design_fee_net (נטו) נספר כעלות בחודש הגיליון של המודעה.
+   • מודעה בלי סוכן (וגם ללקוח אין סוכן) → נזקפת לסוכן ברירת המחדל
+     (המנהל, defaultAgentId).
    • עמלה מדורגת על ההכנסה המוכרת של החודש.
    • רווחיות עובד = הכנסה − עיצוב − עמלה (שכר בסיס בשורה נפרדת).
    ============================================================ */
@@ -76,8 +78,8 @@ function pfIndex(data) {
     if (a.contract_id == null || !pfAlive(a)) return;
     (adsByContract[a.contract_id] = adsByContract[a.contract_id] || []).push(a);
   });
-  const designed = new Set((data.designedAdIds || []).map(Number));
-  return { issueMonth, contractById, custAgent, adsByContract, designed };
+  const defaultAgent = Number(data.defaultAgentId) || 0;
+  return { issueMonth, contractById, custAgent, adsByContract, defaultAgent };
 }
 
 /* עסקה רב-גיליונית: חוזה ליותר מפרסום אחד (או שכבר יש לו יותר ממודעה אחת) */
@@ -91,7 +93,7 @@ function pfAdAgent(a, ix) {
   const ct = a.contract_id != null ? ix.contractById[a.contract_id] : null;
   if (ct && ct.agent_id != null) return Number(ct.agent_id);
   const ca = ix.custAgent[a.customer_id];
-  return ca != null ? Number(ca) : 0;
+  return ca != null ? Number(ca) : ix.defaultAgent;
 }
 
 function pfContractAgent(ct, ix) {
@@ -99,14 +101,11 @@ function pfContractAgent(ct, ix) {
   const first = (ix.adsByContract[ct.id] || []).find(a => a.agent_id != null);
   if (first) return Number(first.agent_id);
   const ca = ix.custAgent[ct.customer_id];
-  return ca != null ? Number(ca) : 0;
+  return ca != null ? Number(ca) : ix.defaultAgent;
 }
 
-/* מודעה שעוצבה אצלנו: קובץ design, לא מודעת מערכת ולא מודעה קבועה
-   (מודעות קבועות מקבלות קובץ design מהבאנר/זריעה — לא עבודת גרפיקה) */
-function pfIsDesigned(a, ix) {
-  return ix.designed.has(Number(a.id)) && !a.is_system && a.recurring_id == null;
-}
+/* עלות העיצוב של מודעה (נטו) — מה שסומן בכפתור בכרטיס המודעה; 0 = לא עוצבה אצלנו */
+function pfDesignFee(a) { return Math.max(0, pfNum(a.design_fee_net)); }
 
 /* שווי עסקה (נטו): total_price של החוזה; אם ריק — סכום מודעותיה */
 function pfDealNet(ct, ctAds) {
@@ -168,13 +167,12 @@ function pfMonthCloseRows(month, data) {
 }
 
 /* ---------- חישוב חודש: פר עובד + סיכומים ----------
-   data: { ads, issues, contracts, customers, designedAdIds, recognition,
-           comps, managerCuts, bonuses, graphicsFee }
+   data: { ads, issues, contracts, customers, recognition, comps,
+           managerCuts, bonuses, defaultAgentId }
    מחזיר { month, agents: {agentId: row}, totals } — row כולל את כל
    המרכיבים לשכר, לרווחיות ולדוח. agentId 0 = "ללא סוכן" (הכנסה בלבד). */
 function pfComputeMonth(month, data) {
   const ix = pfIndex(data);
-  const fee = pfNum(data.graphicsFee);
   const A = {};
   const row = id => (A[id] = A[id] || {
     agent_id: id, revenue_single: 0, revenue_deals: 0, revenue: 0,
@@ -193,7 +191,8 @@ function pfComputeMonth(month, data) {
     const ct = a.contract_id != null ? ix.contractById[a.contract_id] : null;
     const multi = ct && pfIsMultiDeal(ct, ix.adsByContract[ct.id]);
     if (!multi) { r.revenue_single += pfAdNet(a); r.ads_count++; }
-    if (pfIsDesigned(a, ix)) { r.designed_count++; r.graphics += fee; }
+    const fee = pfDesignFee(a);
+    if (fee > 0) { r.designed_count++; r.graphics += fee; }
   });
 
   // 2. עסקאות רב-גיליוניות: רק מה שאושר בסגירת החודש
@@ -269,21 +268,27 @@ function pfComputeMonth(month, data) {
 }
 
 /* ---------- סיווג הוצאות לדוח רווח והפסד ----------
-   expenses: [{amount, notes, expense_date}] של החודש.
+   expenses: [{amount, notes, expense_date, category_id}] של החודש.
    תיוג #issue: → עלות גיליון; #cat:גרפיקה → שורת הגרפיקה (מעל הרווח הגולמי);
-   בלי #issue: → הוצאות כלליות אחרות. נטו מ-#net: (כמו הדוחות הקיימים). */
-function pfClassifyExpenses(expenses) {
-  const out = { issue_print: 0, issue_graphics: 0, other: 0 };
+   בלי #issue: → הוצאות כלליות אחרות. נטו מ-#net: (כמו הדוחות הקיימים).
+   שכר ועמלות לא נספרים פעמיים: שורות שסונכרנו ממסך השכר (#payroll:) וכל
+   הוצאה בקטגוריית שכר/עמלות (payrollCategoryIds) — כבר בשורות השכר של הדוח,
+   ולכן מוחרגות ומוצגות בנפרד כ-payroll_synced / payroll_manual (מידע בלבד). */
+function pfClassifyExpenses(expenses, payrollCategoryIds) {
+  const out = { issue_print: 0, issue_graphics: 0, other: 0, payroll_synced: 0, payroll_manual: 0 };
+  const payCats = new Set((payrollCategoryIds || []).map(Number));
   (expenses || []).forEach(e => {
     const notes = String(e.notes || '');
     const mn = notes.match(/#net:([0-9.]+)/);
     const net = mn ? Number(mn[1]) : pfNum(e.amount);
+    if (/#payroll:/.test(notes)) { out.payroll_synced += net; return; }
+    if (e.category_id != null && payCats.has(Number(e.category_id))) { out.payroll_manual += net; return; }
     if (/#issue:\d+/.test(notes)) {
       const cat = (notes.match(/#cat:([^;]+);/) || [])[1] || '';
       if (cat.trim() === 'גרפיקה') out.issue_graphics += net; else out.issue_print += net;
     } else out.other += net;
   });
-  out.issue_print = pfRound(out.issue_print); out.issue_graphics = pfRound(out.issue_graphics); out.other = pfRound(out.other);
+  Object.keys(out).forEach(k => { out[k] = pfRound(out[k]); });
   return out;
 }
 
@@ -309,13 +314,28 @@ function pfPnl(calc, exp) {
     commission: t.commission, manager_cut: t.manager_cut, commissions, after_commissions: afterComm,
     base_salary: t.base_salary, bonus: t.bonus, salaries, operating,
     other_expenses: e.other, net,
+    payroll_synced: pfRound(e.payroll_synced), payroll_manual: pfRound(e.payroll_manual),
   };
+}
+
+/* ---------- סנכרון השכר להוצאות (תזרים) ----------
+   שורה אחת לכל עובד × חודש, מתויגת #payroll:YYYY-MM;#agent:<id>;#net:<סכום>;
+   כך שסנכרון חוזר מעדכן את אותה שורה, והדוח מזהה אותה ולא סופר פעמיים.
+   מחזיר [{agent_id, amount, tag, notes}] — רק עובדים עם סכום לתשלום. */
+function pfPayrollTag(month, agentId) { return '#payroll:' + month + ';#agent:' + agentId + ';'; }
+function pfPayrollSyncRows(calc) {
+  return Object.values(calc.agents)
+    .filter(r => r.agent_id && r.pay_total > 0)
+    .map(r => {
+      const tag = pfPayrollTag(calc.month, r.agent_id);
+      return { agent_id: r.agent_id, amount: r.pay_total, tag, notes: tag + '#net:' + r.pay_total + ';' };
+    });
 }
 
 /* חשיפה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     pfRound, pfAdNet, pfIssueMonth, pfTiers, pfTieredCommission, pfIsMultiDeal,
-    pfMonthCloseRows, pfComputeMonth, pfClassifyExpenses, pfPnl,
+    pfMonthCloseRows, pfComputeMonth, pfClassifyExpenses, pfPnl, pfPayrollTag, pfPayrollSyncRows,
   };
 }

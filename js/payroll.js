@@ -18,6 +18,15 @@
 
 function pfOn() { return String((cache.settings || {}).profitability_enabled || '0') === '1'; }
 function pfFee() { const v = Number((cache.settings || {}).graphics_fee_net); return isFinite(v) && v >= 0 && (cache.settings || {}).graphics_fee_net != null ? v : 50; }
+/* סוכן ברירת מחדל למודעה בלי סוכן (וללקוח אין סוכן): ההגדרה default_agent_id,
+   ואם ריקה — הסוכן המקושר למשתמש מנהל */
+function pfDefaultAgentId() {
+  const v = Number((cache.settings || {}).default_agent_id);
+  if (v && (cache.agents || []).some(a => a.id === v)) return v;
+  const admins = new Set((cache.profiles || []).filter(p => p.role === 'admin').map(p => p.id));
+  const a = (cache.agents || []).find(x => x.profile_id && admins.has(x.profile_id));
+  return a ? a.id : null;
+}
 function pfAgentName(id) { return Number(id) ? (nameOf('agents', Number(id)) || 'סוכן #' + id) : 'ללא סוכן'; }
 function pfPrevMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 2, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
 function pfMonthsBack(ym, n) { const out = [ym]; for (let i = 1; i < n; i++) out.push(pfPrevMonth(out[i - 1])); return out; }
@@ -47,31 +56,24 @@ async function pfLoad(months, opts = {}) {
     admin ? run(db.from('payroll_bonus').select('*').in('month', months), 'בונוסים') : [],
     run(db.from('revenue_month_close').select('*'), 'סגירות חודש'),
   ]);
-  const mSet = new Set(months);
-  const issMonth = {}; issues.forEach(i => { issMonth[i.id] = pfIssueMonth(i); });
-  // מודעות: כולן (עסקאות צריכות את כל ההיסטוריה שלהן) בלי מבוטלות/נדחות.
-  // is_system/recurring_id לא קיימות בכל מופע — נפילה בטוחה בלעדיהן.
-  const cols = 'id,agent_id,customer_id,contract_id,issue_id,price,discount,status';
-  let ads;
-  try {
-    ads = await runAll((f, t) => db.from('ads').select(cols + ',is_system,recurring_id').not('status', 'in', '("cancelled","rejected")').order('id').range(f, t), 'מודעות');
-  } catch (e) {
-    ads = await runAll((f, t) => db.from('ads').select(cols).not('status', 'in', '("cancelled","rejected")').order('id').range(f, t), 'מודעות');
-  }
-  // עיצוב: קובץ kind='design' — רק למודעות של החודשים המבוקשים
-  const inMonths = ads.filter(a => mSet.has(issMonth[a.issue_id])).map(a => a.id);
-  const files = inMonths.length
-    ? await runAllIn((f, t) => db.from('ad_files').select('ad_id').eq('kind', 'design').order('id').range(f, t), 'ad_id', inMonths, 'קבצי עיצוב')
-    : [];
+    // מודעות: כולן (עסקאות צריכות את כל ההיסטוריה שלהן) בלי מבוטלות/נדחות.
+  // design_fee_net — עלות העיצוב שסומנה בכפתור בכרטיס המודעה (מאותה מיגרציה).
+  const ads = await runAll((f, t) => db.from('ads').select('id,agent_id,customer_id,contract_id,issue_id,price,discount,status,design_fee_net')
+    .not('status', 'in', '("cancelled","rejected")').order('id').range(f, t), 'מודעות');
   const data = {
     issues, contracts, ads, recognition, comps: comps || [], managerCuts: cuts || [], bonuses: bonuses || [],
-    customers: cache.customers || [], designedAdIds: [...new Set(files.map(f => f.ad_id))],
-    graphicsFee: pfFee(), closes: closes || [],
+    customers: cache.customers || [], defaultAgentId: pfDefaultAgentId(), closes: closes || [],
   };
   if (opts.expenses && admin) {
     const sorted = [...months].sort();
-    data.expenses = await runAll((f, t) => db.from('expenses').select('amount,notes,expense_date')
-      .gte('expense_date', sorted[0] + '-01').lte('expense_date', monthEnd(sorted[sorted.length - 1])).order('id').range(f, t), 'הוצאות');
+    const [exps, cats] = await Promise.all([
+      runAll((f, t) => db.from('expenses').select('amount,notes,expense_date,category_id')
+        .gte('expense_date', sorted[0] + '-01').lte('expense_date', monthEnd(sorted[sorted.length - 1])).order('id').range(f, t), 'הוצאות'),
+      (async () => { const r = await db.from('expense_categories').select('id,name'); return (r && r.data) || []; })(),
+    ]);
+    data.expenses = exps;
+    // קטגוריות שכר/עמלות — הוצאה כזו כבר מחושבת בשורות השכר, לא נספרת פעמיים
+    data.payrollCategoryIds = cats.filter(c => /שכר|משכור|עמל/.test(String(c.name || ''))).map(c => c.id);
   }
   return data;
 }
@@ -120,7 +122,7 @@ Pages.monthclose = {
       if (issMonth[a.issue_id] !== month) return;
       const ct = a.contract_id != null ? ctById[a.contract_id] : null;
       if (ct && (Number(ct.total_inserts) > 1 || ctAdsCount[ct.id] > 1)) return;
-      const ag = a.agent_id != null ? a.agent_id : (ct && ct.agent_id != null ? ct.agent_id : (custAgent[a.customer_id] || 0));
+      const ag = a.agent_id != null ? a.agent_id : (ct && ct.agent_id != null ? ct.agent_id : (custAgent[a.customer_id] != null ? custAgent[a.customer_id] : (data.defaultAgentId || 0)));
       (singles[ag] = singles[ag] || []).push(a);
     });
     const agentIds = [...new Set([..._pfMcRows.map(r => r.agent_id), ...Object.keys(singles).map(Number)])]
@@ -293,6 +295,7 @@ ${rows.map(r => `<tr>
 </table></div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
 <button class="btn btn-sm" onclick="pfSaveBonuses()">💾 שמירת בונוסים</button>
+<button class="btn btn-sm btn-ghost" onclick="pfPayrollSync()">📤 סנכרון השכר לתזרים</button>
 <span class="muted" style="font-size:.78rem">לתשלום = בסיס + עמלה מדורגת (על ההכנסה המוכרת של החודש) + נתח מנהלת + בונוס. הסכומים נטו לפני מע"מ ולפני ניכויי שכר.</span>
 </div>
 ${unconfigured.length ? `<p class="muted" style="font-size:.8rem;margin-top:10px">⚠️ עם הכנסה החודש אך בלי הגדרת תגמול: ${unconfigured.map(r => esc(pfAgentName(r.agent_id))).join(', ')}.</p>` : ''}`;
@@ -312,6 +315,31 @@ async function pfSaveBonuses() {
   await run(db.from('payroll_bonus').upsert(changes.map(c => ({ agent_id: c.agent_id, month, amount: c.amount, updated_by: profile.id, updated_at: now })), { onConflict: 'agent_id,month' }), 'שמירת בונוסים');
   toast('✓ הבונוסים נשמרו');
   openPage('payroll');
+}
+
+/* סנכרון השכר להוצאות (תזרים): שורה אחת לכל עובד × חודש, מתויגת
+   #payroll:YYYY-MM;#agent:<id>; — סנכרון חוזר מעדכן את אותה שורה (לא מכפיל),
+   ועובד שירד ל-0 — השורה שלו נמחקת. דוח רווח והפסד מזהה את התג ולא סופר שוב. */
+async function pfPayrollSync() {
+  if (profile.role !== 'admin') { toast('למנהל בלבד', true); return; }
+  if (!_pfPayCalc) return;
+  const month = _pfPayCalc.month;
+  const rows = pfPayrollSyncRows(_pfPayCalc);
+  const existing = await runAll((f, t) => db.from('expenses').select('id,notes').ilike('notes', '%#payroll:' + month + ';%').order('id').range(f, t), 'הוצאות שכר');
+  const byTag = {}; existing.forEach(e => { const m = String(e.notes || '').match(/#payroll:[0-9-]+;#agent:\d+;/); if (m) byTag[m[0]] = e; });
+  const stale = existing.filter(e => !rows.some(r => String(e.notes || '').includes(r.tag)));
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  if (!confirm(`לסנכרן את השכר של ${month} לתזרים?\n\n${rows.map(r => `${pfAgentName(r.agent_id)}: ${pfMoney(r.amount)}`).join('\n')}\n\nסה"כ ${pfMoney(total)} · ${rows.filter(r => byTag[r.tag]).length} יעודכנו, ${rows.filter(r => !byTag[r.tag]).length} חדשות${stale.length ? `, ${stale.length} יימחקו (ירדו ל-0)` : ''}.\nהדוח לא יספור אותן פעמיים.`)) return;
+  const cats = (await db.from('expense_categories').select('id,name')).data || [];
+  const cat = cats.find(c => /שכר|משכור/.test(String(c.name || '')));
+  for (const r of rows) {
+    const payload = { expense_date: monthEnd(month), supplier: pfAgentName(r.agent_id), amount: r.amount, notes: r.notes, category_id: cat ? cat.id : null };
+    const ex = byTag[r.tag];
+    if (ex) await run(db.from('expenses').update(payload).eq('id', ex.id), 'עדכון שכר בתזרים');
+    else await run(db.from('expenses').insert({ ...payload, status: 'expected' }), 'רישום שכר בתזרים');
+  }
+  for (const e of stale) await run(db.from('expenses').delete().eq('id', e.id), 'מחיקת שכר ישן');
+  toast('✓ השכר סונכרן לתזרים — ' + pfMoney(total));
 }
 
 /* ======================================================================
@@ -398,7 +426,7 @@ async function report_pnlx() {
   catch (e) { document.getElementById('repTable').innerHTML = `<p class="empty">${esc(e.message)}</p>`; return; }
   const per = months.map(m => {
     const calc = pfComputeMonth(m, data);
-    const exp = pfClassifyExpenses((data.expenses || []).filter(x => String(x.expense_date || '').slice(0, 7) === m));
+    const exp = pfClassifyExpenses((data.expenses || []).filter(x => String(x.expense_date || '').slice(0, 7) === m), data.payrollCategoryIds);
     return { m, calc, p: pfPnl(calc, exp), closed: !!pfClosedInfo(data, m) };
   });
   const tot = k => per.reduce((s, x) => s + (Number(x.p[k]) || 0), 0);
@@ -417,6 +445,8 @@ async function report_pnlx() {
     ['operating', '= רווח תפעולי', 'sum'],
     ['other_expenses', '− הוצאות כלליות אחרות (לא מתויגות לגיליון)', 'neg'],
     ['net', '= רווח נקי', 'total'],
+    ['payroll_synced', 'לידיעה: שכר שסונכרן לתזרים (כבר בשורות השכר — לא נספר שוב)', 'minor'],
+    ['payroll_manual', 'לידיעה: הוצאות בקטגוריית שכר/עמלות (כבר בשורות השכר — לא נספרו שוב)', 'minor'],
   ];
   const cell = (v, kind) => {
     const n = Number(v) || 0;
@@ -444,8 +474,9 @@ ${agRows.map(([id, a]) => `<tr><td><b>${esc(pfAgentName(Number(id)))}</b></td><t
 <td><b style="color:${a.profitability >= 0 ? 'var(--ok)' : 'var(--danger)'}">${pfMoney(a.profitability)}</b></td><td>${a.manager_cut ? pfMoney(a.manager_cut) : '—'}</td><td>${a.base_salary ? pfMoney(a.base_salary) : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">אין נתונים</td></tr>'}
 </tbody></table>
 <p class="muted" style="font-size:.78rem;margin-top:8px">הכל נטו, לפני מע"מ. הכנסה = מודעות בודדות לפי חודש הסגירה לדפוס של הגיליון + עסקאות רב-חודשיות לפי מה שאושר בסגירת החודש.
-עיצוב = ${pfMoney(pfFee())} למודעה שעוצבה אצלנו (קובץ עיצוב, לא מודעת מערכת/קבועה) + עלויות גיליון שתויגו "גרפיקה". עלויות גיליון והוצאות כלליות לפי חודש ההוצאה (#net:).
-שכר בסיס הוא עלות קבועה — מוצג בדוח ובמסך השכר, ולא בתוך "רווחיות עובד". אם שכר נרשם גם כהוצאה כללית — הוא ייספר פעמיים; רשמו אותו רק בהגדרות התגמול.</p>`;
+עיצוב = הסכום שסומן בכפתור "🎨 עיצוב" בכל מודעה + עלויות גיליון שתויגו "גרפיקה". עלויות גיליון והוצאות כלליות לפי חודש ההוצאה (#net:).
+שכר ועמלות מחושבים רק מהגדרות התגמול: שורות שסונכרנו ממסך השכר וכל הוצאה בקטגוריית שכר/עמלות מוחרגות מההוצאות הכלליות, כדי שלא ייספרו פעמיים.
+שכר בסיס הוא עלות קבועה — מוצג בדוח ובמסך השכר, ולא בתוך "רווחיות עובד".</p>`;
   const csvRows = LINES.map(([k, label]) => [label, ...per.map(x => Math.round(Number(x.p[k]) || 0)), ...(multi ? [Math.round(tot(k))] : [])]);
   document.getElementById('pfPnlCsv').onclick = () => exportCsv('רווח_והפסד_מדורג', ['שורה', ...months, ...(multi ? ['סה"כ'] : [])], csvRows);
 }
@@ -473,6 +504,13 @@ async function pfCostsSave() {
   if (pt) ups.push({ key: 'print_price_table', value: JSON.stringify(JSON.parse(pt)) });
   for (const u of ups) { await run(db.from('settings').upsert(u)); cache.settings[u.key] = u.value; }
   toast('✓ העלויות נשמרו');
+}
+
+async function pfDefAgentSave(v) {
+  if (profile.role !== 'admin') return;
+  await run(db.from('settings').upsert({ key: 'default_agent_id', value: v || '' }));
+  cache.settings.default_agent_id = v || '';
+  toast('✓ מודעות בלי סוכן ייזקפו ל' + (v ? pfAgentName(Number(v)) : 'סוכן המנהל'));
 }
 
 async function pfCompLoadInto() {
@@ -566,19 +604,22 @@ async function pfCutSave(existingId) {
 <b>💼 רווחיות, שכר ועמלות</b>
 <p class="muted" style="font-size:.82rem">תגמול עובדים (בסיס + עמלה מדורגת לפי יעד), נתח מנהלת, סגירת חודש (הכרה בהכנסה מעסקאות רב-חודשיות),
 מסך שכר לתשלום, "הביצועים שלי" לסוכנים ודו"ח רווח והפסד מדורג. דורש את המיגרציה 2026-10-05_profitability_payroll. למנהל בלבד.
-<br>שימו לב: מסך "עמלות" הקיים (עמלת חיוב/גבייה לפי pct_new/pct_renew) נשאר כמו שהוא ומחושב אחרת — בחרו מקור אחד לתשלום בפועל.</p>
+<br>כשהמודול פעיל — העמלות מחושבות רק לפי ההגדרות כאן: מסך "🤝 עמלות" מציג את החישוב הזה (מנהל: שכר לתשלום, סוכן: הביצועים שלי) במקום החישוב הישן לפי חיוב/גבייה.</p>
 <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer">
 <input type="checkbox" ${pfOn() ? 'checked' : ''} onchange="pfToggleSave(this.checked)" style="width:18px;height:18px">
 המודול פעיל
 </label>
 <b style="display:block;margin-top:14px">עלויות (נטו, לפני מע"מ)</b>
 <div class="grid2" style="margin-top:6px">
-<div class="field"><label>עלות עיצוב למודעה שעוצבה אצלנו (₪)</label><input id="pfFee" type="number" min="0" step="1" value="${esc(st.graphics_fee_net != null ? st.graphics_fee_net : '50')}" dir="ltr"></div>
+<div class="field"><label>תעריף עיצוב למודעה (₪ נטו + מע"מ) — ערך הכפתור "🎨 עיצוב" בכרטיס המודעה</label><input id="pfFee" type="number" min="0" step="1" value="${esc(st.graphics_fee_net != null ? st.graphics_fee_net : '50')}" dir="ltr"></div>
 <div class="field"><label>עלות הפצה לגיליון (₪) — ברירת מחדל במסך עלויות הגיליון</label><input id="pfDist" type="number" min="0" step="1" value="${esc(st.distribution_cost || '')}" placeholder="500" dir="ltr"></div>
 </div>
 <div class="field"><label>מחירי דפוס לפי מספר עמודים (JSON) — ברירת מחדל במסך עלויות הגיליון</label><input id="pfPrint" value="${esc(st.print_price_table || '')}" placeholder='{"32":2600,"40":3580,"48":4100,"56":4695}' dir="ltr"></div>
 <button class="btn btn-sm" onclick="pfCostsSave()">💾 שמירת עלויות</button>
-<p class="muted" style="font-size:.76rem;margin-top:4px">"מעוצבת אצלנו" = למודעה יש קובץ עיצוב (design) והיא אינה מודעת מערכת/קבועה. דפוס והפצה בפועל נרשמים פר גיליון במסך "עלויות גיליון" ונספרים בדו"ח לפי חודש ההוצאה.</p>
+<p class="muted" style="font-size:.76rem;margin-top:4px">עלות העיצוב נספרת רק למודעות שסומן בהן הכפתור "🎨 עיצוב" (אופציונלי, בכרטיס המודעה) — בסכום שהיה בתוקף בזמן הסימון. דפוס והפצה בפועל נרשמים פר גיליון במסך "עלויות גיליון" ונספרים בדו"ח לפי חודש ההוצאה.</p>
+<div class="field" style="margin-top:10px"><label>מודעה בלי סוכן (וללקוח אין סוכן) נזקפת ל:</label>
+<select id="pfDefAgent" onchange="pfDefAgentSave(this.value)"><option value="">אוטומטי — הסוכן המקושר למנהל${pfDefaultAgentId() ? ' (' + esc(pfAgentName(pfDefaultAgentId())) + ')' : ' (לא נמצא — בחרו)'}</option>
+${(cache.agents || []).map(a => `<option value="${a.id}" ${String(st.default_agent_id || '') === String(a.id) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
 <b style="display:block;margin-top:14px">תגמול עובדים</b>
 <div id="pfCompBox"><div class="muted">טוען...</div></div>`;
         const anchor = el.querySelector('#activityLog');
@@ -628,5 +669,27 @@ function pfNavSync() {
     const w = function () { const r = origShell.apply(this, arguments); try { pfNavSync(); } catch (e) { } return r; };
     w._pfWrapped = true;
     window.buildShell = w;
+  }
+})();
+
+/* ---------- "🤝 עמלות" — כשהמודול פעיל, העמלות לפי ההגדרות כאן בלבד ----------
+   החישוב הישן (v_commissions: עמלת חיוב/גבייה לפי pct_new/pct_renew) לא מוצג
+   כשהמודול פעיל, כדי שיהיה מקור אחד לעמלה. מנהל → שכר לתשלום; סוכן → הביצועים שלי.
+   כשהמודול כבוי — המסך הישן כמו שהיה. */
+(function () {
+  const orig = typeof Pages !== 'undefined' && Pages.commissions && Pages.commissions.render;
+  if (orig && !orig._pfWrapped) {
+    const wrapped = async function (el) {
+      if (!pfOn()) return orig.apply(this, arguments);
+      const target = profile.role === 'admin' ? Pages.payroll : Pages.mypay;
+      await target.render(el);
+      const note = document.createElement('p');
+      note.className = 'muted';
+      note.style.fontSize = '.78rem';
+      note.textContent = 'העמלות מחושבות לפי הגדרות התגמול (רווחיות, שכר ועמלות): אחוז עד היעד / מעל היעד על ההכנסה המוכרת של החודש.';
+      el.prepend(note);
+    };
+    wrapped._pfWrapped = true;
+    Pages.commissions.render = wrapped;
   }
 })();

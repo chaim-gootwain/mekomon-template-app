@@ -197,6 +197,7 @@ ${debtHoldBlock}
 <div><label>עמוד</label><b>${a.page_number || '—'}</b></div>
 <div><label>מחיר</label><b>${money(a.price)}${a.discount > 0 ? ' (הנחה ' + money(a.discount) + ')' : ''}</b></div>
 </div>
+${adDesignFeeBlock(a)}
 ${a.content_text ? `<div class="field" style="margin-top:8px"><label>תוכן שהלקוח שלח</label>
 <div style="background:var(--bg);border-radius:8px;padding:10px;font-size:.88rem;white-space:pre-wrap">${esc(a.content_text)}</div></div>` : ''}
 ${a.graphics_note ? `<p style="font-size:.85rem"><b>הנחיה לגרפיקה:</b> ${esc(a.graphics_note)}</p>` : ''}
@@ -280,6 +281,32 @@ toast('נשמר');
 if (typeof onDone === 'function') { try { await onDone(); } catch (e) { openPage('ads'); } }
 else { openPage('ads'); }
 });
+}
+
+/* --- עלות עיצוב (אופציונלי): כפתור בכל מודעה — "🎨 עיצוב ₪50 + מע"מ" ---
+   נשמר ב-ads.design_fee_net (נטו, לפי התעריף graphics_fee_net בזמן הסימון).
+   משמש את מודול הרווחיות כעלות העיצוב של המודעה. בלי העמודה (מיגרציה
+   2026-10-05_profitability_payroll שטרם הורצה) — הכפתור לא מוצג. */
+function adDesignFeeRate() { const v = Number((cache.settings || {}).graphics_fee_net); return (cache.settings || {}).graphics_fee_net != null && isFinite(v) && v >= 0 ? v : 50; }
+function adDesignFeeBlock(a) {
+  if (!a || !('design_fee_net' in a) || !['admin', 'sales'].includes(profile.role)) return '';
+  const vat = Number((cache.settings || {}).vat_rate) > 0 ? Number(cache.settings.vat_rate) : 18;
+  const on = Number(a.design_fee_net) > 0;
+  const amt = on ? Number(a.design_fee_net) : adDesignFeeRate();
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;font-size:.88rem">
+${on ? `<span class="pill green">🎨 עוצבה אצלנו — ${money(amt)} + מע"מ ${vat}%</span>
+<button class="btn btn-sm btn-ghost" onclick="adDesignFeeToggle(${a.id}, false)">הסרת עלות העיצוב</button>`
+    : `<button class="btn btn-sm btn-ghost" onclick="adDesignFeeToggle(${a.id}, true)">🎨 עיצוב ${money(amt)} + מע"מ</button>
+<span class="muted" style="font-size:.76rem">אופציונלי — לסמן אם המודעה עוצבה אצלנו</span>`}
+</div>`;
+}
+async function adDesignFeeToggle(id, on) {
+  const val = on ? adDesignFeeRate() : null;
+  await run(db.from('ads').update({ design_fee_net: val }).eq('id', id), 'עדכון עלות עיצוב');
+  const cached = (_ads || []).find(x => x.id === id); if (cached) cached.design_fee_net = val;
+  await addInteraction('ad', id, on ? `🎨 סומנה עלות עיצוב ${money(val)} + מע"מ` : '🎨 הוסרה עלות העיצוב');
+  toast(on ? 'סומנה עלות עיצוב' : 'עלות העיצוב הוסרה');
+  openAdCard(id);
 }
 
 /* --- קבצים: העלאה ל-Storage וצפייה בקישור חתום --- */
