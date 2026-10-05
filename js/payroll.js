@@ -27,6 +27,8 @@ function pfDefaultAgentId() {
   const a = (cache.agents || []).find(x => x.profile_id && admins.has(x.profile_id));
   return a ? a.id : null;
 }
+/* עלות הגרפיקה לעסק למודעה מעוצבת (נטו); ריק = כגובה החיוב ללקוח */
+function pfGraphicsCost() { const s = (cache.settings || {}).graphics_cost_net; return s == null || s === '' || !isFinite(Number(s)) ? null : Math.max(0, Number(s)); }
 function pfAgentName(id) { return Number(id) ? (nameOf('agents', Number(id)) || 'סוכן #' + id) : 'ללא סוכן'; }
 function pfPrevMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 2, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
 function pfMonthsBack(ym, n) { const out = [ym]; for (let i = 1; i < n; i++) out.push(pfPrevMonth(out[i - 1])); return out; }
@@ -63,6 +65,7 @@ async function pfLoad(months, opts = {}) {
   const data = {
     issues, contracts, ads, recognition, comps: comps || [], managerCuts: cuts || [], bonuses: bonuses || [],
     customers: cache.customers || [], defaultAgentId: pfDefaultAgentId(), closes: closes || [],
+    graphicsCostNet: pfGraphicsCost(),
   };
   if (opts.expenses && admin) {
     const sorted = [...months].sort();
@@ -384,7 +387,7 @@ ${now.closed ? '' : '<p class="muted" style="font-size:.8rem;margin:4px 0 0">ע�
 </div>
 <div class="stats">
 ${stat(pfMoney(r.revenue), 'כמה הכנסתי (נטו)')}
-${stat(pfMoney(r.graphics), `עלות עיצוב (${r.designed_count || 0} מודעות)`)}
+${stat(pfMoney((r.design_revenue || 0) - r.graphics), `עיצוב: חויב ${pfMoney(r.design_revenue || 0)} − עלות ${pfMoney(r.graphics)} (${r.designed_count || 0} מודעות)`)}
 ${stat(pfMoney(r.commission), 'העמלה שלי')}
 ${stat(pfMoney(r.profitability), r.profitability >= 0 ? 'רווחיות ✓' : 'רווחיות — הפסד', r.profitability >= 0 ? 'gold' : 'red')}
 </div>
@@ -396,7 +399,7 @@ ${rows.map(x => `<tr><td><b>${x.m}</b></td><td>${pfMoney(x.r.revenue)}</td><td>$
 <td><b style="color:${x.r.profitability >= 0 ? 'var(--ok)' : 'var(--danger)'}">${pfMoney(x.r.profitability)}</b></td>
 <td class="muted" style="font-size:.74rem">${x.closed ? 'נסגר' : 'פתוח'}</td></tr>`).join('')}
 </tbody></table></div></div>
-<p class="muted" style="font-size:.78rem">רווחיות = הכנסה − עלות עיצוב המודעות שלי − העמלה שלי. ${r.has_comp ? '' : 'לא הוגדרו עדיין אחוזי עמלה — פנה למנהל.'}</p>`;
+<p class="muted" style="font-size:.78rem">רווחיות = הכנסה + חיובי עיצוב − עלות העיצוב של המודעות שלי − העמלה שלי. העמלה מחושבת על הכנסת המודעות בלבד. ${r.has_comp ? '' : 'לא הוגדרו עדיין אחוזי עמלה — פנה למנהל.'}</p>`;
   }
 };
 
@@ -431,10 +434,12 @@ async function report_pnlx() {
   });
   const tot = k => per.reduce((s, x) => s + (Number(x.p[k]) || 0), 0);
   const LINES = [
-    ['revenue', 'הכנסות מודעות (נטו, מוכרות)', 'sub'],
-    ['revenue_single', '· מודעות בודדות', 'minor'],
-    ['revenue_deals', '· עסקאות רב-חודשיות (סגירת חודש)', 'minor'],
-    ['graphics', '− עיצוב / גרפיקה', 'neg'],
+    ['income', 'הכנסות (נטו)', 'sub'],
+    ['revenue', '· מודעות (מוכרות)', 'minor'],
+    ['revenue_single', '·· מודעות בודדות', 'minor'],
+    ['revenue_deals', '·· עסקאות רב-חודשיות (סגירת חודש)', 'minor'],
+    ['design_revenue', '· חיובי עיצוב ללקוחות', 'minor'],
+    ['graphics', '− עלות עיצוב / גרפיקה', 'neg'],
     ['graphics_ads', '· לפי מודעה מעוצבת', 'minor'],
     ['graphics_issue', '· עלויות גיליון בקטגוריית "גרפיקה"', 'minor'],
     ['gross', '= רווח גולמי', 'sum'],
@@ -456,8 +461,8 @@ async function report_pnlx() {
   const multi = months.length > 1;
   const agg = {};
   per.forEach(x => Object.values(x.calc.agents).forEach(r => {
-    const a = agg[r.agent_id] = agg[r.agent_id] || { revenue: 0, graphics: 0, commission: 0, manager_cut: 0, base_salary: 0, profitability: 0 };
-    ['revenue', 'graphics', 'commission', 'manager_cut', 'base_salary', 'profitability'].forEach(k => a[k] += Number(r[k]) || 0);
+    const a = agg[r.agent_id] = agg[r.agent_id] || { revenue: 0, design_revenue: 0, graphics: 0, commission: 0, manager_cut: 0, base_salary: 0, profitability: 0 };
+    ['revenue', 'design_revenue', 'graphics', 'commission', 'manager_cut', 'base_salary', 'profitability'].forEach(k => a[k] += Number(r[k]) || 0);
   }));
   const agRows = Object.entries(agg).filter(([, a]) => a.revenue || a.commission || a.manager_cut || a.base_salary)
     .sort((a, b) => b[1].revenue - a[1].revenue);
@@ -469,12 +474,12 @@ ${LINES.map(([k, label, kind]) => `<tr${kind === 'sum' || kind === 'total' ? ' s
 ${per.map(x => cell(x.p[k], kind)).join('')}${multi ? cell(tot(k), kind) : ''}</tr>`).join('')}
 </tbody></table>
 <b style="display:block;margin-top:18px">רווחיות לפי עובד/ת — ${months[0]}${multi ? ' עד ' + months[months.length - 1] : ''}</b>
-<table class="data" style="margin-top:6px"><thead><tr><th>עובד/ת</th><th>הכנסה</th><th>עיצוב</th><th>עמלה</th><th>רווחיות (הכנסה−עיצוב−עמלה)</th><th>נתח מנהלת</th><th>שכר בסיס</th></tr></thead><tbody>
-${agRows.map(([id, a]) => `<tr><td><b>${esc(pfAgentName(Number(id)))}</b></td><td>${pfMoney(a.revenue)}</td><td>${pfMoney(a.graphics)}</td><td>${pfMoney(a.commission)}</td>
-<td><b style="color:${a.profitability >= 0 ? 'var(--ok)' : 'var(--danger)'}">${pfMoney(a.profitability)}</b></td><td>${a.manager_cut ? pfMoney(a.manager_cut) : '—'}</td><td>${a.base_salary ? pfMoney(a.base_salary) : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">אין נתונים</td></tr>'}
+<table class="data" style="margin-top:6px"><thead><tr><th>עובד/ת</th><th>הכנסה</th><th>חיובי עיצוב</th><th>עלות עיצוב</th><th>עמלה</th><th>רווחיות</th><th>נתח מנהלת</th><th>שכר בסיס</th></tr></thead><tbody>
+${agRows.map(([id, a]) => `<tr><td><b>${esc(pfAgentName(Number(id)))}</b></td><td>${pfMoney(a.revenue)}</td><td>${pfMoney(a.design_revenue)}</td><td>${pfMoney(a.graphics)}</td><td>${pfMoney(a.commission)}</td>
+<td><b style="color:${a.profitability >= 0 ? 'var(--ok)' : 'var(--danger)'}">${pfMoney(a.profitability)}</b></td><td>${a.manager_cut ? pfMoney(a.manager_cut) : '—'}</td><td>${a.base_salary ? pfMoney(a.base_salary) : '—'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">אין נתונים</td></tr>'}
 </tbody></table>
 <p class="muted" style="font-size:.78rem;margin-top:8px">הכל נטו, לפני מע"מ. הכנסה = מודעות בודדות לפי חודש הסגירה לדפוס של הגיליון + עסקאות רב-חודשיות לפי מה שאושר בסגירת החודש.
-עיצוב = הסכום שסומן בכפתור "🎨 עיצוב" בכל מודעה + עלויות גיליון שתויגו "גרפיקה". עלויות גיליון והוצאות כלליות לפי חודש ההוצאה (#net:).
+חיובי עיצוב = מה שחויב ללקוחות בכפתור "🎨 עיצוב" במודעה (לא נכנס לבסיס העמלה). עלות העיצוב = ${pfGraphicsCost() != null ? pfMoney(pfGraphicsCost()) : 'כגובה החיוב'} למודעה מעוצבת + עלויות גיליון שתויגו "גרפיקה". עלויות גיליון והוצאות כלליות לפי חודש ההוצאה (#net:).
 שכר ועמלות מחושבים רק מהגדרות התגמול: שורות שסונכרנו ממסך השכר וכל הוצאה בקטגוריית שכר/עמלות מוחרגות מההוצאות הכלליות, כדי שלא ייספרו פעמיים.
 שכר בסיס הוא עלות קבועה — מוצג בדוח ובמסך השכר, ולא בתוך "רווחיות עובד".</p>`;
   const csvRows = LINES.map(([k, label]) => [label, ...per.map(x => Math.round(Number(x.p[k]) || 0)), ...(multi ? [Math.round(tot(k))] : [])]);
@@ -494,12 +499,15 @@ async function pfToggleSave(on) {
 
 async function pfCostsSave() {
   const fee = document.getElementById('pfFee').value.trim();
+  const cost = document.getElementById('pfCost').value.trim();
+  if (cost !== '' && !(Number(cost) >= 0)) { toast('עלות גרפיקה לא תקינה', true); return; }
   const dist = document.getElementById('pfDist').value.trim();
   const pt = document.getElementById('pfPrint').value.trim();
   if (fee !== '' && !(Number(fee) >= 0)) { toast('עלות עיצוב לא תקינה', true); return; }
   if (pt) { try { const o = JSON.parse(pt); if (!o || typeof o !== 'object' || Array.isArray(o)) throw 0; } catch (e) { toast('טבלת מחירי דפוס חייבת להיות JSON, למשל {"32":2600,"40":3580}', true); return; } }
   if (!confirm('לשמור את עלויות הרווחיות?')) return;
-  const ups = [{ key: 'graphics_fee_net', value: fee === '' ? '50' : String(Number(fee)) }];
+  const ups = [{ key: 'graphics_fee_net', value: fee === '' ? '50' : String(Number(fee)) },
+    { key: 'graphics_cost_net', value: cost === '' ? '' : String(Number(cost)) }];
   if (dist !== '') ups.push({ key: 'distribution_cost', value: String(Number(dist)) });
   if (pt) ups.push({ key: 'print_price_table', value: JSON.stringify(JSON.parse(pt)) });
   for (const u of ups) { await run(db.from('settings').upsert(u)); cache.settings[u.key] = u.value; }
@@ -611,12 +619,13 @@ async function pfCutSave(existingId) {
 </label>
 <b style="display:block;margin-top:14px">עלויות (נטו, לפני מע"מ)</b>
 <div class="grid2" style="margin-top:6px">
-<div class="field"><label>תעריף עיצוב למודעה (₪ נטו + מע"מ) — ערך הכפתור "🎨 עיצוב" בכרטיס המודעה</label><input id="pfFee" type="number" min="0" step="1" value="${esc(st.graphics_fee_net != null ? st.graphics_fee_net : '50')}" dir="ltr"></div>
+<div class="field"><label>עלות גרפיקה לעסק למודעה מעוצבת (₪ נטו; ריק = כמו החיוב ללקוח)</label><input id="pfCost" type="number" min="0" step="1" value="${esc(st.graphics_cost_net || '')}" placeholder="50" dir="ltr"></div>
+<div class="field"><label>חיוב עיצוב ללקוח (₪ נטו + מע"מ) — ערך הכפתור "🎨 עיצוב" בכרטיס המודעה</label><input id="pfFee" type="number" min="0" step="1" value="${esc(st.graphics_fee_net != null ? st.graphics_fee_net : '50')}" dir="ltr"></div>
 <div class="field"><label>עלות הפצה לגיליון (₪) — ברירת מחדל במסך עלויות הגיליון</label><input id="pfDist" type="number" min="0" step="1" value="${esc(st.distribution_cost || '')}" placeholder="500" dir="ltr"></div>
 </div>
 <div class="field"><label>מחירי דפוס לפי מספר עמודים (JSON) — ברירת מחדל במסך עלויות הגיליון</label><input id="pfPrint" value="${esc(st.print_price_table || '')}" placeholder='{"32":2600,"40":3580,"48":4100,"56":4695}' dir="ltr"></div>
 <button class="btn btn-sm" onclick="pfCostsSave()">💾 שמירת עלויות</button>
-<p class="muted" style="font-size:.76rem;margin-top:4px">עלות העיצוב נספרת רק למודעות שסומן בהן הכפתור "🎨 עיצוב" (אופציונלי, בכרטיס המודעה) — בסכום שהיה בתוקף בזמן הסימון. דפוס והפצה בפועל נרשמים פר גיליון במסך "עלויות גיליון" ונספרים בדו"ח לפי חודש ההוצאה.</p>
+<p class="muted" style="font-size:.76rem;margin-top:4px">הכפתור "🎨 עיצוב" בכרטיס המודעה ידני ואופציונלי (תיקון קל לא מחויב): לחיצה + אישור יוצרת חיוב פתוח ללקוח בתעריף שבתוקף. ברווחיות — החיוב הוא הכנסת עיצוב, ועלות הגרפיקה למודעה מנוכה מולו. דפוס והפצה בפועל נרשמים פר גיליון במסך "עלויות גיליון" ונספרים בדו"ח לפי חודש ההוצאה.</p>
 <div class="field" style="margin-top:10px"><label>מודעה בלי סוכן (וללקוח אין סוכן) נזקפת ל:</label>
 <select id="pfDefAgent" onchange="pfDefAgentSave(this.value)"><option value="">אוטומטי — הסוכן המקושר למנהל${pfDefaultAgentId() ? ' (' + esc(pfAgentName(pfDefaultAgentId())) + ')' : ' (לא נמצא — בחרו)'}</option>
 ${(cache.agents || []).map(a => `<option value="${a.id}" ${String(st.default_agent_id || '') === String(a.id) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>

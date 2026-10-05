@@ -14,12 +14,14 @@
      בחודש הגיליון שלה.
    • עסקה רב-גיליונית (חוזה עם יותר מפרסום אחד) — מוכרת רק דרך
      revenue_recognition (סגירת חודש). חודש שלא נסגר = 0 מהעסקה.
-   • עיצוב: לפי הכפתור "🎨 עיצוב ₪50 + מע"מ" בכרטיס המודעה —
-     ads.design_fee_net (נטו) נספר כעלות בחודש הגיליון של המודעה.
+   • עיצוב: לפי הכפתור "🎨 עיצוב ₪50 + מע"מ" בכרטיס המודעה (לחיצה ידנית
+     שמחייבת את הלקוח). ads.design_fee_net = מה שחויב ללקוח (נטו) → הכנסת
+     עיצוב; עלות הגרפיקה למודעה כזו = graphicsCostNet (הגדרה נפרדת).
+     שניהם בחודש הגיליון של המודעה. הכנסת העיצוב לא נכנסת לבסיס העמלה.
    • מודעה בלי סוכן (וגם ללקוח אין סוכן) → נזקפת לסוכן ברירת המחדל
      (המנהל, defaultAgentId).
    • עמלה מדורגת על ההכנסה המוכרת של החודש.
-   • רווחיות עובד = הכנסה − עיצוב − עמלה (שכר בסיס בשורה נפרדת).
+   • רווחיות עובד = הכנסה + חיובי עיצוב − עלות גרפיקה − עמלה (שכר בסיס בשורה נפרדת).
    ============================================================ */
 
 'use strict';
@@ -104,8 +106,12 @@ function pfContractAgent(ct, ix) {
   return ca != null ? Number(ca) : ix.defaultAgent;
 }
 
-/* עלות העיצוב של מודעה (נטו) — מה שסומן בכפתור בכרטיס המודעה; 0 = לא עוצבה אצלנו */
+/* חיוב העיצוב של מודעה (נטו) — מה שסומן בכפתור בכרטיס המודעה; 0 = לא עוצבה אצלנו */
 function pfDesignFee(a) { return Math.max(0, pfNum(a.design_fee_net)); }
+/* עלות הגרפיקה למודעה מעוצבת: ההגדרה graphicsCostNet; בלעדיה — כגובה החיוב */
+function pfDesignCost(a, data) {
+  return data.graphicsCostNet != null && data.graphicsCostNet !== '' ? Math.max(0, pfNum(data.graphicsCostNet)) : pfDesignFee(a);
+}
 
 /* שווי עסקה (נטו): total_price של החוזה; אם ריק — סכום מודעותיה */
 function pfDealNet(ct, ctAds) {
@@ -168,7 +174,7 @@ function pfMonthCloseRows(month, data) {
 
 /* ---------- חישוב חודש: פר עובד + סיכומים ----------
    data: { ads, issues, contracts, customers, recognition, comps,
-           managerCuts, bonuses, defaultAgentId }
+           managerCuts, bonuses, defaultAgentId, graphicsCostNet }
    מחזיר { month, agents: {agentId: row}, totals } — row כולל את כל
    המרכיבים לשכר, לרווחיות ולדוח. agentId 0 = "ללא סוכן" (הכנסה בלבד). */
 function pfComputeMonth(month, data) {
@@ -176,7 +182,7 @@ function pfComputeMonth(month, data) {
   const A = {};
   const row = id => (A[id] = A[id] || {
     agent_id: id, revenue_single: 0, revenue_deals: 0, revenue: 0,
-    ads_count: 0, designed_count: 0, graphics: 0,
+    ads_count: 0, designed_count: 0, graphics: 0, design_revenue: 0,
     commission: 0, commission_parts: [], tiers: [], target: 0,
     manager_cut: 0, manager_cut_base: 0, manager_cut_pct: 0, manager_sources: [],
     base_salary: 0, commission_only: true, bonus: 0, profitability: 0, pay_total: 0, has_comp: false,
@@ -192,7 +198,7 @@ function pfComputeMonth(month, data) {
     const multi = ct && pfIsMultiDeal(ct, ix.adsByContract[ct.id]);
     if (!multi) { r.revenue_single += pfAdNet(a); r.ads_count++; }
     const fee = pfDesignFee(a);
-    if (fee > 0) { r.designed_count++; r.graphics += fee; }
+    if (fee > 0) { r.designed_count++; r.design_revenue += fee; r.graphics += pfDesignCost(a, data); }
   });
 
   // 2. עסקאות רב-גיליוניות: רק מה שאושר בסגירת החודש
@@ -248,8 +254,9 @@ function pfComputeMonth(month, data) {
     r.revenue_single = pfRound(r.revenue_single);
     r.revenue_deals = pfRound(r.revenue_deals);
     r.graphics = pfRound(r.graphics);
+    r.design_revenue = pfRound(r.design_revenue);
     r.bonus = pfRound(r.bonus);
-    r.profitability = pfRound(r.revenue - r.graphics - r.commission);
+    r.profitability = pfRound(r.revenue + r.design_revenue - r.graphics - r.commission);
     r.pay_total = pfRound(r.base_salary + r.commission + r.manager_cut + r.bonus);
   });
 
@@ -259,7 +266,7 @@ function pfComputeMonth(month, data) {
     agents: A,
     totals: {
       revenue: sum('revenue'), revenue_single: sum('revenue_single'), revenue_deals: sum('revenue_deals'),
-      graphics: sum('graphics'), designed_count: sum('designed_count'),
+      graphics: sum('graphics'), design_revenue: sum('design_revenue'), designed_count: sum('designed_count'),
       commission: sum('commission'), manager_cut: sum('manager_cut'),
       base_salary: sum('base_salary'), bonus: sum('bonus'), pay_total: sum('pay_total'),
       profitability: sum('profitability'),
@@ -293,14 +300,15 @@ function pfClassifyExpenses(expenses, payrollCategoryIds) {
 }
 
 /* ---------- רווח והפסד מדורג לחודש ----------
-   הכנסה → − עיצוב → = רווח גולמי → − דפוס/הפצה (עלויות גיליון) →
+   הכנסה (מודעות + חיובי עיצוב) → − עיצוב → = רווח גולמי → − דפוס/הפצה (עלויות גיליון) →
    − עמלות ונתח מנהלת → − שכר בסיס (+בונוסים) → = רווח תפעולי →
    − הוצאות כלליות אחרות → = רווח נקי */
 function pfPnl(calc, exp) {
   const t = calc.totals;
   const e = exp || { issue_print: 0, issue_graphics: 0, other: 0 };
   const graphics = pfRound(t.graphics + e.issue_graphics);
-  const gross = pfRound(t.revenue - graphics);
+  const income = pfRound(t.revenue + t.design_revenue);
+  const gross = pfRound(income - graphics);
   const afterIssue = pfRound(gross - e.issue_print);
   const commissions = pfRound(t.commission + t.manager_cut);
   const afterComm = pfRound(afterIssue - commissions);
@@ -308,7 +316,8 @@ function pfPnl(calc, exp) {
   const operating = pfRound(afterComm - salaries);
   const net = pfRound(operating - e.other);
   return {
-    revenue: t.revenue, revenue_single: t.revenue_single, revenue_deals: t.revenue_deals,
+    income, revenue: t.revenue, revenue_single: t.revenue_single, revenue_deals: t.revenue_deals,
+    design_revenue: t.design_revenue,
     graphics_ads: t.graphics, graphics_issue: e.issue_graphics, graphics,
     gross, issue_costs: e.issue_print, after_issue: afterIssue,
     commission: t.commission, manager_cut: t.manager_cut, commissions, after_commissions: afterComm,

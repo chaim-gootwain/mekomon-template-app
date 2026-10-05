@@ -59,7 +59,8 @@ const comps = [
 ];
 const managerCuts = [{ manager_agent_id: 3, source_agent_ids: [1, 2], pct: 10, active: true }];
 
-const base = { issues, contracts, ads, customers, comps, managerCuts, defaultAgentId: 4 };
+// הלקוח משלם ₪50 על עיצוב; עלות הגרפיקה לעסק ₪30 למודעה
+const base = { issues, contracts, ads, customers, comps, managerCuts, defaultAgentId: 4, graphicsCostNet: 30 };
 
 /* ---------- מדרגות ---------- */
 t('pfTiers: בסיס/מעל-יעד → שתי מדרגות', () => {
@@ -119,14 +120,17 @@ const r1 = oct.agents[1], r2 = oct.agents[2], r3 = oct.agents[3];
 t('רחל: הכנסה = בודדת 8,000 + הכרה 4,000 (החבילה לא נספרת פעמיים)', () => {
   eq(r1.revenue_single, 8000); eq(r1.revenue_deals, 4000); eq(r1.revenue, 12000);
 });
-t('רחל: עיצוב — 2 מודעות מעוצבות (בודדת + מודעת החבילה של אוקטובר)', () => {
-  assert.strictEqual(r1.designed_count, 2); eq(r1.graphics, 100);
+t('רחל: עיצוב — 2 מודעות מעוצבות: חיוב ללקוח 100, עלות גרפיקה 60', () => {
+  assert.strictEqual(r1.designed_count, 2); eq(r1.design_revenue, 100); eq(r1.graphics, 60);
+});
+t('חיוב העיצוב לא נכנס לבסיס העמלה', () => {
+  eq(r1.revenue, 12000);
 });
 t('רחל: מעל היעד — 5% עד 10,000 + 10% על 2,000', () => {
   eq(r1.commission, 500 + 200);
 });
-t('רחל: רווחיות = הכנסה − עיצוב − עמלה; שכר בסיס בנפרד', () => {
-  eq(r1.profitability, 12000 - 100 - 700);
+t('רחל: רווחיות = הכנסה + חיובי עיצוב − עלות גרפיקה − עמלה; שכר בסיס בנפרד', () => {
+  eq(r1.profitability, 12000 + 100 - 60 - 700);
   eq(r1.base_salary, 6000); assert.strictEqual(r1.commission_only, false);
   eq(r1.pay_total, 6000 + 700);
 });
@@ -153,11 +157,15 @@ t('נתח המנהלת לא מנכה מהעמלה של הנציגות', () => {
   eq(noCut.agents[2].commission, r2.commission);
 });
 t('עיצוב לפי הכפתור במודעה: רק מודעות שסומנו ולא מבוטלות', () => {
-  eq(oct.totals.graphics, 50 * 3); // 1, 3, 8 — לא 9 (מבוטלת)
+  eq(oct.totals.design_revenue, 50 * 3); // 1, 3, 8 — לא 9 (מבוטלת)
+  eq(oct.totals.graphics, 30 * 3);
 });
-t('נשמר הסכום שסומן במודעה (תעריף שהשתנה לא משנה עבר)', () => {
+t('חיוב העיצוב = הסכום שנשמר במודעה (תעריף שהשתנה לא משנה עבר)', () => {
   const a2 = ads.map(a => a.id === 1 ? { ...a, design_fee_net: 40 } : a);
-  eq(E.pfComputeMonth('2026-10', { ...base, ads: a2, recognition: recOct }).agents[1].graphics, 90);
+  eq(E.pfComputeMonth('2026-10', { ...base, ads: a2, recognition: recOct }).agents[1].design_revenue, 90);
+});
+t('בלי הגדרת עלות גרפיקה — העלות כגובה החיוב', () => {
+  eq(E.pfComputeMonth('2026-10', { ...base, graphicsCostNet: null, recognition: recOct }).agents[1].graphics, 100);
 });
 t('מודעה בלי סוכן וללקוח אין סוכן → על שם המנהל (סוכן ברירת מחדל)', () => {
   eq(oct.agents[4].revenue, 700);
@@ -216,8 +224,10 @@ t('רווח והפסד: השכבות נסגרות בדיוק ומתאימות ל
   // הכנסה כוללת: רחל 12,000 + לאה 5,500 + שרה 1,000 + מנהל 700
   eq(p.revenue, 19200);
   eq(p.revenue, Object.values(oct.agents).reduce((s, r) => s + r.revenue, 0));
-  eq(p.graphics, 150 + 100);
-  eq(p.gross, 19200 - 250);
+  eq(p.design_revenue, 150);
+  eq(p.income, 19350);
+  eq(p.graphics, 90 + 100);
+  eq(p.gross, 19350 - 190);
   eq(p.after_issue, p.gross - 3100);
   eq(p.commissions, 700 + 575 + 40 + 1750);
   eq(p.after_commissions, p.after_issue - p.commissions);
@@ -227,8 +237,8 @@ t('רווח והפסד: השכבות נסגרות בדיוק ומתאימות ל
   // שכר כולל במסך השכר = עמלות + נתח + בסיס + בונוס בדוח
   eq(oct.totals.pay_total, p.commissions + p.salaries);
 });
-t('רווחיות עובדים מצטברת = הכנסה − עיצוב לפי מודעה − עמלות (בלי נתח מנהלת ובסיס)', () => {
-  eq(oct.totals.profitability, oct.totals.revenue - oct.totals.graphics - oct.totals.commission);
+t('רווחיות עובדים מצטברת = הכנסה + חיובי עיצוב − עלות גרפיקה − עמלות (בלי נתח מנהלת ובסיס)', () => {
+  eq(oct.totals.profitability, oct.totals.revenue + oct.totals.design_revenue - oct.totals.graphics - oct.totals.commission);
 });
 
 console.log(`\n${passed} בדיקות עברו`);
