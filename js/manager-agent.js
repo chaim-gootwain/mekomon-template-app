@@ -263,6 +263,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_send_clips') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_clips' };
       await mgrProposeSendClips(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_add_customer') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_customer' };
+      await mgrProposeAddCustomer(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_debt_reminders') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'debt_reminders' };
       await mgrProposeReminders(r.data.proposal);
@@ -569,6 +572,75 @@ async function mgrRemFinish() {
   const id = s.toolUseId;
   _mgrRem = null;
   await mgrResolveProposal(id, outcome.trim());
+}
+
+/* ---------- פתיחת כרטיס לקוח חדש (כרטיס אישור) ---------- */
+let _mgrNewCust = null;
+async function mgrProposeAddCustomer(p) {
+  const inp = p.input || {};
+  const name = String(inp.name || '').trim();
+  if (!name) {
+    icSayErr('חסר שם לקוח.');
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: חסר שם לקוח.');
+    return;
+  }
+  _mgrNewCust = { toolUseId: p.tool_use_id };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrCustCard';
+  card.innerHTML = `
+    <div class="hd">➕ כרטיס לקוח חדש — לאישור</div>
+    <div class="grid2">
+      <div class="field"><label>שם *</label><input id="mgrCustName" type="text" value="${esc(name)}"></div>
+      <div class="field"><label>טלפון</label><input id="mgrCustPhone" type="text" dir="ltr" value="${esc(String(inp.phone || ''))}"></div>
+      <div class="field"><label>מייל</label><input id="mgrCustEmail" type="text" dir="ltr" value="${esc(String(inp.email || ''))}"></div>
+      <div class="field"><label>ח.פ / עוסק</label><input id="mgrCustBiz" type="text" dir="ltr" value="${esc(String(inp.business_id || ''))}"></div>
+    </div>
+    <div class="muted" style="font-size:.78rem">את שאר הפרטים (סוכן, תגיות, אנשי קשר) אפשר להשלים בכרטיס הלקוח המלא.</div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrCustBtn" onclick="mgrAddCustomerApprove()">✅ פתח כרטיס</button>
+      <button class="btn btn-ghost" onclick="mgrAddCustomerCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrAddCustomerApprove() {
+  const s = _mgrNewCust;
+  if (!s) return;
+  const name = ((document.getElementById('mgrCustName') || {}).value || '').trim();
+  if (!name) { toast('חסר שם לקוח', true); return; }
+  const rec = { name };
+  const phone = ((document.getElementById('mgrCustPhone') || {}).value || '').trim();
+  const email = ((document.getElementById('mgrCustEmail') || {}).value || '').trim();
+  const biz = ((document.getElementById('mgrCustBiz') || {}).value || '').trim();
+  if (phone) rec.phone = phone;
+  if (email) rec.email = email;
+  if (biz) rec.business_id = biz;
+  const btn = document.getElementById('mgrCustBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'פותח...'; }
+  const { data, error } = await db.from('customers').insert(rec).select('id,name').single();
+  if (error || !data) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ פתח כרטיס'; }
+    toast('שגיאה בפתיחת הכרטיס: ' + (error && error.message || ''), true);
+    return;
+  }
+  try { cache.customers && cache.customers.push({ id: data.id, name: data.name, phone: rec.phone || null }); } catch (e) { }
+  try { await addInteraction('customer', data.id, '➕ כרטיס הלקוח נפתח מסוכן המקומון'); } catch (e) { }
+  document.getElementById('mgrCustCard')?.remove();
+  icSayOk('✅ נפתח כרטיס לקוח חדש: <b>' + esc(data.name) + '</b>' + (phone ? ' · ' + esc(phone) : ''));
+  const id = s.toolUseId;
+  _mgrNewCust = null;
+  await mgrResolveProposal(id, 'נפתח כרטיס לקוח חדש: "' + data.name + '" (customer_id=' + data.id + ').' +
+    (email ? ' מייל: ' + email + '.' : '') + ' אפשר להמשיך איתו.');
+}
+async function mgrAddCustomerCancel() {
+  const s = _mgrNewCust;
+  if (!s) return;
+  document.getElementById('mgrCustCard')?.remove();
+  icSay('בוטל — לא נפתח כרטיס.');
+  const id = s.toolUseId;
+  _mgrNewCust = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — לא נפתח כרטיס לקוח.');
 }
 
 /* ---------- הוספת משימה על כרטיס לקוח (כרטיס אישור) ---------- */

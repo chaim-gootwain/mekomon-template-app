@@ -44,6 +44,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - לעולם אל תמציא נתונים. כל מספר שאתה מציג חייב להגיע מכלי. אם אין לך נתון — אמור זאת.
 - זיהוי לקוח: לפני כל propose_* חובה לקרוא ל-search_customers. התאמה יחידה ברורה — המשך. כמה מועמדים דומים — הצג אותם ושאל למי הכוונה. לא נמצא — שאל את המנהל; ב-propose_issue_document מותר להמשיך עם שם חופשי (בלי customer_id) רק אחרי שהמנהל אישר שזה לקוח חדש/חד-פעמי. propose_pay_existing ו-propose_new_deal מחייבים customer_id של לקוח קיים.
 - אל תנחש. כשמשהו חסר או דו-משמעי (סוג מסמך, מחיר, אמצעי תשלום לקבלה) — שאל שאלה אחת קצרה וממוקדת.
+- לקוח חדש: כש-search_customers לא מוצא והמנהל רוצה להוסיף (או ביקש בפירוש "תפתח לקוח") → propose_add_customer. שם חובה; טלפון/מייל/ח.פ רק אם ננקבו — אל תמציא. אחרי האישור תקבל את מזהה הלקוח החדש ותוכל להמשיך איתו (עסקה, מסמך, משימה) באותה שיחה.
 
 מוסכמות הניסוח של המנהל:
 - סוגי מסמכים: "ח. מס" / "חשבונית מס" → tax_invoice · "מס קבלה" → tax_invoice_receipt · "קבלה" → receipt · "זיכוי" → credit_invoice · "עסקה" / "חשבון עסקה" → proforma.
@@ -162,6 +163,20 @@ const TOOLS = [
         issue_to: { type: 'number', description: 'מספר גיליון סיום (אופציונלי)' }
       },
       required: ['customer_id', 'customer_name']
+    }
+  },
+  {
+    name: 'propose_add_customer',
+    description: 'הצעת פתיחת כרטיס לקוח חדש. פותח כרטיס אישור קטן (שם, טלפון, מייל, ח.פ — ניתנים לעריכה); אחרי האישור תקבל את מזהה הלקוח החדש להמשך העבודה. השתמש רק אחרי ש-search_customers לא מצא, או כשהמנהל ביקש בפירוש.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'שם הלקוח/העסק' },
+        phone: { type: 'string', description: 'טלפון — רק אם המנהל ציין' },
+        email: { type: 'string', description: 'מייל — רק אם המנהל ציין' },
+        business_id: { type: 'string', description: 'ח.פ / עוסק מורשה — רק אם המנהל ציין' }
+      },
+      required: ['name']
     }
   },
   {
