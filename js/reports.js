@@ -25,7 +25,8 @@ const reports = [
 { id: 'weekly', title: '🗓️ דוח שבועי תפעולי', desc: 'מה נסגר, מה נכנס ומה תקוע — לשבוע שנבחר', roles: ['admin', 'sales'] },
 { id: 'agencies', title: '🏢 עמלות סוכנויות', desc: 'מחזור חודשי פר סוכנות × אחוז העמלה — תצוגה בלבד', roles: ['admin'] },
 { id: 'profit', title: '📊 רווחיות', desc: 'פר גיליון / סוכן / לקוח — מי מכניס, מה רווחי, מי שוחק', roles: ['admin'] },
-].filter(r => r.roles.includes(role));
+{ id: 'pnlx', title: '🧮 רווח והפסד מדורג', desc: 'הכנסה מוכרת → עיצוב → רווח גולמי → דפוס/הפצה → עמלות → שכר → רווח נקי', roles: ['admin'], when: () => typeof pfOn === 'function' && pfOn() },
+].filter(r => r.roles.includes(role) && (!r.when || r.when()));
 
 el.innerHTML = `
 <div class="page-head"><h2>דו״חות</h2></div>
