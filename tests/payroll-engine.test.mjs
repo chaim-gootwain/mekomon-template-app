@@ -241,4 +241,38 @@ t('רווחיות עובדים מצטברת = הכנסה + חיובי עיצוב
   eq(oct.totals.profitability, oct.totals.revenue + oct.totals.design_revenue - oct.totals.graphics - oct.totals.commission);
 });
 
+/* ---------- עלות גרפיקה לפי שכר שעתי ---------- */
+t('שעתי: עלות החודש מתחלקת שווה בין מודעות שסומנו 🎨 ומודעות שהגרפיקאית עיצבה', () => {
+  // 20 שעות × ₪60 = ₪1,200; מודעות: 1, 3, 8 (סומנו) + 5 (עיצבה, לא חויב — תיקון קל) = 4 → ₪300 למודעה
+  const m = E.pfComputeMonth('2026-10', { ...base, recognition: recOct, graphicsHours: { '2026-10': 1200 }, graphicsWorkedAdIds: [5] });
+  eq(m.agents[1].graphics, 600); assert.strictEqual(m.agents[1].designed_count, 2);
+  eq(m.agents[2].graphics, 300);
+  eq(m.agents[3].graphics, 300);
+  eq(m.totals.graphics, 1200);
+  eq(m.agents[1].design_revenue, 100); // החיוב ללקוח לא משתנה
+  eq(m.agents[1].profitability, 12000 + 100 - 600 - 700);
+});
+t('שעתי: בלי מודעות מעוצבות — העלות נשארת בדוח כלא משויכת', () => {
+  const a2 = ads.map(a => ({ ...a, design_fee_net: null }));
+  const m = E.pfComputeMonth('2026-10', { ...base, ads: a2, recognition: recOct, graphicsHours: { '2026-10': 900 } });
+  eq(m.totals.graphics, 0); eq(m.totals.graphics_unallocated, 900);
+  eq(E.pfPnl(m, null).graphics, 900);
+});
+t('שעתי: עלויות גיליון בקטגוריית גרפיקה לא נספרות שוב', () => {
+  const m = E.pfComputeMonth('2026-10', { ...base, recognition: recOct, graphicsHours: { '2026-10': 1200 } });
+  const p = E.pfPnl(m, { issue_print: 0, issue_graphics: 500, other: 0, payroll_synced: 0, payroll_manual: 0 });
+  eq(p.graphics, 1200); eq(p.graphics_issue_info, 500);
+});
+t('מסך הסוכן: עלות למודעה שנשמרה בסגירה (בלי שעות ושכר) נותנת אותה תוצאה', () => {
+  const full = E.pfComputeMonth('2026-10', { ...base, recognition: recOct, graphicsHours: { '2026-10': 1200 }, graphicsWorkedAdIds: [5] });
+  eq(full.totals.graphics_cost_per_ad, 300);
+  const snap = E.pfComputeMonth('2026-10', { ...base, recognition: recOct, graphicsPerAd: { '2026-10': 300 }, graphicsWorkedAdIds: [5] });
+  eq(snap.agents[1].graphics, full.agents[1].graphics);
+  eq(snap.agents[1].profitability, full.agents[1].profitability);
+});
+t('חודש בלי נתוני שעות — עלות קבועה למודעה שסומנה (כמו קודם)', () => {
+  const m = E.pfComputeMonth('2026-10', { ...base, recognition: recOct, graphicsHours: { '2026-09': 999 } });
+  eq(m.totals.graphics, 90);
+});
+
 console.log(`\n${passed} בדיקות עברו`);

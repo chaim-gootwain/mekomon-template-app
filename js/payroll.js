@@ -67,6 +67,7 @@ async function pfLoad(months, opts = {}) {
     customers: cache.customers || [], defaultAgentId: pfDefaultAgentId(), closes: closes || [],
     graphicsCostNet: pfGraphicsCost(),
   };
+  await _pfLoadGraphics(data, months, admin);
   if (opts.expenses && admin) {
     const sorted = [...months].sort();
     const [exps, cats] = await Promise.all([
@@ -81,6 +82,58 @@ async function pfLoad(months, opts = {}) {
   return data;
 }
 
+/* עלות הגרפיקה לפי שכר שעתי:
+   • מודעות "שעברו גרפיקה" = קובץ עיצוב שהועלה ע"י משתמש בתפקיד גרפיקה
+     (בנוסף למודעות שסומנו 🎨 — זה נעשה במנוע).
+   • מנהל: שעות שעון הנוכחות של הגרפיקאיות בחודש × השכר השעתי (staff_hourly_rate).
+   • סוכן: לא רואה שעות ושכר — מקבל את העלות למודעה שנשמרה בסגירת החודש. */
+async function _pfLoadGraphics(data, months, admin) {
+  const gfxIds = new Set((cache.profiles || []).filter(p => p.role === 'graphics').map(p => p.id));
+  const mSet = new Set(months);
+  const issMonth = {}; data.issues.forEach(i => { issMonth[i.id] = pfIssueMonth(i); });
+  const inMonths = data.ads.filter(a => mSet.has(issMonth[a.issue_id])).map(a => a.id);
+  if (gfxIds.size && inMonths.length) {
+    const files = await runAllIn((f, t) => db.from('ad_files').select('ad_id,uploaded_by').eq('kind', 'design').order('id').range(f, t), 'ad_id', inMonths, 'קבצי עיצוב');
+    data.graphicsWorkedAdIds = [...new Set(files.filter(f => gfxIds.has(f.uploaded_by)).map(f => f.ad_id))];
+  }
+  if (!admin) {
+    data.graphicsPerAd = {};
+    (data.closes || []).forEach(c => { if (c.graphics_cost_per_ad != null) data.graphicsPerAd[c.month] = Number(c.graphics_cost_per_ad); });
+    return;
+  }
+  const rates = (await db.from('staff_hourly_rate').select('profile_id,hourly_rate')).data || [];
+  const rateOf = {}; rates.forEach(r => { if (Number(r.hourly_rate) > 0) rateOf[r.profile_id] = Number(r.hourly_rate); });
+  const ids = Object.keys(rateOf);
+  if (!ids.length) return; // אין שכר שעתי מוגדר — עלות קבועה למודעה
+  const sorted = [...months].sort();
+  const [fy, fm] = sorted[0].split('-').map(Number), [ty, tm] = sorted[sorted.length - 1].split('-').map(Number);
+  const rows = await runAll((f, t) => db.from('attendance').select('profile_id,clock_in,clock_out').in('profile_id', ids)
+    .gte('clock_in', new Date(fy, fm - 1, 1).toISOString()).lt('clock_in', new Date(ty, tm, 1).toISOString()).order('id').range(f, t), 'נוכחות');
+  const hours = {}, pool = {};
+  rows.forEach(r => {
+    if (!r.clock_out) return;
+    const m = localDay(r.clock_in).slice(0, 7);
+    const h = (new Date(r.clock_out) - new Date(r.clock_in)) / 3600000;
+    if (!(h > 0)) return;
+    hours[m] = (hours[m] || 0) + h;
+    pool[m] = (pool[m] || 0) + h * rateOf[r.profile_id];
+  });
+  data.graphicsHours = pool;      // רק חודשים עם שעות בפועל — חודש בלי שעות נופל לעלות הקבועה
+  data.graphicsHoursCount = hours;
+}
+
+/* שורת סיכום עלות הגרפיקה לחודש (מנהל) */
+function _pfGfxSummary(calc, data, month) {
+  const T = calc.totals;
+  const h = (data.graphicsHoursCount || {})[month];
+  if (h != null && T.graphics_pool != null) {
+    return `<div class="card card-pad" style="font-size:.86rem">🎨 עלות גרפיקה החודש: <b>${Math.round(h * 10) / 10} שעות</b> בשעון הנוכחות × שכר שעתי = <b>${pfMoney(T.graphics_pool)}</b> ·
+${T.graphics_ads_count ? `${T.graphics_ads_count} מודעות עברו גרפיקה → <b>${pfMoney(T.graphics_cost_per_ad)} למודעה</b>` : '<span style="color:var(--danger)">אין מודעות שסומנו 🎨 או עוצבו ע"י הגרפיקה — העלות לא משויכת לסוכן</span>'}
+<div class="muted" style="font-size:.76rem">העלות למודעה נשמרת באישור הסגירה — כך הסוכנים רואים את עלות המודעות שלהם בלי לראות שעות ושכר.</div></div>`;
+  }
+  return `<div class="card card-pad muted" style="font-size:.82rem">🎨 עלות גרפיקה: ${pfGraphicsCost() != null ? pfMoney(pfGraphicsCost()) : 'כגובה החיוב'} למודעה שסומנה 🎨 — לחישוב לפי שעות הגרפיקאית מגדירים שכר שעתי בהגדרות.</div>`;
+}
+
 function pfClosedInfo(data, month) {
   const c = (data.closes || []).find(x => x.month === month);
   if (!c) return null;
@@ -93,6 +146,7 @@ function pfClosedInfo(data, month) {
    ====================================================================== */
 let _pfMcMonth = null;
 let _pfMcRows = [];
+let _pfMcCalc = null;
 
 Pages.monthclose = {
   title: 'סגירת חודש',
@@ -112,7 +166,7 @@ Pages.monthclose = {
     catch (e) { document.getElementById('pfMcBody').innerHTML = `<div class="card card-pad"><p class="empty">${esc(e.message)}</p></div>`; return; }
     const month = _pfMcMonth;
     _pfMcRows = pfMonthCloseRows(month, data);
-    const calc = pfComputeMonth(month, data);
+    const calc = _pfMcCalc = pfComputeMonth(month, data);
     const closed = pfClosedInfo(data, month);
     // מודעות בודדות של החודש לפי נציג — לתצוגה בלבד
     const issMonth = {}; data.issues.forEach(i => { issMonth[i.id] = pfIssueMonth(i); });
@@ -144,6 +198,7 @@ Pages.monthclose = {
     let html = closed
       ? `<div class="card card-pad" style="background:#ecfdf5">✓ החודש נסגר ${heDateTime(closed.at)}${closed.by ? ' ע"י ' + esc(closed.by) : ''}. אפשר לשנות ולאשר שוב — הרישום יתעדכן.</div>`
       : `<div class="card card-pad" style="background:#fffbeb">החודש עדיין לא נסגר — עסקאות רב-חודשיות לא נספרות בשכר ובדוחות עד האישור.</div>`;
+    html += _pfGfxSummary(calc, data, month);
     if (!agentIds.length) html += '<div class="card card-pad"><p class="empty">אין פעילות בחודש זה</p></div>';
     agentIds.forEach(ag => {
       const deals = _pfMcRows.map((r, i) => ({ r, i })).filter(x => x.r.agent_id === ag);
@@ -228,7 +283,8 @@ async function pfMcConfirm() {
     confirmed_by: profile.id, confirmed_at: now,
   }));
   if (rows.length) await run(db.from('revenue_recognition').upsert(rows, { onConflict: 'contract_id,month' }), 'שמירת ההכרה');
-  await run(db.from('revenue_month_close').upsert({ month, closed_by: profile.id, closed_at: now }, { onConflict: 'month' }), 'סימון סגירה');
+  const snap = _pfMcCalc && _pfMcCalc.totals.graphics_cost_per_ad != null ? _pfMcCalc.totals.graphics_cost_per_ad : null;
+  await run(db.from('revenue_month_close').upsert({ month, closed_by: profile.id, closed_at: now, graphics_cost_per_ad: snap }, { onConflict: 'month' }), 'סימון סגירה');
   toast('✓ החודש נסגר — ' + pfMoney(total) + ' הוכרו');
   openPage('monthclose');
 }
@@ -383,7 +439,7 @@ ${admin ? `<select onchange="_pfEmpAgent=Number(this.value); openPage('mypay')">
     const prog = r.target ? Math.min(100, Math.round(r.revenue / r.target * 100)) : null;
     document.getElementById('pfEmpBody').innerHTML = `
 <div class="card card-pad"><b>${esc(pfAgentName(agentId))} — ${cur}</b>
-${now.closed ? '' : '<p class="muted" style="font-size:.8rem;margin:4px 0 0">עסקאות רב-חודשיות נכנסות אחרי סגירת החודש ע"י המנהל — עד אז מוצגות רק מודעות בודדות.</p>'}
+${now.closed ? '' : '<p class="muted" style="font-size:.8rem;margin:4px 0 0">עסקאות רב-חודשיות ועלות הגרפיקה הסופית נכנסות אחרי סגירת החודש ע"י המנהל — עד אז מוצגות מודעות בודדות ועלות עיצוב משוערת.</p>'}
 </div>
 <div class="stats">
 ${stat(pfMoney(r.revenue), 'כמה הכנסתי (נטו)')}
@@ -442,6 +498,7 @@ async function report_pnlx() {
     ['graphics', '− עלות עיצוב / גרפיקה', 'neg'],
     ['graphics_ads', '· לפי מודעה מעוצבת', 'minor'],
     ['graphics_issue', '· עלויות גיליון בקטגוריית "גרפיקה"', 'minor'],
+    ['graphics_issue_info', '· לידיעה: עלויות גיליון "גרפיקה" שלא נוכו (העלות לפי שעות)', 'minor'],
     ['gross', '= רווח גולמי', 'sum'],
     ['issue_costs', '− דפוס, הפצה ועלויות גיליון', 'neg'],
     ['commission', '− עמלות סוכנים', 'neg'],
@@ -479,7 +536,7 @@ ${agRows.map(([id, a]) => `<tr><td><b>${esc(pfAgentName(Number(id)))}</b></td><t
 <td><b style="color:${a.profitability >= 0 ? 'var(--ok)' : 'var(--danger)'}">${pfMoney(a.profitability)}</b></td><td>${a.manager_cut ? pfMoney(a.manager_cut) : '—'}</td><td>${a.base_salary ? pfMoney(a.base_salary) : '—'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">אין נתונים</td></tr>'}
 </tbody></table>
 <p class="muted" style="font-size:.78rem;margin-top:8px">הכל נטו, לפני מע"מ. הכנסה = מודעות בודדות לפי חודש הסגירה לדפוס של הגיליון + עסקאות רב-חודשיות לפי מה שאושר בסגירת החודש.
-חיובי עיצוב = מה שחויב ללקוחות בכפתור "🎨 עיצוב" במודעה (לא נכנס לבסיס העמלה). עלות העיצוב = ${pfGraphicsCost() != null ? pfMoney(pfGraphicsCost()) : 'כגובה החיוב'} למודעה מעוצבת + עלויות גיליון שתויגו "גרפיקה". עלויות גיליון והוצאות כלליות לפי חודש ההוצאה (#net:).
+חיובי עיצוב = מה שחויב ללקוחות בכפתור "🎨 עיצוב" במודעה (לא נכנס לבסיס העמלה). עלות העיצוב = שעות הגרפיקאית בשעון הנוכחות × השכר השעתי, מחולקת שווה בין המודעות שעברו גרפיקה בחודש (סומנו 🎨 או שהגרפיקאית העלתה להן עיצוב). חודש בלי שעות: ${pfGraphicsCost() != null ? pfMoney(pfGraphicsCost()) : 'כגובה החיוב'} למודעה שסומנה 🎨 + עלויות גיליון שתויגו "גרפיקה". עלויות גיליון והוצאות כלליות לפי חודש ההוצאה (#net:).
 שכר ועמלות מחושבים רק מהגדרות התגמול: שורות שסונכרנו ממסך השכר וכל הוצאה בקטגוריית שכר/עמלות מוחרגות מההוצאות הכלליות, כדי שלא ייספרו פעמיים.
 שכר בסיס הוא עלות קבועה — מוצג בדוח ובמסך השכר, ולא בתוך "רווחיות עובד".</p>`;
   const csvRows = LINES.map(([k, label]) => [label, ...per.map(x => Math.round(Number(x.p[k]) || 0)), ...(multi ? [Math.round(tot(k))] : [])]);
@@ -495,6 +552,29 @@ async function pfToggleSave(on) {
   cache.settings.profitability_enabled = on ? '1' : '0';
   pfNavSync();
   toast(on ? 'מודול הרווחיות הופעל' : 'מודול הרווחיות כובה');
+}
+
+async function pfRatesLoadInto() {
+  const box = document.getElementById('pfRateBox'); if (!box) return;
+  const r = await db.from('staff_hourly_rate').select('*');
+  if (r.error) { box.innerHTML = `<p class="muted">${esc(_PF_MIGRATION_MSG)}</p>`; return; }
+  const rateOf = {}; (r.data || []).forEach(x => { rateOf[x.profile_id] = x.hourly_rate; });
+  const gfx = (cache.profiles || []).filter(p => p.role === 'graphics');
+  box.innerHTML = gfx.length ? `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+${gfx.map(p => `<div class="field" style="margin:0"><label>${esc(p.full_name || 'גרפיקה')} — ₪ לשעה</label><input type="number" min="0" step="0.5" class="pfRate" data-profile="${esc(p.id)}" value="${rateOf[p.id] != null ? esc(String(Number(rateOf[p.id]))) : ''}" style="width:110px;text-align:left"></div>`).join('')}
+<button class="btn btn-sm" onclick="pfRatesSave()">💾 שמירת שכר שעתי</button></div>`
+    : '<p class="muted" style="font-size:.8rem">אין משתמש בתפקיד "גרפיקה" — מגדירים במסך המשתמשים.</p>';
+}
+
+async function pfRatesSave() {
+  if (profile.role !== 'admin') { toast('למנהל בלבד', true); return; }
+  const recs = [...document.querySelectorAll('.pfRate')].filter(i => i.value.trim() !== '')
+    .map(i => ({ profile_id: i.dataset.profile, hourly_rate: Number(i.value), updated_by: profile.id, updated_at: new Date().toISOString() }));
+  if (recs.some(r => !(r.hourly_rate >= 0))) { toast('שכר שעתי לא תקין', true); return; }
+  if (!recs.length) { toast('לא הוזן שכר שעתי', true); return; }
+  if (!confirm('לשמור שכר שעתי?\n\n' + recs.map(r => `${((cache.profiles || []).find(p => p.id === r.profile_id) || {}).full_name || ''}: ${pfMoney(r.hourly_rate)} לשעה`).join('\n'))) return;
+  await run(db.from('staff_hourly_rate').upsert(recs, { onConflict: 'profile_id' }), 'שמירת שכר שעתי');
+  toast('✓ השכר השעתי נשמר');
 }
 
 async function pfCostsSave() {
@@ -619,7 +699,7 @@ async function pfCutSave(existingId) {
 </label>
 <b style="display:block;margin-top:14px">עלויות (נטו, לפני מע"מ)</b>
 <div class="grid2" style="margin-top:6px">
-<div class="field"><label>עלות גרפיקה לעסק למודעה מעוצבת (₪ נטו; ריק = כמו החיוב ללקוח)</label><input id="pfCost" type="number" min="0" step="1" value="${esc(st.graphics_cost_net || '')}" placeholder="50" dir="ltr"></div>
+<div class="field"><label>עלות גרפיקה למודעה כשאין שעות בשעון הנוכחות (₪ נטו; ריק = כמו החיוב ללקוח)</label><input id="pfCost" type="number" min="0" step="1" value="${esc(st.graphics_cost_net || '')}" placeholder="50" dir="ltr"></div>
 <div class="field"><label>חיוב עיצוב ללקוח (₪ נטו + מע"מ) — ערך הכפתור "🎨 עיצוב" בכרטיס המודעה</label><input id="pfFee" type="number" min="0" step="1" value="${esc(st.graphics_fee_net != null ? st.graphics_fee_net : '50')}" dir="ltr"></div>
 <div class="field"><label>עלות הפצה לגיליון (₪) — ברירת מחדל במסך עלויות הגיליון</label><input id="pfDist" type="number" min="0" step="1" value="${esc(st.distribution_cost || '')}" placeholder="500" dir="ltr"></div>
 </div>
@@ -629,12 +709,16 @@ async function pfCutSave(existingId) {
 <div class="field" style="margin-top:10px"><label>מודעה בלי סוכן (וללקוח אין סוכן) נזקפת ל:</label>
 <select id="pfDefAgent" onchange="pfDefAgentSave(this.value)"><option value="">אוטומטי — הסוכן המקושר למנהל${pfDefaultAgentId() ? ' (' + esc(pfAgentName(pfDefaultAgentId())) + ')' : ' (לא נמצא — בחרו)'}</option>
 ${(cache.agents || []).map(a => `<option value="${a.id}" ${String(st.default_agent_id || '') === String(a.id) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
+<b style="display:block;margin-top:14px">🎨 שכר שעתי — גרפיקה</b>
+<p class="muted" style="font-size:.76rem">עלות הגרפיקה בחודש = השעות בשעון הנוכחות × השכר השעתי (עלות מעביד), מחולקת בין המודעות שעברו גרפיקה. מנהל בלבד.</p>
+<div id="pfRateBox"><div class="muted">טוען...</div></div>
 <b style="display:block;margin-top:14px">תגמול עובדים</b>
 <div id="pfCompBox"><div class="muted">טוען...</div></div>`;
         const anchor = el.querySelector('#activityLog');
         const anchorCard = anchor ? anchor.closest('.card') : null;
         if (anchorCard) el.insertBefore(card, anchorCard); else el.appendChild(card);
         pfCompLoadInto();
+        pfRatesLoadInto();
       } catch (e) { console.error('profitability settings card', e); }
       return r;
     };
