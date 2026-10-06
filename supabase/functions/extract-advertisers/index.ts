@@ -51,7 +51,11 @@ function buildSystem(paperName: string, region: string, contentRules: string) {
 }
 
 הנחיות:
-- מודעה = כל שטח פרסומי נפרד בעמוד, כולל מודעות לוח קטנות. כל מודעה פריט נפרד.
+- מודעה = כל השטח הפרסומי של מפרסם אחד. פריט אחד לכל מפרסם בעמוד — לא לכל מוצר.
+  מודעה של חנות/עסק בנויה לעיתים מכמה קוביות, מבצעים, מוצרים ומחירים (למשל "מכנסיים 65 ש\"ח", "חולצות 100 ש\"ח") ולוגו/טלפון במקום אחר באותה מסגרת — כל אלה מודעה אחת של אותו עסק: החזר פריט אחד שה-bbox שלו מקיף את כל השטח, והפרטים (טלפון, כתובת) נלקחים מכל חלקי המודעה.
+  לעולם אל תחזיר מוצר, מבצע או כותרת כפריט נפרד. פריט נפרד רק כשמדובר בעסק אחר (שם אחר / טלפון אחר).
+- business_name = שם העסק או המותג (מהלוגו / החתימה / פרטי הקשר), לא שם של מוצר או מבצע. אם לא מופיע שם עסק — השתמש בשם החנות כפי שהוא מופיע; אם אין שום זהות לעסק — אל תחזיר את הפריט.
+- מודעות לוח קטנות (מודעה מילולית קצרה) — כל אחת פריט נפרד.
 - bbox: מיקום המודעה בעמוד כשברים בין 0 ל-1 ביחס לרוחב ולגובה התמונה (x0,y0 = פינה שמאלית-עליונה, x1,y1 = ימנית-תחתונה). היה מדויק — לפי זה חותכים את צילום המודעה. כלול את כל המודעה עם שוליים קטנים.
 - size: לפי החלק היחסי מהעמוד — full=עמוד שלם, half=חצי, third=שליש, quarter=רבע, eighth=שמינית, strip=רצועה/סטריפ, small=קטנה ממש, classified=מודעת לוח מילולית.
 - kind: business=מודעה של עסק/נותן שירות/מוסד שמוכר משהו (זה מה שאנחנו מחפשים) · editorial=כתבה/תוכן מערכתי · own_house=מודעה של העיתון עצמו (מנויים, "פרסמו אצלנו") · public_notice=הודעה רשמית של מועצה/רשות, מכרז, הודעת אבל/מזל טוב · personal=מודעה פרטית של אדם (דירה להשכרה, מכירת חפץ יד שנייה) · other.
@@ -98,6 +102,28 @@ function normalizeAd(a: any) {
     content_reason: str(a.content_reason),
     summary: str(a.summary)
   };
+}
+
+/* רשת ביטחון: אם המודל בכל זאת פיצל מפרסם אחד לכמה פריטים באותו עמוד —
+   מאחדים פריטים עם אותו טלפון או אותו שם (bbox מאוחד, הגודל הגדול, פרטים משלימים) */
+const SIZE_RANK: Record<string, number> = { full: 7, half: 6, third: 5, quarter: 4, eighth: 3, strip: 3, small: 2, classified: 1 };
+function nameKey(n: string) { return n.toLowerCase().replace(/['"׳״`.,\-–_()!?:]/g, ' ').replace(/\s+/g, ' ').trim(); }
+function mergeSameAdvertiser(ads: any[]) {
+  const out: any[] = [];
+  for (const a of ads) {
+    const ph = [a.phone, a.phone2].map((p: string | null) => String(p || '').replace(/\D/g, '').slice(-9)).filter((k: string) => k.length >= 7);
+    const nk = nameKey(a.business_name);
+    const hit = out.find((b) => b._nk === nk || ph.some((k: string) => b._ph.includes(k)));
+    if (!hit) { out.push({ ...a, _nk: nk, _ph: ph }); continue; }
+    for (const f of ['phone', 'phone2', 'email', 'website', 'field', 'location', 'service_area', 'summary']) if (!hit[f] && a[f]) hit[f] = a[f];
+    if ((SIZE_RANK[a.size] || 0) > (SIZE_RANK[hit.size] || 0)) hit.size = a.size;
+    if (a.bbox && hit.bbox) hit.bbox = [Math.min(hit.bbox[0], a.bbox[0]), Math.min(hit.bbox[1], a.bbox[1]), Math.max(hit.bbox[2], a.bbox[2]), Math.max(hit.bbox[3], a.bbox[3])];
+    else if (a.bbox) hit.bbox = a.bbox;
+    hit.is_online = hit.is_online || a.is_online;
+    hit.content_ok = hit.content_ok && a.content_ok;
+    hit._ph = [...new Set([...hit._ph, ...ph])];
+  }
+  return out.map(({ _nk, _ph, ...a }) => a);
 }
 
 Deno.serve(async (req: Request) => {
@@ -151,7 +177,7 @@ Deno.serve(async (req: Request) => {
     const content = (resp.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
     const raw = extractJson(content);
     if (!raw || !Array.isArray(raw.ads)) return json({ error: 'הזיהוי לא החזיר JSON תקין' }, 422);
-    const ads = raw.ads.map(normalizeAd).filter(Boolean);
+    const ads = mergeSameAdvertiser(raw.ads.map(normalizeAd).filter(Boolean));
     return json({ ok: true, ads, usage: resp.usage || null });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
