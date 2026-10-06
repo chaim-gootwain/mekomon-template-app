@@ -101,7 +101,7 @@ function psDrawScanBox() {
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px">
         <button class="btn" onclick="psStartScan()">🔍 סרוק ומצא מפרסמים</button>
-        <span class="muted" style="font-size:.85rem">כמה עמודים נסרקים במקביל — גיליון של 48 עמודים לוקח בערך 5–10 דקות. אפשר להמשיך לעבוד במסכים אחרים בזמן הסריקה.</span>
+        <span class="muted" style="font-size:.85rem">כמה עמודים נסרקים במקביל — הרשימה למטה מתמלאת תוך כדי. אפשר להמשיך לעבוד במסכים אחרים בזמן הסריקה.</span>
       </div>
     </div>`;
 }
@@ -172,7 +172,7 @@ async function psStartScan() {
     // כמה עמודים נשלחים לזיהוי במקביל. רק הקריאה ל-AI רצה במקביל —
     // השמירה וההשוואה מול לקוחות/לידים/מפרסמים עוברות בתור אחד (psSerial),
     // כדי שמפרסם שמופיע בשני עמודים לא ייכנס פעמיים.
-    const PAR = Math.max(1, Math.min(6, Number(cache.settings && cache.settings.prospect_parallel) || 4));
+    const PAR = Math.max(1, Math.min(8, Number(cache.settings && cache.settings.prospect_parallel) || 6));
     let next = 1;
     const worker = async () => {
       while (!_psScan.cancel && next <= doc.numPages) {
@@ -181,6 +181,7 @@ async function psStartScan() {
         catch (e) { console.error('prospects page', p, e); _psScan.stats.failedPages.push(p); }
         _psScan.done++;
         psDrawProgress();
+        psLiveRefresh();
       }
     };
     await Promise.all(Array.from({ length: Math.min(PAR, doc.numPages) }, worker));
@@ -253,14 +254,30 @@ async function psScanPage(doc, pageNum) {
 
   const ads = await psExtract(b64);
   lo.width = lo.height = 0; // שחרור זיכרון
+  // ההחלטות והשמירות — בתור אחד; העלאת צילומי המודעות — אחר כך, במקביל
+  const jobs = [];
   await psSerial(async () => {
     for (const ad of ads) {
       if (_psScan.cancel) break;
-      try { await psHandleAd(ad, hi, pageNum); }
+      try { await psHandleAd(ad, pageNum, jobs); }
       catch (e) { console.error('prospects ad', ad, e); }
     }
   });
+  await Promise.all(jobs.map(async j => {
+    try {
+      const path = await psUploadCrop(hi, j.bbox);
+      if (path) await db.from('prospects').update({ image_path: path }).eq('id', j.id);
+    } catch (e) { console.error('prospect crop', e); }
+  }));
   hi.width = hi.height = 0;
+}
+
+/* רענון הרשימה תוך כדי סריקה — לכל היותר פעם ב-8 שניות */
+let _psLiveAt = 0;
+function psLiveRefresh() {
+  if (currentPage !== 'prospects' || Date.now() - _psLiveAt < 8000) return;
+  _psLiveAt = Date.now();
+  psLoad().catch(() => { });
 }
 
 /* תור יחיד לשמירות — עמודים שהסתיימו במקביל נשמרים אחד אחרי השני */
@@ -319,7 +336,7 @@ async function psUploadCrop(hi, bbox) {
   return path;
 }
 
-async function psHandleAd(ad, hi, pageNum) {
+async function psHandleAd(ad, pageNum, jobs) {
   const s = _psScan, ix = s.ix;
   if (ad.kind !== 'business') return; // כתבות, מודעות העיתון, הודעות רשמיות ופרטיות — לא מפרסמים
 
@@ -349,8 +366,7 @@ async function psHandleAd(ad, hi, pageNum) {
     };
     if (sizeRank > (pro.size_rank || 0)) {
       upd.size_rank = sizeRank; upd.best_size = ad.size;
-      const img = await psUploadCrop(hi, ad.bbox);
-      if (img) upd.image_path = img;
+      if (ad.bbox) jobs.push({ id: pro.id, bbox: ad.bbox }); // צילום חדש — של המודעה הגדולה יותר
     }
     if (winback) { upd.winback = true; upd.customer_id = customerId; }
     await run(db.from('prospects').update(upd).eq('id', pro.id), 'שגיאה בעדכון מפרסם');
@@ -371,12 +387,13 @@ async function psHandleAd(ad, hi, pageNum) {
     location: ad.location, service_area: ad.service_area,
     is_online: !!ad.is_online, region_fit: ad.region_fit,
     best_size: ad.size, size_rank: sizeRank, appearances: 1, sources: [src],
-    image_path: await psUploadCrop(hi, ad.bbox),
+    image_path: null,
     summary: ad.summary, status, filter_reason: reason,
     winback, customer_id: customerId, created_by: profile.id,
   };
   const saved = await run(db.from('prospects').insert(rec).select('id,name,name_key,phone_key,size_rank,best_size,appearances,sources,image_path,status').single(), 'שגיאה בשמירת מפרסם');
   psIndexPro(ix, saved);
+  if (ad.bbox) jobs.push({ id: saved.id, bbox: ad.bbox });
   if (status === 'filtered') s.stats.filtered++;
   else { s.stats.added++; if (winback) s.stats.winback++; }
 }
