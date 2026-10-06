@@ -101,7 +101,7 @@ function psDrawScanBox() {
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px">
         <button class="btn" onclick="psStartScan()">🔍 סרוק ומצא מפרסמים</button>
-        <span class="muted" style="font-size:.85rem">כל עמוד נסרק בנפרד (כ-5–10 שניות לעמוד). אפשר להמשיך לעבוד במסכים אחרים בזמן הסריקה.</span>
+        <span class="muted" style="font-size:.85rem">כמה עמודים נסרקים במקביל — גיליון של 48 עמודים לוקח בערך 5–10 דקות. אפשר להמשיך לעבוד במסכים אחרים בזמן הסריקה.</span>
       </div>
     </div>`;
 }
@@ -114,7 +114,7 @@ function psDrawProgress() {
     <div class="card card-pad ps-upload">
       <b>${s.running ? '⏳ סורק' : '✓ הסריקה הסתיימה'}: ${esc(s.fileName)}</b>
       <div class="ps-bar"><div style="width:${pct}%"></div></div>
-      <div style="font-size:.9rem">עמוד ${s.done} מתוך ${s.total}
+      <div style="font-size:.9rem">${s.done} מתוך ${s.total} עמודים
         · <b>${s.stats.added}</b> מפרסמים חדשים
         · ${s.stats.merged} הופיעו כבר ברשימה
         · ${s.stats.winback} לקוחות עבר
@@ -163,18 +163,28 @@ async function psStartScan() {
     running: true, cancel: false, fileName: file.name, total: doc.numPages, done: 0,
     kind, pub, date,
     stats: { added: 0, merged: 0, winback: 0, filtered: 0, existing: [], failedPages: [] },
+    serial: Promise.resolve(),
   };
   psDrawProgress();
 
   try {
     await psLoadIndex();
-    for (let p = 1; p <= doc.numPages; p++) {
-      if (_psScan.cancel) break;
-      try { await psScanPage(doc, p); }
-      catch (e) { console.error('prospects page', p, e); _psScan.stats.failedPages.push(p); }
-      _psScan.done = p;
-      psDrawProgress();
-    }
+    // כמה עמודים נשלחים לזיהוי במקביל. רק הקריאה ל-AI רצה במקביל —
+    // השמירה וההשוואה מול לקוחות/לידים/מפרסמים עוברות בתור אחד (psSerial),
+    // כדי שמפרסם שמופיע בשני עמודים לא ייכנס פעמיים.
+    const PAR = Math.max(1, Math.min(6, Number(cache.settings && cache.settings.prospect_parallel) || 4));
+    let next = 1;
+    const worker = async () => {
+      while (!_psScan.cancel && next <= doc.numPages) {
+        const p = next++;
+        try { await psScanPage(doc, p); }
+        catch (e) { console.error('prospects page', p, e); _psScan.stats.failedPages.push(p); }
+        _psScan.done++;
+        psDrawProgress();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(PAR, doc.numPages) }, worker));
+    await _psScan.serial; // לסיים את השמירות שבתור
   } catch (e) {
     console.error(e); toast('שגיאה בסריקה: ' + (e.message || e), true);
   } finally {
@@ -242,11 +252,22 @@ async function psScanPage(doc, pageNum) {
   const b64 = lo.toDataURL('image/jpeg', 0.85).split(',')[1];
 
   const ads = await psExtract(b64);
-  for (const ad of ads) {
-    if (_psScan.cancel) break;
-    try { await psHandleAd(ad, hi, pageNum); }
-    catch (e) { console.error('prospects ad', ad, e); }
-  }
+  lo.width = lo.height = 0; // שחרור זיכרון
+  await psSerial(async () => {
+    for (const ad of ads) {
+      if (_psScan.cancel) break;
+      try { await psHandleAd(ad, hi, pageNum); }
+      catch (e) { console.error('prospects ad', ad, e); }
+    }
+  });
+  hi.width = hi.height = 0;
+}
+
+/* תור יחיד לשמירות — עמודים שהסתיימו במקביל נשמרים אחד אחרי השני */
+function psSerial(fn) {
+  const p = _psScan.serial.then(fn, fn);
+  _psScan.serial = p.catch(() => { });
+  return p;
 }
 
 async function psExtract(b64) {
@@ -256,13 +277,20 @@ async function psExtract(b64) {
     region: psRegion(),
     content_rules: (cache.settings && cache.settings.prospect_content_rules) || '',
   };
-  let lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { data, error } = await db.functions.invoke('extract-advertisers', { body });
+  let lastErr = 'הסריקה נעצרה';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (_psScan && _psScan.cancel) break;
+    let { data, error } = await db.functions.invoke('extract-advertisers', { body });
     if (!error && data && data.ok) return data.ads || [];
+    // בשגיאת HTTP ‏supabase-js מחזיר data=null — קוראים את גוף התשובה מ-error.context
+    if (error && !data && error.context && typeof error.context.json === 'function') {
+      try { data = await error.context.json(); } catch (e) { }
+    }
     lastErr = (data && data.error) || (error && error.message) || 'שגיאה';
     if (data && /ANTHROPIC_API_KEY|אין הרשאה|לא מזוהה/.test(data.error || '')) break;
-    await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    // עומס / מגבלת קצב (429, 529) — מחכים יותר; שגיאה אחרת — המתנה קצרה
+    const busy = /\((429|529|503)\)|overload|rate/i.test(lastErr + ' ' + ((data && data.detail) || ''));
+    await new Promise(r => setTimeout(r, (busy ? 6000 : 1500) * (attempt + 1) + Math.random() * 1000));
   }
   throw new Error(lastErr);
 }
