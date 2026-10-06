@@ -31,6 +31,10 @@ verify_jwt = true
 [functions.manager-agent]
 verify_jwt = true
 
+[functions.assistant]
+# העוזר האחוד — המוח. מזהה את המשתמש מה-JWT ופועל רק בהרשאותיו (בלי service_role).
+verify_jwt = true
+
 [functions.match-customer]
 verify_jwt = true
 
