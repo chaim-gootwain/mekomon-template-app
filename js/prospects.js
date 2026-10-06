@@ -377,7 +377,9 @@ async function psHandleAd(ad, pageNum, jobs) {
 
   // 3. מפרסם חדש
   let status = 'new', reason = null;
-  if (ad.content_ok === false) { status = 'filtered'; reason = 'תוכן לא מתאים' + (ad.content_reason ? ': ' + ad.content_reason : ''); }
+  const noContact = !ad.phone && !ad.phone2 && !ad.email && !ad.website;
+  if (noContact) { status = 'filtered'; reason = 'אין פרטי קשר במודעה (ייתכן חלק ממודעה גדולה)'; }
+  else if (ad.content_ok === false) { status = 'filtered'; reason = 'תוכן לא מתאים' + (ad.content_reason ? ': ' + ad.content_reason : ''); }
   else if (ad.region_fit === 'far' && !ad.is_online) { status = 'filtered'; reason = 'עסק מאזור רחוק' + (ad.location ? ' (' + ad.location + ')' : ''); }
 
   const rec = {
