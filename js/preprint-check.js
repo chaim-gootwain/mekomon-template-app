@@ -52,8 +52,10 @@ async function openPreprintCheck(issueId) {
     const ads = await run(db.from('ads').select('id,customer_id,title,page_number,status,price_item_id,is_system')
       .eq('issue_id', issueId).not('status', 'in', '("cancelled","rejected")'));
     const ids = (ads || []).map(a => a.id);
-    const files = ids.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind').in('ad_id', ids).eq('kind', 'design')) : [];
-    const design = {}; (files || []).forEach(f => { if (!design[f.ad_id]) design[f.ad_id] = f; });
+    // קובץ עיצוב סופי, ואם אין — קובץ שהלקוח שלח (source, כולל מה שבני מצרף מהמייל)
+    const files = ids.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind').in('ad_id', ids).in('kind', ['design', 'source'])) : [];
+    const design = {};
+    (files || []).forEach(f => { const cur = design[f.ad_id]; if (!cur || (cur.kind !== 'design' && f.kind === 'design')) design[f.ad_id] = f; });
     _ppState = { issue, ads: ads || [], design, data: _ppDataChecks(ads || [], design), pdf: null };
     _ppRender();
   } catch (e) { toast('שגיאה: ' + (e && e.message || e), true); }
@@ -72,7 +74,7 @@ function _ppDataChecks(ads, design) {
     } else if (!placed && a.status === 'approved') {
       out.warn.push({ ad: a, msg: 'אושרה ולא שובצה בעימוד — אמורה להיכנס לגיליון?' });
     } else if (placed && !a.is_system && !design[a.id]) {
-      out.warn.push({ ad: a, page: a.page_number, msg: `בעמוד ${a.page_number} — אין קובץ עיצוב סופי במערכת, אי אפשר לוודא שזו הגרסה הנכונה` });
+      out.warn.push({ ad: a, page: a.page_number, msg: `בעמוד ${a.page_number} — אין קובץ מודעה במערכת, אי אפשר לוודא שזו הגרסה הנכונה` });
     } else if (placed) out.ok++;
   });
   Object.keys(fill).forEach(p => {
