@@ -75,6 +75,8 @@ function invChatEnsureStyles() {
 /* ---------- קריאת Edge Function עם הודעת שגיאה קריאה ---------- */
 async function invChatFn(name, body) {
   try {
+    // מזהה עסקה של מסמך שבוטל — הפקה מחדש מקבלת מזהה חדש (invFreshTxn, invoices.js)
+    if (name === 'ezcount-doc' && body && body.transaction_id && typeof invFreshTxn === 'function') body.transaction_id = await invFreshTxn(body.transaction_id);
     const { data, error } = await db.functions.invoke(name, { body });
     if (error) {
       let msg = error.message || 'שגיאה';

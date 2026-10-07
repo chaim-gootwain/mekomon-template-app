@@ -561,9 +561,29 @@ async function markContractPrepaid(contractId) {
     .not('status', 'in', '("cancelled","rejected")').or('deal_stage.is.null,deal_stage.neq.paid');
 }
 
+/* מזהה עסקה אחרי ביטול: transaction_id קבוע (חודשי / גיליון / צ'אט) מגן מכפילות,
+   אבל אחרי שהמסמך בוטל — אותו מזהה מחזיר מ-EZcount את המסמך המבוטל במקום להפיק
+   חדש. לכן הפקה מחדש מקבלת סיומת R1, R2... (רק כשקיים מסמך מבוטל במזהה הקודם). */
+function invTxnVariant(txn, n) {
+  if (!n) return txn;
+  const suf = '-R' + n;
+  return (txn.length + suf.length <= 45 ? txn : txn.slice(0, 45 - suf.length)) + suf;
+}
+async function invFreshTxn(txn) {
+  if (!txn) return txn;
+  const cands = []; for (let n = 0; n <= 9; n++) cands.push(invTxnVariant(txn, n));
+  try {
+    const { data } = await db.from('documents').select('transaction_id,status').in('transaction_id', cands);
+    const cancelled = new Set((data || []).filter(d => d.status === 'cancelled').map(d => d.transaction_id));
+    // המזהה הראשון שאינו של מסמך מבוטל — אם יש בו מסמך תקף, השרת יחזיר אותו (הגנת הכפילות נשמרת)
+    return cands.find(c => !cancelled.has(c)) || txn;
+  } catch (e) { return txn; }
+}
+
 async function invCall(body) {
   toast('מפיק מסמך...');
   try {
+    if (body.transaction_id) body.transaction_id = await invFreshTxn(body.transaction_id);
     const { data, error } = await db.functions.invoke('ezcount-doc', { body });
     if (error) {
       let msg = 'שגיאה';
