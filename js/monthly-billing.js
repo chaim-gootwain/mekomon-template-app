@@ -120,7 +120,9 @@ async function _mbDoneSet(ym) {
   return done;
 }
 function _mbIsDone(done, ym, cid, cat) {
-  return _MB_KINDS.some(k => done.has(_mbTxn(ym, cid, k, cat)));
+  // כולל הפקה מחדש אחרי ביטול (סיומת R1..R9 — invTxnVariant)
+  const _v = (typeof invTxnVariant === 'function') ? invTxnVariant : (t => t);
+  return _MB_KINDS.some(k => { const b = _mbTxn(ym, cid, k, cat); for (let n = 0; n <= 9; n++) if (done.has(_v(b, n))) return true; return false; });
 }
 /* מודעה שטרם חויבה — "חויב" נקבע לפי המודעה עצמה ולא לפי "יש ללקוח חשבונית החודש":
    מודעה שנוספה אחרי ההפקה החודשית (או הוזנה מחדש על הלקוח) לא נבלעת ב"חויב ✓" */
