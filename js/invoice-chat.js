@@ -580,10 +580,10 @@ async function invChatApprove() {
   }
   if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
   if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
-  // הפקה על חוזה שלם (למשל מהתראת עסקת סוכן) — סימון "חויב מראש"
-  if (f._contract_id && typeof markContractPrepaid === 'function') { try { await markContractPrepaid(f._contract_id); } catch (e) { console.error('mark prepaid', e); } }
+  // סימון המודעות "חויבו" + הפקה על חוזה שלם (למשל מהתראת עסקת סוכן) — "חויב מראש".
+  // הקישור נשמר על המסמך, כדי שביטולו יחזיר את המודעות לשלב הקודם
   let icIssuesNote = '';
-  try { icIssuesNote = await invChatMarkIssueAds(f) || ''; } catch (e) { console.error('mark issue ads', e); }
+  try { icIssuesNote = await invChatMarkIssueAds(f, doc) || ''; } catch (e) { console.error('mark issue ads', e); }
   const t = invChatTotals(f.line_items, invChatVatPct());
   const shownTotal = f.doc_type === 'receipt'
     ? Math.round(f.line_items.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0) * 100) / 100
@@ -671,10 +671,14 @@ async function invChatLinkHint(f, reqId) {
     nums.join(', ') + '</b> (' + info.ads.length + ' מודעות' +
     (info.source === 'open' ? ' — הגיליונות הפתוחים של הלקוח, כי לא צוינו גיליונות במלל' : ' — לפי המלל') + ').</div>';
 }
-async function invChatMarkIssueAds(f) {
+async function invChatMarkIssueAds(f, doc) {
   const info = await _icLinkInfo(f);
-  if (!info || !info.ads.length) return '';
-  await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', info.ads.map(a => a.id)).or('deal_stage.is.null,deal_stage.neq.paid');
+  const contractId = f._contract_id || null;
+  if (!info || !info.ads.length) {
+    if (contractId) await invLinkAdsToDoc(doc, [], contractId);
+    return '';
+  }
+  await invLinkAdsToDoc(doc, info.ads.map(a => a.id), contractId);
   const nums = _icLinkNums(info);
   return '<div class="muted" style="font-size:.78rem;margin-top:4px">🔗 סומנו "חויבו" ' + info.ads.length + ' מודעות בגיליונות ' + nums.join(', ') +
     (info.source === 'open' ? ' (הגיליונות הפתוחים של הלקוח)' : '') + ' — יופיעו "חויב ✓" במסך חיוב הגיליון.</div>';
@@ -1108,7 +1112,8 @@ async function invChatNewDealApprove() {
       if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: docNum ? String(docNum) : null, icount_doc_url: pdfUrl || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
       if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
       // העסקה חויבה מראש: הדגל על החוזה + סימון המודעות שנוצרו כ"חויבו"
-      if (contractId && typeof markContractPrepaid === 'function') { try { await markContractPrepaid(contractId); } catch (e) { console.error('mark prepaid', e); } }
+      // (דרך invLinkAdsToDoc — הקישור נשמר על המסמך, וביטולו מחזיר את החוזה והמודעות)
+      if (contractId && typeof invLinkAdsToDoc === 'function') { try { await invLinkAdsToDoc(doc, [], contractId); } catch (e) { console.error('mark prepaid', e); } }
       done.push('חשבון עסקה' + (docNum ? ' #' + docNum : ''));
     }
     // רישום בציר הזמן של הלקוח (כמו בהזנת גיליון) — לא קריטי
