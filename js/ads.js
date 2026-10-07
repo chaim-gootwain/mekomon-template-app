@@ -275,7 +275,25 @@ openForm('עריכת מודעה', [
 { name: 'commission_pct', label: '% עמלה מיוחד', type: 'number' },
 { name: 'notes', label: 'הערות', type: 'textarea' },
 ], a, async (rec) => {
+// העברת מודעה מחויבת ללקוח אחר — סימון "חשבונית הופקה/שולם" שייך ללקוח הקודם,
+// ובלי בדיקה הוא נגרר בשקט ומסתיר את המודעה מחיוב הלקוח החדש
+if (rec.customer_id && Number(rec.customer_id) !== Number(a.customer_id) && ['invoiced', 'paid'].includes(a.deal_stage)) {
+  let docTxt = '';
+  try {
+    const { data: docs } = await db.from('documents').select('doc_number').eq('customer_id', a.customer_id)
+      .neq('status', 'cancelled').contains('ad_links', { ads: [{ id: a.id }] });
+    const nums = (docs || []).map(d => d.doc_number).filter(Boolean);
+    if (nums.length) docTxt = '\nהמודעה כלולה במסמך ' + nums.join(', ') + ' של הלקוח הקודם — ייתכן שצריך לבטל/לזכות אותו.';
+  } catch (e) { }
+  const stHe = a.deal_stage === 'paid' ? 'שולם' : 'חשבונית הופקה';
+  const reset = confirm('המודעה מסומנת "' + stHe + '" אצל ' + (nameOf('customers', a.customer_id) || 'הלקוח הקודם') + '.' + docTxt +
+    '\n\nלהעביר ל' + (nameOf('customers', rec.customer_id) || 'הלקוח החדש') + ' כ"סוכם" (לא מחויבת)?\n\nאישור = כן (מומלץ) · ביטול = להשאיר "' + stHe + '"');
+  if (reset) rec.deal_stage = 'agreed';
+}
 await run(db.from('ads').update(rec).eq('id', id));
+if (rec.customer_id && Number(rec.customer_id) !== Number(a.customer_id) && typeof addInteraction === 'function') {
+  try { await addInteraction('customer', Number(rec.customer_id), '↪️ הועברה מודעה מ' + (nameOf('customers', a.customer_id) || 'לקוח אחר') + (rec.deal_stage === 'agreed' && ['invoiced', 'paid'].includes(a.deal_stage) ? ' (סימון החיוב אופס ל"סוכם")' : '')); } catch (e) { }
+}
 try { await refreshCache(); } catch (e) { }
 toast('נשמר');
 if (typeof onDone === 'function') { try { await onDone(); } catch (e) { openPage('ads'); } }
