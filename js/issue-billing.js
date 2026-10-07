@@ -31,14 +31,15 @@ async function togglePagesOnlyInvoice(id) {
   toast(arr.includes(id) ? '🧾 פירוט מקוצר הופעל — בחשבונית יופיע "פרסום (עמודים)"' : 'פירוט מקוצר בוטל');
   if (typeof openCustomerCard === 'function') openCustomerCard(id);
 }
-/* שורה אחת לכל המודעות עם מחיר: "פרסום (3, 7, 12)" */
+/* שורה אחת לכל המודעות עם מחיר: "פרסום (עמודים 3, 7, 12)" */
 function ipoLine(ads) {
   const priced = ads.filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
   if (!priced.length) return [];
   const total = priced.reduce((s, a) => s + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)), 0);
   const pages = [...new Set(priced.map(a => a.page_number).filter(p => p != null && p !== ''))]
     .sort((x, y) => (Number(x) || 0) - (Number(y) || 0));
-  return [{ details: 'פרסום' + (pages.length ? ' (' + pages.join(', ') + ')' : ''), amount: 1, price: Math.round(total * 100) / 100 }];
+  const pg = pages.length ? ' (' + (pages.length > 1 ? 'עמודים ' : 'עמוד ') + pages.join(', ') + ')' : '';
+  return [{ details: 'פרסום' + pg, amount: 1, price: Math.round(total * 100) / 100 }];
 }
 
 function _ibItems(ads, issue) {
