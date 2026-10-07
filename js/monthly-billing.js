@@ -158,12 +158,12 @@ async function monthlyBillingRun(ym) {
       ? { regular: cAds.filter(a => ecCatOfAd(a.id) === 'regular'), social: cAds.filter(a => ecCatOfAd(a.id) === 'social') }
       : { regular: cAds };
     for (const gk of Object.keys(groups)) {
-      const lines = groups[gk].map(mkLine).filter(it => it.price > 0);
+      const lines = isPagesOnlyCustomer(cid) ? ipoLine(groups[gk]) : groups[gk].map(mkLine).filter(it => it.price > 0);
       if (!lines.length) continue;
       if (_mbIsDone(done, ym, cid, isCenter ? gk : '')) continue; // כבר חויב החודש
       const isSocial = gk === 'social';
       const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
-      const items = [{ details: header, amount: 1, price: 0 }, ...lines];
+      const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
       const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
       await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: docDate, transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: groups[gk].map(a => a.id) });
       count++;
@@ -306,7 +306,7 @@ async function monthlyBillingPreviewOne(ym, cid, gk) {
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
   const cAds = ctx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk));
-  const lines = cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
+  const lines = isPagesOnlyCustomer(cid) ? ipoLine(cAds) : cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const total = lines.reduce((s, it) => s + it.amount * it.price, 0);
   const isSocial = gk === 'social';
@@ -338,12 +338,12 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
   const cAds = _mbCtx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk));
-  const lines = cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
+  const lines = isPagesOnlyCustomer(cid) ? ipoLine(cAds) : cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const isSocial = gk === 'social';
   const docKind = _mbKind || (cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma');
   const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
-  const items = [{ details: header, amount: 1, price: 0 }, ...lines];
+  const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
   const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
   // בדיקה טרייה מול המסד ממש לפני ההפקה — גם בסוג מסמך אחר וגם ממכשיר אחר
   const _doneNow = await _mbDoneSet(ym);
@@ -398,6 +398,12 @@ async function issueBillingSetMonthly(issueId, customerId) {
             div.innerHTML = `<span><b>אופן חיוב:</b> ${on ? '<span class="pill amber">חודשי — חשבונית אחת בסוף החודש</span>' : 'לפי גיליון'}</span>
               <button id="mbToggle" class="btn btn-sm ${on ? 'btn-ghost' : ''}" onclick="toggleMonthlyBilling(${id})">${on ? 'בטל חיוב חודשי' : '🔁 הפוך לחיוב חודשי'}</button>`;
             modal.appendChild(div);
+            const po = isPagesOnlyCustomer(id);
+            const div2 = document.createElement('div');
+            div2.style.cssText = div.style.cssText;
+            div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
+              <button class="btn btn-sm ${po ? 'btn-ghost' : ''}" onclick="togglePagesOnlyInvoice(${id})">${po ? 'חזרה לפירוט מלא' : '🧾 פירוט מקוצר'}</button>`;
+            modal.appendChild(div2);
           }
         }
       } catch (e) { console.error('monthly-billing', e); }
