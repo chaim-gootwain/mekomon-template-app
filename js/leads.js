@@ -239,6 +239,52 @@ function tempDot(t) {
   return `<span title="${lbl}" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-left:6px;vertical-align:middle"></span>`;
 }
 
+/* --- זיהוי שם דומה: מילים משמעותיות משותפות ("רהיטי קחטן" ↔ "קחטן") --- */
+const NAME_STOPWORDS = new Set(['בעמ', 'חברת', 'חברה', 'קבוצת', 'ושות', 'של', 'את', 'בית', 'חנות', 'רשת', 'משרד', 'מרכז', 'סטודיו', 'שיווק', 'הפקות', 'שירותי', 'ltd', 'inc']);
+function leadNameWords(name) {
+  return String(name || '').toLowerCase()
+    .replace(/["'״׳`.,\-–()/\\]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !NAME_STOPWORDS.has(w));
+}
+/* לקוחות שמילה בשמם משותפת — מכל הסוכנים (RPC ‏customers_matching_words עוקף
+   את ה-RLS ומחזיר רק שם+סוכן). אם המיגרציה עוד לא רצה במופע — רק הלקוחות הגלויים */
+async function customersMatchingWords(words) {
+  if (!words.length) return [];
+  const agentName = id => (cache.agents.find(a => a.id === id) || {}).name;
+  try {
+    const { data, error } = await db.rpc('customers_matching_words', { p_words: words });
+    if (error) throw error;
+    return (data || []).map(r => ({ name: r.customer_name, agent: r.agent_name }));
+  } catch (e) {
+    const set = new Set(words);
+    return (cache.customers || []).filter(c => leadNameWords(c.name).some(w => set.has(w)))
+      .map(c => ({ name: c.name, agent: agentName(c.agent_id) }));
+  }
+}
+/* בונה פונקציית חיפוש לרשימת שמות (קריאה אחת לשרת גם בייבוא של מאות שורות):
+   name -> שורות התראה על לידים/לקוחות עם מילה משותפת בשם */
+async function similarNamesFinder(names, leads) {
+  const customers = await customersMatchingWords([...new Set(names.flatMap(leadNameWords))]);
+  const agentName = id => (cache.agents.find(a => a.id === id) || {}).name;
+  return name => {
+    const words = new Set(leadNameWords(name));
+    if (!words.size) return [];
+    const hit = n => leadNameWords(n).some(w => words.has(w));
+    const out = [];
+    // לידים — צפייה משותפת, כולל של סוכנים אחרים ושל המאגר
+    (leads || _leads || []).filter(l => hit(l.name)).slice(0, 5).forEach(l => {
+      const owner = l.agent_id ? (agentName(l.agent_id) || 'סוכן אחר') : 'מאגר ללא שיוך';
+      out.push(`• ליד "${l.name}"${l.phone ? ' · ' + l.phone : ''} · ${owner} · ${STATUS.lead[l.status]?.[0] || l.status}`);
+    });
+    customers.filter(c => hit(c.name)).slice(0, 5).forEach(c => {
+      out.push(`• לקוח "${c.name}"${c.agent ? ' · ' + c.agent : ''}`);
+    });
+    return out;
+  };
+}
+async function leadSimilarNames(name) { return (await similarNamesFinder([name]))(name); }
+
 function leadQuickAdd() {
   const myAgent = cache.agents.find(a => a.profile_id === profile.id);
   openForm('ליד חדש — הזמן נרשם אוטומטית', LEAD_FIELDS(), { agent_id: myAgent?.id }, async (rec) => {
@@ -284,6 +330,12 @@ function leadQuickAdd() {
           throw new Error('duplicate-other-cancel');
         }
       }
+    }
+    /* שם דומה (טלפון שונה) — התראה בלבד, ההחלטה אצל הסוכן */
+    const similar = await leadSimilarNames(rec.name);
+    if (similar.length && !confirm(
+      `שים לב: יש במערכת שם דומה:\n${similar.join('\n')}\n\nייתכן שזה אותו עסק עם טלפון אחר.\nלהוסיף את הליד בכל זאת?`)) {
+      throw new Error('similar-name-cancel');
     }
     rec.created_by = profile.id;
     const data = await run(db.from('leads').insert(rec).select().single());
@@ -496,8 +548,16 @@ async function leadsImport() {
   }
 
   if (!toInsert.length) { toast('אין שורות חדשות לייבוא', true); return; }
+  // שם דומה לליד/לקוח קיים — התראה בלבד, ההחלטה אצל המייבא
+  const findSimilar = await similarNamesFinder(toInsert.map(r => r.name));
+  const similar = toInsert.map(r => ({ name: r.name, hits: findSimilar(r.name) })).filter(x => x.hits.length);
+  const simTxt = similar.length
+    ? `\n\n⚠ ל-${similar.length} מהם יש שם דומה במערכת (ייתכן שזה אותו עסק עם טלפון אחר):\n` +
+      similar.slice(0, 8).map(x => `"${x.name}" ← ${x.hits[0].replace(/^• /, '')}`).join('\n') +
+      (similar.length > 8 ? `\n... ועוד ${similar.length - 8}` : '')
+    : '';
   if (!confirm(`נמצאו ${toInsert.length} לידים חדשים לייבוא` +
-    (skipped.length ? `\n(${skipped.length} דולגו — טלפון קיים או בלי שם)` : '') + '\n\nלהמשיך?')) return;
+    (skipped.length ? `\n(${skipped.length} דולגו — טלפון קיים או בלי שם)` : '') + simTxt + '\n\nלהמשיך?')) return;
 
   for (let i = 0; i < toInsert.length; i += 50)
     await run(db.from('leads').insert(toInsert.slice(i, i + 50)));

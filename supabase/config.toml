@@ -22,6 +22,9 @@ verify_jwt = true
 [functions.alerts-engine]
 verify_jwt = true
 
+[functions.extract-advertisers]
+verify_jwt = true
+
 [functions.green-invoice-doc]
 verify_jwt = true
 
@@ -43,6 +46,9 @@ verify_jwt = true
 [functions.send-email]
 # מאמתת בעצמה (admin.auth.getUser) — חייבת verify_jwt=false, אחרת השער חוסם.
 verify_jwt = false
+
+[functions.weekly-summary]
+verify_jwt = true
 
 [functions.send-issue]
 verify_jwt = true

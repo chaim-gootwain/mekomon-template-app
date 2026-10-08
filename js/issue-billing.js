@@ -16,7 +16,34 @@ let _ibKind = null; // סוג המסמך שנבחר בתצוגה המקדימה 
 function _ibLabel(t) { return (t || '').trim() === 'כתבות' ? 'מידע לתושב' : (t || 'מודעה'); }
 function _ibSize(a) { try { const z = (typeof nameOf === 'function') ? nameOf('priceList', a.price_item_id) : ''; return z || ''; } catch (e) { return ''; } }
 function _ibIssueDate(issue) { const d = issue.print_date || issue.publish_date; if (!d) return ''; const p = String(d).slice(0, 10).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; }
+/* פירוט מקוצר בחשבונית — ללקוחות שסומנו בכרטיס הלקוח (settings.invoice_pages_only_customers):
+   במקום שורה לכל מודעה — שורה אחת "פרסום (עמודים)" בסכום הכולל, בלי שורת כותרת. */
+const IPO_KEY = 'invoice_pages_only_customers';
+function ipoList() { try { return JSON.parse((cache.settings || {})[IPO_KEY] || '[]'); } catch (e) { return []; } }
+function isPagesOnlyCustomer(id) { return ipoList().includes(Number(id)); }
+async function togglePagesOnlyInvoice(id) {
+  id = Number(id);
+  const arr = ipoList(); const i = arr.indexOf(id);
+  if (i >= 0) arr.splice(i, 1); else arr.push(id);
+  const v = JSON.stringify(arr);
+  await db.from('settings').upsert({ key: IPO_KEY, value: v }, { onConflict: 'key' });
+  if (cache.settings) cache.settings[IPO_KEY] = v;
+  toast(arr.includes(id) ? '🧾 פירוט מקוצר הופעל — בחשבונית יופיע "פרסום (עמודים)"' : 'פירוט מקוצר בוטל');
+  if (typeof openCustomerCard === 'function') openCustomerCard(id);
+}
+/* שורה אחת לכל המודעות עם מחיר: "פרסום (עמודים 3, 7, 12)" */
+function ipoLine(ads) {
+  const priced = ads.filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
+  if (!priced.length) return [];
+  const total = priced.reduce((s, a) => s + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)), 0);
+  const pages = [...new Set(priced.map(a => a.page_number).filter(p => p != null && p !== ''))]
+    .sort((x, y) => (Number(x) || 0) - (Number(y) || 0));
+  const pg = pages.length ? ' (' + (pages.length > 1 ? 'עמודים ' : 'עמוד ') + pages.join(', ') + ')' : '';
+  return [{ details: 'פרסום' + pg, amount: 1, price: Math.round(total * 100) / 100 }];
+}
+
 function _ibItems(ads, issue) {
+  if (ads.length && isPagesOnlyCustomer(ads[0].customer_id)) return ipoLine(ads);
   const num = issue.issue_number;
   const adLines = ads.map(a => ({
     details: _ibLabel(a.title) + (_ibSize(a) ? ' · ' + _ibSize(a) : '') + (a.page_number ? ' — עמוד ' + a.page_number : ''),
@@ -130,7 +157,9 @@ async function issueBillingPreview(issueId, customerId) {
     ? `<td style="text-align:left"><button class="btn btn-sm btn-ghost" title="עריכת המודעה (מחיר, גודל, תיאור)" onclick="adEdit(${adId}, function(){ issueBillingPreview(${issueId}, ${customerId}); })">✎ עריכה</button></td>`
     : '<td></td>';
   const _ibHdr = _ibItems(ads, issue)[0]; // שורת כותרת הגיליון (מחיר 0)
-  const hdrRow = `<tr><td>${esc(_ibHdr ? _ibHdr.details : 'גיליון ' + issue.issue_number)}</td><td></td><td></td><td></td></tr>`;
+  const hdrRow = isPagesOnlyCustomer(customerId)
+    ? `<tr><td colspan="4" class="muted" style="font-size:.82rem">🧾 פירוט מקוצר — בחשבונית תופיע שורה אחת: <b>${esc(_ibHdr ? _ibHdr.details : 'פרסום')}</b></td></tr>`
+    : `<tr><td>${esc(_ibHdr ? _ibHdr.details : 'גיליון ' + issue.issue_number)}</td><td></td><td></td><td></td></tr>`;
   const adRows = ads.map(a => {
     const p = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
     const lbl = _ibLabel(a.title) + (_ibSize(a) ? ' · ' + _ibSize(a) : '') + (a.page_number ? ' — עמוד ' + a.page_number : '');

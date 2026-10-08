@@ -263,6 +263,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_send_clips') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_clips' };
       await mgrProposeSendClips(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_add_customer') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_customer' };
+      await mgrProposeAddCustomer(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_debt_reminders') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'debt_reminders' };
       await mgrProposeReminders(r.data.proposal);
@@ -569,6 +572,75 @@ async function mgrRemFinish() {
   const id = s.toolUseId;
   _mgrRem = null;
   await mgrResolveProposal(id, outcome.trim());
+}
+
+/* ---------- פתיחת כרטיס לקוח חדש (כרטיס אישור) ---------- */
+let _mgrNewCust = null;
+async function mgrProposeAddCustomer(p) {
+  const inp = p.input || {};
+  const name = String(inp.name || '').trim();
+  if (!name) {
+    icSayErr('חסר שם לקוח.');
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: חסר שם לקוח.');
+    return;
+  }
+  _mgrNewCust = { toolUseId: p.tool_use_id };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrCustCard';
+  card.innerHTML = `
+    <div class="hd">➕ כרטיס לקוח חדש — לאישור</div>
+    <div class="grid2">
+      <div class="field"><label>שם *</label><input id="mgrCustName" type="text" value="${esc(name)}"></div>
+      <div class="field"><label>טלפון</label><input id="mgrCustPhone" type="text" dir="ltr" value="${esc(String(inp.phone || ''))}"></div>
+      <div class="field"><label>מייל</label><input id="mgrCustEmail" type="text" dir="ltr" value="${esc(String(inp.email || ''))}"></div>
+      <div class="field"><label>ח.פ / עוסק</label><input id="mgrCustBiz" type="text" dir="ltr" value="${esc(String(inp.business_id || ''))}"></div>
+    </div>
+    <div class="muted" style="font-size:.78rem">את שאר הפרטים (סוכן, תגיות, אנשי קשר) אפשר להשלים בכרטיס הלקוח המלא.</div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrCustBtn" onclick="mgrAddCustomerApprove()">✅ פתח כרטיס</button>
+      <button class="btn btn-ghost" onclick="mgrAddCustomerCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrAddCustomerApprove() {
+  const s = _mgrNewCust;
+  if (!s) return;
+  const name = ((document.getElementById('mgrCustName') || {}).value || '').trim();
+  if (!name) { toast('חסר שם לקוח', true); return; }
+  const rec = { name };
+  const phone = ((document.getElementById('mgrCustPhone') || {}).value || '').trim();
+  const email = ((document.getElementById('mgrCustEmail') || {}).value || '').trim();
+  const biz = ((document.getElementById('mgrCustBiz') || {}).value || '').trim();
+  if (phone) rec.phone = phone;
+  if (email) rec.email = email;
+  if (biz) rec.business_id = biz;
+  const btn = document.getElementById('mgrCustBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'פותח...'; }
+  const { data, error } = await db.from('customers').insert(rec).select('id,name').single();
+  if (error || !data) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ פתח כרטיס'; }
+    toast('שגיאה בפתיחת הכרטיס: ' + (error && error.message || ''), true);
+    return;
+  }
+  try { cache.customers && cache.customers.push({ id: data.id, name: data.name, phone: rec.phone || null }); } catch (e) { }
+  try { await addInteraction('customer', data.id, '➕ כרטיס הלקוח נפתח מסוכן המקומון'); } catch (e) { }
+  document.getElementById('mgrCustCard')?.remove();
+  icSayOk('✅ נפתח כרטיס לקוח חדש: <b>' + esc(data.name) + '</b>' + (phone ? ' · ' + esc(phone) : ''));
+  const id = s.toolUseId;
+  _mgrNewCust = null;
+  await mgrResolveProposal(id, 'נפתח כרטיס לקוח חדש: "' + data.name + '" (customer_id=' + data.id + ').' +
+    (email ? ' מייל: ' + email + '.' : '') + ' אפשר להמשיך איתו.');
+}
+async function mgrAddCustomerCancel() {
+  const s = _mgrNewCust;
+  if (!s) return;
+  document.getElementById('mgrCustCard')?.remove();
+  icSay('בוטל — לא נפתח כרטיס.');
+  const id = s.toolUseId;
+  _mgrNewCust = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — לא נפתח כרטיס לקוח.');
 }
 
 /* ---------- הוספת משימה על כרטיס לקוח (כרטיס אישור) ---------- */
@@ -943,6 +1015,36 @@ async function mgrNotesSave() {
   toast(v ? 'ההוראות הקבועות נשמרו — ייכנסו לתוקף מהפנייה הבאה' : 'ההוראות הקבועות נמחקו');
 }
 
+/* ---------- הסיכום השבועי (מסך הגדרות) ---------- */
+async function mgrWeeklyToggle(on) {
+  await run(db.from('settings').upsert({ key: 'weekly_summary_enabled', value: on ? '1' : '0' }));
+  cache.settings.weekly_summary_enabled = on ? '1' : '0';
+  toast(on ? 'הסיכום השבועי הופעל — ודא שהנמענים והקרון מוגדרים' : 'הסיכום השבועי כובה');
+}
+async function mgrWeeklySave() {
+  const emails = ((document.getElementById('mgrWkEmails') || {}).value || '').trim();
+  const time = ((document.getElementById('mgrWkTime') || {}).value || '').trim() || 'ראשון 08:00';
+  await run(db.from('settings').upsert([
+    { key: 'weekly_summary_emails', value: emails },
+    { key: 'weekly_summary_time', value: time },
+  ]));
+  cache.settings.weekly_summary_emails = emails;
+  cache.settings.weekly_summary_time = time;
+  toast('הגדרות הסיכום השבועי נשמרו');
+}
+async function mgrWeeklyTest(btn) {
+  const out = document.getElementById('mgrWkOut');
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  if (out) out.textContent = 'אוסף נתונים ושולח (יכול לקחת חצי דקה)...';
+  // שומרים קודם את מה שבשדות — שהניסיון ישקף אותם
+  try { await mgrWeeklySave(); } catch (e) { }
+  const r = await invChatFn('weekly-summary', { force: true });
+  if (btn) { btn.disabled = false; btn.textContent = '📨 שלח עכשיו לניסיון'; }
+  if (out) out.innerHTML = (r.data && r.data.ok)
+    ? '✅ נשלח ל-' + r.data.sent + ' נמענים' + (r.data.had_summary ? ' (כולל תקציר מנהלים)' : ' (בלי תקציר — בדוק ANTHROPIC_API_KEY)')
+    : '❌ ' + esc((r.data && r.data.error) || r.errMsg || 'הפונקציה weekly-summary לא פרוסה עדיין');
+}
+
 /* ---------- כרטיס במסך ההגדרות (עטיפת Pages.settings) ---------- */
 async function mgrToggleSave(on) {
   await run(db.from('settings').upsert({ key: 'manager_agent_enabled', value: on ? '1' : '0' }));
@@ -986,7 +1088,29 @@ async function mgrProbe() {
           <button class="btn btn-sm btn-ghost" onclick="mgrUsageCalc()">📊 שימוש ועלות החודש</button>
         </div>
         <div id="mgrProbeOut" class="muted" style="font-size:.83rem;margin-top:6px"></div>
-        <div id="mgrUsageOut" class="muted" style="font-size:.83rem;margin-top:4px"></div>`;
+        <div id="mgrUsageOut" class="muted" style="font-size:.83rem;margin-top:4px"></div>
+        <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">
+          <b>📬 הסיכום השבועי</b>
+          <p class="muted" style="font-size:.82rem;margin:4px 0 8px">פעם בשבוע הסוכן שולח מייל: מה נסגר, מצב חובות וחייבים,
+          לידים חדשים, מה תקוע בגרפיקה והגיליון הקרוב — עם תקציר מנהלים שהוא כותב בעצמו.
+          דורש (חד-פעמי) משימת Cron שעתית ל-weekly-summary ב-Supabase, כמו של דיוור הוועדה.</p>
+          <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+            <input type="checkbox" ${String((cache.settings || {}).weekly_summary_enabled || '0') === '1' ? 'checked' : ''}
+              onchange="mgrWeeklyToggle(this.checked)" style="width:18px;height:18px">
+            הסיכום השבועי פעיל
+          </label>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label>נמענים (מופרד בפסיקים)</label>
+              <input id="mgrWkEmails" dir="ltr" placeholder="you@example.com" value="${esc((cache.settings || {}).weekly_summary_emails || '')}"></div>
+            <div class="field"><label>מתי (יום + שעה, שעון ישראל)</label>
+              <input id="mgrWkTime" placeholder="ראשון 08:00" value="${esc((cache.settings || {}).weekly_summary_time || 'ראשון 08:00')}"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+            <button class="btn btn-sm" onclick="mgrWeeklySave()">שמור</button>
+            <button class="btn btn-sm btn-ghost" onclick="mgrWeeklyTest(this)">📨 שלח עכשיו לניסיון</button>
+          </div>
+          <div id="mgrWkOut" class="muted" style="font-size:.83rem;margin-top:6px"></div>
+        </div>`;
         const anchor = el.querySelector('#activityLog');
         const anchorCard = anchor ? anchor.closest('.card') : null;
         if (anchorCard) el.insertBefore(card, anchorCard); else el.appendChild(card);

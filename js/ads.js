@@ -197,6 +197,7 @@ ${debtHoldBlock}
 <div><label>עמוד</label><b>${a.page_number || '—'}</b></div>
 <div><label>מחיר</label><b>${money(a.price)}${a.discount > 0 ? ' (הנחה ' + money(a.discount) + ')' : ''}</b></div>
 </div>
+${adDesignFeeBlock(a)}
 ${a.content_text ? `<div class="field" style="margin-top:8px"><label>תוכן שהלקוח שלח</label>
 <div style="background:var(--bg);border-radius:8px;padding:10px;font-size:.88rem;white-space:pre-wrap">${esc(a.content_text)}</div></div>` : ''}
 ${a.graphics_note ? `<p style="font-size:.85rem"><b>הנחיה לגרפיקה:</b> ${esc(a.graphics_note)}</p>` : ''}
@@ -274,12 +275,87 @@ openForm('עריכת מודעה', [
 { name: 'commission_pct', label: '% עמלה מיוחד', type: 'number' },
 { name: 'notes', label: 'הערות', type: 'textarea' },
 ], a, async (rec) => {
+// העברת מודעה מחויבת ללקוח אחר — סימון "חשבונית הופקה/שולם" שייך ללקוח הקודם,
+// ובלי בדיקה הוא נגרר בשקט ומסתיר את המודעה מחיוב הלקוח החדש
+if (rec.customer_id && Number(rec.customer_id) !== Number(a.customer_id) && ['invoiced', 'paid'].includes(a.deal_stage)) {
+  let docTxt = '';
+  try {
+    const { data: docs } = await db.from('documents').select('doc_number').eq('customer_id', a.customer_id)
+      .neq('status', 'cancelled').contains('ad_links', { ads: [{ id: a.id }] });
+    const nums = (docs || []).map(d => d.doc_number).filter(Boolean);
+    if (nums.length) docTxt = '\nהמודעה כלולה במסמך ' + nums.join(', ') + ' של הלקוח הקודם — ייתכן שצריך לבטל/לזכות אותו.';
+  } catch (e) { }
+  const stHe = a.deal_stage === 'paid' ? 'שולם' : 'חשבונית הופקה';
+  const reset = confirm('המודעה מסומנת "' + stHe + '" אצל ' + (nameOf('customers', a.customer_id) || 'הלקוח הקודם') + '.' + docTxt +
+    '\n\nלהעביר ל' + (nameOf('customers', rec.customer_id) || 'הלקוח החדש') + ' כ"סוכם" (לא מחויבת)?\n\nאישור = כן (מומלץ) · ביטול = להשאיר "' + stHe + '"');
+  if (reset) rec.deal_stage = 'agreed';
+}
 await run(db.from('ads').update(rec).eq('id', id));
+if (rec.customer_id && Number(rec.customer_id) !== Number(a.customer_id) && typeof addInteraction === 'function') {
+  try { await addInteraction('customer', Number(rec.customer_id), '↪️ הועברה מודעה מ' + (nameOf('customers', a.customer_id) || 'לקוח אחר') + (rec.deal_stage === 'agreed' && ['invoiced', 'paid'].includes(a.deal_stage) ? ' (סימון החיוב אופס ל"סוכם")' : '')); } catch (e) { }
+}
 try { await refreshCache(); } catch (e) { }
 toast('נשמר');
 if (typeof onDone === 'function') { try { await onDone(); } catch (e) { openPage('ads'); } }
 else { openPage('ads'); }
 });
+}
+
+/* --- חיוב עיצוב (אופציונלי, ידני): כפתור בכל מודעה — "🎨 עיצוב ₪50 + מע"מ" ---
+   לא אוטומטי — לא כל תיקון קל מחייב. לחיצה + אישור:
+   1. ads.design_fee_net = התעריף (graphics_fee_net, נטו) בזמן הסימון;
+   2. חיוב פתוח ללקוח באותו סכום (נטו, כמו חיובי המודעות), מסומן #design:<id>.
+   החיוב בכוונה בלי ad_id: טריגר הפרסום (on_ad_published) מדלג על מודעה שכבר
+   יש לה חיוב עם ad_id — חיוב העיצוב היה מונע את חיוב המודעה עצמה.
+   הסרה: מבטלת את חיוב העיצוב אם עוד פתוח (pending); אם כבר הופקה חשבונית —
+   מתריעה ולא נוגעת בחיוב (זיכוי ידני).
+   בלי העמודה (מיגרציה 2026-10-05_profitability_payroll שטרם הורצה) — הכפתור לא מוצג. */
+function adDesignFeeRate() { const v = Number((cache.settings || {}).graphics_fee_net); return (cache.settings || {}).graphics_fee_net != null && isFinite(v) && v >= 0 ? v : 50; }
+function adDesignMark(id) { return '#design:' + id + ';'; }
+function adDesignFeeBlock(a) {
+  if (!a || !('design_fee_net' in a) || !['admin', 'sales'].includes(profile.role)) return '';
+  const vat = Number((cache.settings || {}).vat_rate) > 0 ? Number(cache.settings.vat_rate) : 18;
+  const on = Number(a.design_fee_net) > 0;
+  const amt = on ? Number(a.design_fee_net) : adDesignFeeRate();
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;font-size:.88rem">
+${on ? `<span class="pill green">🎨 עיצוב — חויב ${money(amt)} + מע"מ ${vat}%</span>
+<button class="btn btn-sm btn-ghost" onclick="adDesignFeeToggle(${a.id}, false)">ביטול חיוב העיצוב</button>`
+    : `<button class="btn btn-sm btn-ghost" onclick="adDesignFeeToggle(${a.id}, true)">🎨 עיצוב ${money(amt)} + מע"מ</button>
+<span class="muted" style="font-size:.76rem">ידני — רק אם המודעה עוצבה אצלנו (תיקון קל לא מחויב)</span>`}
+</div>`;
+}
+async function adDesignFeeToggle(id, on) {
+  const a = (_ads || []).find(x => x.id === id) || (await run(db.from('ads').select('*').eq('id', id).limit(1)))[0];
+  if (!a) return;
+  const cust = nameOf('customers', a.customer_id) || 'הלקוח';
+  const existing = (await run(db.from('charges').select('id,status,amount').eq('customer_id', a.customer_id).ilike('description', '%' + adDesignMark(id) + '%'), 'בדיקת חיוב עיצוב'))
+    .filter(c => c.status !== 'cancelled');
+  if (on) {
+    const val = adDesignFeeRate();
+    if (!confirm(`לחייב את ${cust} על עיצוב המודעה?\n\n${money(val)} + מע"מ — ייווצר חיוב פתוח ללקוח.`)) return;
+    await run(db.from('ads').update({ design_fee_net: val }).eq('id', id), 'סימון עיצוב');
+    if (!existing.length) {
+      await run(db.from('charges').insert({
+        customer_id: a.customer_id, agent_id: a.agent_id || null, amount: val,
+        description: 'עיצוב מודעה: ' + (a.title || '') + ' ' + adDesignMark(id),
+        issued_date: today(), due_date: today(), status: 'pending',
+        notes: 'חיוב עיצוב — סומן ידנית בכרטיס המודעה',
+      }), 'יצירת חיוב עיצוב');
+    }
+    if (a) a.design_fee_net = val;
+    await addInteraction('ad', id, `🎨 חיוב עיצוב ${money(val)} + מע"מ`);
+    toast('✓ חויב עיצוב — ' + money(val) + ' + מע"מ');
+  } else {
+    const open = existing.filter(c => c.status === 'pending');
+    const billed = existing.filter(c => c.status !== 'pending');
+    if (!confirm(`לבטל את חיוב העיצוב של המודעה?` + (billed.length ? `\n\n⚠️ כבר הופקה חשבונית על חיוב העיצוב — החיוב לא יבוטל אוטומטית, צריך זיכוי ידני.` : ''))) return;
+    await run(db.from('ads').update({ design_fee_net: null }).eq('id', id), 'ביטול סימון עיצוב');
+    for (const c of open) await run(db.from('charges').update({ status: 'cancelled' }).eq('id', c.id), 'ביטול חיוב עיצוב');
+    if (a) a.design_fee_net = null;
+    await addInteraction('ad', id, '🎨 בוטל חיוב העיצוב' + (billed.length ? ' (החשבונית דורשת זיכוי ידני)' : ''));
+    toast(billed.length ? 'הסימון בוטל — שים לב: נדרש זיכוי ידני לחשבונית' : 'חיוב העיצוב בוטל');
+  }
+  openAdCard(id);
 }
 
 /* --- קבצים: העלאה ל-Storage וצפייה בקישור חתום --- */

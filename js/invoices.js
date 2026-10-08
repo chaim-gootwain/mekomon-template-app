@@ -441,8 +441,9 @@ async function invCredit(docId) {
       const _exact = (chs || []).filter(c => _icHasDocTag(c.notes, num));
       if (_exact.length) await db.from('charges').update({ status: 'cancelled', notes: 'בוטל — חשבון עסקה ' + num + ' #doc:' + num }).in('id', _exact.map(c => c.id));
       await db.from('documents').update({ status: 'cancelled' }).eq('id', d.id);
-      try { await addInteraction('customer', d.customer_id, '🚫 בוטל חשבון עסקה ' + num + ' (ביטול פנימי — ללא זיכוי מס)'); } catch (e) { }
-      toast('✓ חשבון העסקה בוטל והחוב הוסר');
+      let _nAds = 0; try { _nAds = await invRevertDocAds(d); } catch (e) { console.error('revert ads', e); }
+      try { await addInteraction('customer', d.customer_id, '🚫 בוטל חשבון עסקה ' + num + ' (ביטול פנימי — ללא זיכוי מס)' + (_nAds ? ' · ' + _nAds + ' מודעות הוחזרו לשלב הקודם' : '')); } catch (e) { }
+      toast('✓ חשבון העסקה בוטל והחוב הוסר' + (_nAds ? ' · ' + _nAds + ' מודעות הוחזרו לשלב הקודם' : ''));
       if (typeof openCustomerCard === 'function') openCustomerCard(d.customer_id);
     } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
     return;
@@ -463,7 +464,93 @@ async function invCredit(docId) {
     toast('לא אותר סכום המסמך המקורי — לא ניתן להפיק זיכוי אוטומטי. הפק זיכוי ידני בחשבונית ירוקה/EZcount', true);
     return;
   }
-  await invCall(body);
+  const r = await invCall(body);
+  if (r && r.ok) {
+    let _nAds = 0; try { _nAds = await invRevertDocAds(d); } catch (e) { console.error('revert ads', e); }
+    if (_nAds) {
+      try { await addInteraction('customer', d.customer_id, '↩️ זיכוי למסמך ' + num + ' — ' + _nAds + ' מודעות הוחזרו לשלב הקודם'); } catch (e) { }
+      toast('✓ הזיכוי הופק · ' + _nAds + ' מודעות הוחזרו לשלב הקודם');
+      if (typeof openCustomerCard === 'function') openCustomerCard(d.customer_id);
+    }
+  }
+}
+
+/* ── קישור מסמך ↔ מודעות ─────────────────────────────────────────
+   בהפקה: מסמנים את המודעות "חשבונית הופקה" ושומרים על המסמך
+   (documents.ad_links) את השלב שהיה להן קודם + מצב "חויב מראש" של החוזה.
+   בביטול/זיכוי: מחזירים בדיוק את מה שהמסמך הזה שינה. מודעה שכבר הייתה
+   "חויבה/שולמה" לפני המסמך לא נרשמת — ביטולו לא נוגע בה. */
+async function invLinkAdsToDoc(doc, adIds, contractId) {
+  const ids = new Set((adIds || []).map(Number).filter(Boolean));
+  let contractPrev = null;
+  if (contractId) {
+    try {
+      const { data: k } = await db.from('contracts').select('prepaid').eq('id', contractId).single();
+      contractPrev = !!(k && k.prepaid);
+      const { data: kAds } = await db.from('ads').select('id').eq('contract_id', contractId).not('status', 'in', '("cancelled","rejected")');
+      (kAds || []).forEach(a => ids.add(a.id));
+    } catch (e) { }
+  }
+  let changed = [];
+  if (ids.size) {
+    const { data: cur } = await db.from('ads').select('id,deal_stage').in('id', [...ids]);
+    changed = (cur || []).filter(a => !['invoiced', 'paid'].includes(a.deal_stage)).map(a => ({ id: a.id, prev: a.deal_stage || null }));
+  }
+  // שמירה רק כשלמסמך עוד אין קישור — "מסמך קיים" שחוזר (duplicate) לא דורס את המקור
+  if (doc && doc.id && !doc.ad_links && (changed.length || contractId)) {
+    const links = { ads: changed };
+    if (contractId) links.contract = { id: contractId, prev_prepaid: contractPrev };
+    try { await db.from('documents').update({ ad_links: links }).eq('id', doc.id); } catch (e) { /* עמודת ad_links אולי לא קיימת במופע — לא חוסם */ }
+  }
+  if (ids.size) await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', [...ids]).or('deal_stage.is.null,deal_stage.neq.paid');
+  if (contractId) await markContractPrepaid(contractId);
+}
+
+/* ביטול מסמך → החזרת המודעות לשלב שהיה להן לפני ההפקה. מחזיר מס' מודעות ששוחזרו. */
+async function invRevertDocAds(d) {
+  // חשבון עסקה שכבר נסגר במס-קבלה — המודעות חויבו בפועל במסמך התשלום שנשאר בתוקף
+  if (!d || d.settled_at) return 0;
+  const links = d.ad_links;
+  if (links && typeof links === 'object') {
+    let n = 0;
+    const ads = Array.isArray(links.ads) ? links.ads : [];
+    if (ads.length) {
+      // רק מודעות שעדיין "חשבונית הופקה" — מודעה ששולמה או שונתה ידנית בינתיים נשארת
+      const { data: cur } = await db.from('ads').select('id,deal_stage').in('id', ads.map(a => a.id));
+      const still = new Set((cur || []).filter(a => a.deal_stage === 'invoiced').map(a => a.id));
+      const byPrev = {};
+      ads.filter(a => still.has(a.id)).forEach(a => { const k = a.prev || ''; (byPrev[k] = byPrev[k] || []).push(a.id); });
+      for (const [prev, ids] of Object.entries(byPrev)) {
+        await db.from('ads').update({ deal_stage: prev || null }).in('id', ids).eq('deal_stage', 'invoiced');
+        n += ids.length;
+      }
+    }
+    if (links.contract && links.contract.id && links.contract.prev_prepaid === false) {
+      try { await db.from('contracts').update({ prepaid: false }).eq('id', links.contract.id); } catch (e) { }
+    }
+    return n;
+  }
+  // מסמך ישן (לפני שנשמר הקישור) — מאתרים לפי הגיליונות שרשומים בחיוב של המסמך,
+  // ומבקשים אישור: אולי המודעות חויבו גם במסמך אחר (למשל ביטול כפילות)
+  const num = String(d.doc_number || '').trim();
+  if (!num) return 0;
+  const _c1 = (await db.from('charges').select('description,notes,invoice_number').eq('customer_id', d.customer_id).eq('invoice_number', num)).data || [];
+  const _c2 = (await db.from('charges').select('description,notes,invoice_number').eq('customer_id', d.customer_id).ilike('notes', '%#doc:' + num + '%')).data || [];
+  const nums = new Set();
+  _c1.concat(_c2).filter(c => String(c.invoice_number || '') === num || _icHasDocTag(c.notes, num)).forEach(c => {
+    const m = String(c.description || '').match(/גיליון[ ]*([0-9][0-9, ]*)/);
+    if (m) (m[1].match(/\d+/g) || []).forEach(x => nums.add(Number(x)));
+  });
+  if (!nums.size) return 0;
+  const { data: iss } = await db.from('issues').select('id,issue_number').in('issue_number', [...nums]);
+  if (!iss || !iss.length) return 0;
+  const { data: ads } = await db.from('ads').select('id').eq('customer_id', d.customer_id).eq('deal_stage', 'invoiced')
+    .in('issue_id', iss.map(i => i.id)).not('status', 'in', '("cancelled","rejected")');
+  if (!ads || !ads.length) return 0;
+  if (!confirm('מסמך ישן — לא נשמר בו אילו מודעות חויבו.\nנמצאו ' + ads.length + ' מודעות של הלקוח בגיליון ' + [...nums].sort((a, b) => a - b).join(', ') +
+    ' שמסומנות "חשבונית הופקה".\n\nלהחזיר אותן ל"סוכם"?\n(בטל אם הן חויבו גם במסמך אחר שנשאר בתוקף)')) return 0;
+  await db.from('ads').update({ deal_stage: 'agreed' }).in('id', ads.map(a => a.id)).eq('deal_stage', 'invoiced');
+  return ads.length;
 }
 
 /* סימון חוזה "חויב מראש" אחרי הפקת חשבונית עליו: הדגל + המודעות
@@ -474,9 +561,29 @@ async function markContractPrepaid(contractId) {
     .not('status', 'in', '("cancelled","rejected")').or('deal_stage.is.null,deal_stage.neq.paid');
 }
 
+/* מזהה עסקה אחרי ביטול: transaction_id קבוע (חודשי / גיליון / צ'אט) מגן מכפילות,
+   אבל אחרי שהמסמך בוטל — אותו מזהה מחזיר מ-EZcount את המסמך המבוטל במקום להפיק
+   חדש. לכן הפקה מחדש מקבלת סיומת R1, R2... (רק כשקיים מסמך מבוטל במזהה הקודם). */
+function invTxnVariant(txn, n) {
+  if (!n) return txn;
+  const suf = '-R' + n;
+  return (txn.length + suf.length <= 45 ? txn : txn.slice(0, 45 - suf.length)) + suf;
+}
+async function invFreshTxn(txn) {
+  if (!txn) return txn;
+  const cands = []; for (let n = 0; n <= 9; n++) cands.push(invTxnVariant(txn, n));
+  try {
+    const { data } = await db.from('documents').select('transaction_id,status').in('transaction_id', cands);
+    const cancelled = new Set((data || []).filter(d => d.status === 'cancelled').map(d => d.transaction_id));
+    // המזהה הראשון שאינו של מסמך מבוטל — אם יש בו מסמך תקף, השרת יחזיר אותו (הגנת הכפילות נשמרת)
+    return cands.find(c => !cancelled.has(c)) || txn;
+  } catch (e) { return txn; }
+}
+
 async function invCall(body) {
   toast('מפיק מסמך...');
   try {
+    if (body.transaction_id) body.transaction_id = await invFreshTxn(body.transaction_id);
     const { data, error } = await db.functions.invoke('ezcount-doc', { body });
     if (error) {
       let msg = 'שגיאה';
@@ -502,10 +609,9 @@ async function invCall(body) {
           }).eq('id', _src.id);
         } catch (e) { /* עמודת settled_at אולי לא קיימת במופע — לא חוסם */ }
       }
-      try { if (Array.isArray(body.ad_ids) && body.ad_ids.length) { await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', body.ad_ids).or('deal_stage.is.null,deal_stage.neq.paid'); } } catch (e) { console.error('mark invoiced', e); }
-      // חשבונית על חוזה שלם: דגל "חויב מראש" (מודעות עתידיות מהחוזה ייוולדו
-      // מסומנות "חויבו") + סימון המודעות הקיימות של החוזה
-      try { if (body.contract_ref) await markContractPrepaid(body.contract_ref); } catch (e) { console.error('mark prepaid', e); }
+      // סימון המודעות "חשבונית הופקה" + שמירת הקישור על המסמך (לשחזור בביטול).
+      // חשבונית על חוזה שלם: גם דגל "חויב מראש" (מודעות עתידיות מהחוזה ייוולדו מסומנות)
+      try { await invLinkAdsToDoc(data.document, body.ad_ids, body.contract_ref || null); } catch (e) { console.error('mark invoiced', e); }
     } else if (data && data.status === 'pending_allocation') {
       toast('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount', true);
     } else {

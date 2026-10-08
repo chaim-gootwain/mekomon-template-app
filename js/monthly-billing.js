@@ -120,7 +120,20 @@ async function _mbDoneSet(ym) {
   return done;
 }
 function _mbIsDone(done, ym, cid, cat) {
-  return _MB_KINDS.some(k => done.has(_mbTxn(ym, cid, k, cat)));
+  // כולל הפקה מחדש אחרי ביטול (סיומת R1..R9 — invTxnVariant)
+  const _v = (typeof invTxnVariant === 'function') ? invTxnVariant : (t => t);
+  return _MB_KINDS.some(k => { const b = _mbTxn(ym, cid, k, cat); for (let n = 0; n <= 9; n++) if (done.has(_v(b, n))) return true; return false; });
+}
+/* מודעה שטרם חויבה — "חויב" נקבע לפי המודעה עצמה ולא לפי "יש ללקוח חשבונית החודש":
+   מודעה שנוספה אחרי ההפקה החודשית (או הוזנה מחדש על הלקוח) לא נבלעת ב"חויב ✓" */
+function _mbBillable(a) { return !['invoiced', 'paid'].includes(a.deal_stage); }
+/* מזהה עסקה לחיוב השלמה (מודעות שנוספו אחרי החשבונית החודשית). שומר על הקידומת
+   החודשית, ונגזר מהמודעות עצמן — לחיצה כפולה על אותה השלמה לא מפיקה מסמך שני */
+function _mbSuppTxn(ym, cid, kind, cat, ads) {
+  const kk = { proforma: 'p', tax_invoice: 'ti', invoice_receipt: 'ir', receipt: 'r' }[kind] || kind;
+  const cc = cat ? (cat === 'social' ? 's' : 'r') : '';
+  const ids = ads.map(a => a.id).sort((a, b) => a - b);
+  return ('emu-monthly-' + ym + '-cust' + cid + '-x' + ids[0] + 'n' + ids.length + '-' + kk + (cc ? '-' + cc : '')).slice(0, 45);
 }
 /* שורת פריט אחת למודעה בחשבונית החודשית */
 function _mbLine(a, issMap) {
@@ -148,7 +161,7 @@ async function monthlyBillingRun(ym) {
   let count = 0;
   const mkLine = a => { const iss = issMap[a.issue_id] || {}; const sz = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || ''; return { details: lbl(a.title) + (sz ? ' · ' + sz : '') + ' — גיליון ' + iss.issue_number + (a.page_number ? ' — עמוד ' + a.page_number : ''), amount: 1, price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) }; };
   for (const cid of monthly) {
-    const cAds = ads.filter(a => a.customer_id === cid);
+    const cAds = ads.filter(a => a.customer_id === cid && _mbBillable(a));
     if (!cAds.length) continue;
     const cust = (cache.customers || []).find(c => c.id === cid) || {};
     const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
@@ -158,12 +171,12 @@ async function monthlyBillingRun(ym) {
       ? { regular: cAds.filter(a => ecCatOfAd(a.id) === 'regular'), social: cAds.filter(a => ecCatOfAd(a.id) === 'social') }
       : { regular: cAds };
     for (const gk of Object.keys(groups)) {
-      const lines = groups[gk].map(mkLine).filter(it => it.price > 0);
+      const lines = isPagesOnlyCustomer(cid) ? ipoLine(groups[gk]) : groups[gk].map(mkLine).filter(it => it.price > 0);
       if (!lines.length) continue;
       if (_mbIsDone(done, ym, cid, isCenter ? gk : '')) continue; // כבר חויב החודש
       const isSocial = gk === 'social';
       const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
-      const items = [{ details: header, amount: 1, price: 0 }, ...lines];
+      const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
       const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
       await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: docDate, transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: groups[gk].map(a => a.id) });
       count++;
@@ -270,21 +283,28 @@ async function monthlyBillingReview(ym) {
     const groups = isCenter ? ['regular', 'social'] : ['regular'];
     for (const gk of groups) {
       const gAds = isCenter ? cAds.filter(a => ecCatOfAd(a.id) === gk) : cAds;
-      const total = gAds.reduce((s, a) => s + Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)), 0);
-      if (!(total > 0)) continue;
+      const _net = a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
+      const openAds = gAds.filter(_mbBillable);
+      const total = openAds.reduce((s, a) => s + _net(a), 0);
+      const billedTotal = gAds.filter(a => !_mbBillable(a)).reduce((s, a) => s + _net(a), 0);
+      if (!(total > 0) && !(billedTotal > 0)) continue;
       const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
       // "הופק?" — מזהים כל סוג מסמך (חשבון עסקה / חשבונית מס), כי המשתמש יכול לבחור סוג בבורר
-      const _isDone = _mbIsDone(done, ym, cid, isCenter ? gk : '');
+      const _docDone = _mbIsDone(done, ym, cid, isCenter ? gk : '');
+      // חויב במלואו = אין מודעה פתוחה. יש חשבונית חודשית ועדיין מודעות פתוחות → חיוב השלמה
+      const _isDone = !(total > 0);
       const _cRec = (cache.customers || []).find(c => c.id === cid) || {};
-      rows.push({ cid, gk, isCenter, isSocial: gk === 'social', total, count: gAds.length, txn, done: _isDone, name: nameOf('customers', cid), email: (_cRec.email || '').trim() });
+      rows.push({ cid, gk, isCenter, isSocial: gk === 'social', total, count: openAds.length, billedCount: gAds.length - openAds.length, txn, done: _isDone, supp: _docDone && !_isDone, name: nameOf('customers', cid), email: (_cRec.email || '').trim() });
     }
   }
   rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he') || a.gk.localeCompare(b.gk));
   const listRows = rows.map(r => `<tr>
       <td><b>${esc(r.name)}</b>${r.isCenter ? ` <span style="font-size:.78rem;color:${r.isSocial ? '@@COLOR_BRAND@@' : '#6b7280'}">· ${r.isSocial ? 'חברתי כלכלי' : 'רגיל'}</span>` : ''}</td>
-      <td>${r.count}</td>
+      <td>${r.count}${r.billedCount ? ` <span class="muted" style="font-size:.78rem">(+${r.billedCount} חויבו)</span>` : ''}</td>
       <td>${money(r.total)}</td>
-      <td>${r.done ? '<span class="pill green">חויב ✓</span>' : `<button class="btn btn-sm" onclick="monthlyBillingPreviewOne('${ym}',${r.cid},'${r.gk}')">תצוגה והפקה</button>`}
+      <td>${r.done ? '<span class="pill green">חויב ✓</span>' : r.supp
+        ? `<span class="pill green" title="הופקה חשבונית חודשית">חויב ✓</span> <button class="btn btn-sm" onclick="monthlyBillingPreviewOne('${ym}',${r.cid},'${r.gk}')" title="מודעות שנוספו אחרי החשבונית החודשית">➕ השלמה (${r.count})</button>`
+        : `<button class="btn btn-sm" onclick="monthlyBillingPreviewOne('${ym}',${r.cid},'${r.gk}')">תצוגה והפקה</button>`}
         <button class="btn btn-sm btn-ghost" onclick="mbDownloadClips('${ym}', ${r.cid})" title="הורד PDF עם כל גזירי הפרסום של הלקוח לחודש">📎 גזירים</button>
         ${r.email ? '' : `<button class="btn btn-sm btn-ghost" style="color:var(--brand)" onclick="mbCaptureEmail(${r.cid}, '${ym}')" title="ללקוח אין מייל — הוסף/עדכן כדי לשלוח גזירים">✉️ הוסף מייל</button>`}</td>
     </tr>`).join('');
@@ -305,16 +325,18 @@ async function monthlyBillingPreviewOne(ym, cid, gk) {
   const ctx = _mbCtx; if (!ctx) return;
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
-  const cAds = ctx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk));
-  const lines = cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
+  const cAds = ctx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk) && _mbBillable(a));
+  const lines = isPagesOnlyCustomer(cid) ? ipoLine(cAds) : cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const total = lines.reduce((s, it) => s + it.amount * it.price, 0);
+  const _supp = _mbIsDone(ctx.done, ym, cid, isCenter ? gk : '');
   const isSocial = gk === 'social';
   const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
   _mbKind = docKind; // ברירת מחדל לסוג המסמך
   document.getElementById('viewModal').innerHTML = `
     <h3>תצוגה מקדימה — ${esc(nameOf('customers', cid))}${isCenter ? (isSocial ? ' · חברתי כלכלי' : ' · רגיל') : ''}</h3>
     <p class="muted" style="font-size:.85rem">חיוב חודשי ${ym} · תאריך המסמך: ${_mbDocDate(ym)}</p>
+    ${_supp ? `<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:.85rem">➕ <b>חיוב השלמה</b> — ללקוח כבר הופקה חשבונית חודשית ל-${ym}. כאן רק המודעות שנוספו אחריה ועוד לא חויבו.</div>` : ''}
     <div class="table-wrap" style="margin-top:8px"><table class="data">
       <thead><tr><th>פירוט</th><th>מחיר</th></tr></thead><tbody>
       ${lines.map(it => `<tr><td>${esc(it.details)}</td><td>${money(it.price)}</td></tr>`).join('')}
@@ -337,23 +359,30 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   if (!_mbCtx || _mbCtx.ym !== ym) { await monthlyBillingReview(ym); }
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
-  const cAds = _mbCtx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk));
-  const lines = cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
+  const cAds = _mbCtx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk) && _mbBillable(a));
+  const lines = isPagesOnlyCustomer(cid) ? ipoLine(cAds) : cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const isSocial = gk === 'social';
   const docKind = _mbKind || (cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma');
-  const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
-  const items = [{ details: header, amount: 1, price: 0 }, ...lines];
-  const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
-  // בדיקה טרייה מול המסד ממש לפני ההפקה — גם בסוג מסמך אחר וגם ממכשיר אחר
+  // בדיקה טרייה מול המסד ממש לפני ההפקה — גם בסוג מסמך אחר וגם ממכשיר אחר.
+  // כבר הופקה חשבונית חודשית → זה חיוב השלמה: רק המודעות הפתוחות, במזהה עסקה נפרד
   const _doneNow = await _mbDoneSet(ym);
-  if (_mbIsDone(_doneNow, ym, cid, isCenter ? gk : '')) {
-    toast('ללקוח כבר הופקה חשבונית חודשית לחודש ' + ym, true);
-    monthlyBillingReview(ym);
-    return;
+  const _supp = _mbIsDone(_doneNow, ym, cid, isCenter ? gk : '');
+  if (_supp) {
+    const { data: _fresh } = await db.from('ads').select('id,deal_stage').in('id', cAds.map(a => a.id));
+    const _stillOpen = new Set((_fresh || []).filter(_mbBillable).map(a => a.id));
+    if (cAds.some(a => !_stillOpen.has(a.id))) {
+      toast('חלק מהמודעות כבר חויבו בינתיים — מרענן', true);
+      monthlyBillingReview(ym);
+      return;
+    }
   }
+  const header = (_supp ? 'חיוב השלמה — ' : 'חיוב חודשי — ') + ym + (isSocial ? ' — חברתי כלכלי' : '');
+  const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
+  const txn = _supp ? _mbSuppTxn(ym, cid, docKind, isCenter ? gk : '', cAds) : _mbTxn(ym, cid, docKind, isCenter ? gk : '');
   document.getElementById('viewBack').classList.remove('open');
-  await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
+  await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: (_supp ? 'חיוב השלמה ' : 'חיוב חודשי ') + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
+  if (_supp) { await monthlyBillingReview(ym); return; } // הגזירים החודשיים כבר נשלחו בהפקה החודשית
   // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד, גם בפיצול קטגוריות)
   try {
     const _key = cid + '|' + ym;
@@ -398,6 +427,12 @@ async function issueBillingSetMonthly(issueId, customerId) {
             div.innerHTML = `<span><b>אופן חיוב:</b> ${on ? '<span class="pill amber">חודשי — חשבונית אחת בסוף החודש</span>' : 'לפי גיליון'}</span>
               <button id="mbToggle" class="btn btn-sm ${on ? 'btn-ghost' : ''}" onclick="toggleMonthlyBilling(${id})">${on ? 'בטל חיוב חודשי' : '🔁 הפוך לחיוב חודשי'}</button>`;
             modal.appendChild(div);
+            const po = isPagesOnlyCustomer(id);
+            const div2 = document.createElement('div');
+            div2.style.cssText = div.style.cssText;
+            div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
+              <button class="btn btn-sm ${po ? 'btn-ghost' : ''}" onclick="togglePagesOnlyInvoice(${id})">${po ? 'חזרה לפירוט מלא' : '🧾 פירוט מקוצר'}</button>`;
+            modal.appendChild(div2);
           }
         }
       } catch (e) { console.error('monthly-billing', e); }
