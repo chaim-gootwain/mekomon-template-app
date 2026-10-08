@@ -146,7 +146,7 @@ async function liApplyMapping() {
   toast('בודק כפילויות מול המערכת...');
   // כל הלידים והלקוחות הקיימים — להשוואת טלפון ושם (עימוד, כמו בשאר המערכת)
   const [exLeads, exCustomers] = await Promise.all([
-    runAll((f, t) => db.from('leads').select('id,name,phone').order('id').range(f, t)),
+    runAll((f, t) => db.from('leads').select('id,name,phone,agent_id,status').order('id').range(f, t)),
     runAll((f, t) => db.from('customers').select('id,name,phone').order('id').range(f, t)),
   ]);
   const phoneMap = {}; // מפתח טלפון → תיאור הרשומה הקיימת
@@ -174,6 +174,9 @@ async function liApplyMapping() {
     if (item.status === 'new') { if (liPhoneReal(pk)) seenPhones[pk] = item.idx; if (nk) seenNames[nk] = item.idx; }
     return item;
   });
+  // שם דומה (מילה משותפת) לליד/לקוח קיים — סימון בלבד, השורה עדיין נכנסת לייבוא
+  const findSimilar = await similarNamesFinder(_li.items.filter(i => i.status === 'new').map(i => i.data.name), exLeads);
+  _li.items.forEach(i => { if (i.status === 'new') i.similar = findSimilar(i.data.name).map(h => h.replace(/^• /, '')).join(' | '); });
   _li.step = 3;
   liDraw();
 }
@@ -189,7 +192,8 @@ function liToImport() {
   return _li.items.filter(i => i.status === 'new' || (_li.dupMode === 'import' && (i.status === 'dup' || i.status === 'dupfile')));
 }
 function liStatusPill(i) {
-  if (i.status === 'new') return '<span class="pill green">חדש</span>';
+  if (i.status === 'new') return '<span class="pill green">חדש</span>' +
+    (i.similar ? ` <span class="pill amber" title="${esc(i.similar)}">⚠ שם דומה</span> <span class="muted" style="font-size:.78rem">${esc(i.similar)}</span>` : '');
   if (i.status === 'noname') return '<span class="pill red">בלי שם — לא ייובא</span>';
   return `<span class="pill amber">${i.status === 'dup' ? 'כפול' : 'כפול בקובץ'}</span> <span class="muted" style="font-size:.78rem">${esc(i.dupWith)}</span>`;
 }
