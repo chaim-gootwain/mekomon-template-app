@@ -239,6 +239,32 @@ function tempDot(t) {
   return `<span title="${lbl}" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-left:6px;vertical-align:middle"></span>`;
 }
 
+/* --- זיהוי שם דומה: מילים משמעותיות משותפות ("רהיטי קחטן" ↔ "קחטן") --- */
+const NAME_STOPWORDS = new Set(['בעמ', 'חברת', 'חברה', 'קבוצת', 'ושות', 'של', 'את', 'בית', 'חנות', 'רשת', 'משרד', 'מרכז', 'סטודיו', 'שיווק', 'הפקות', 'שירותי', 'ltd', 'inc']);
+function leadNameWords(name) {
+  return String(name || '').toLowerCase()
+    .replace(/["'״׳`.,\-–()/\\]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !NAME_STOPWORDS.has(w));
+}
+function leadSimilarNames(name) {
+  const words = new Set(leadNameWords(name));
+  if (!words.size) return [];
+  const hit = n => leadNameWords(n).some(w => words.has(w));
+  const agentName = id => (cache.agents.find(a => a.id === id) || {}).name;
+  const out = [];
+  // לידים — צפייה משותפת, כולל של סוכנים אחרים
+  (_leads || []).filter(l => hit(l.name)).slice(0, 5).forEach(l => {
+    const owner = l.agent_id ? (agentName(l.agent_id) || 'סוכן אחר') : 'מאגר ללא שיוך';
+    out.push(`• ליד "${l.name}"${l.phone ? ' · ' + l.phone : ''} · ${owner} · ${STATUS.lead[l.status]?.[0] || l.status}`);
+  });
+  // לקוחות — מה שהמשתמש רואה (מנהל: כולם; סוכן: שלו)
+  (cache.customers || []).filter(c => hit(c.name)).slice(0, 5).forEach(c => {
+    out.push(`• לקוח "${c.name}"${c.phone ? ' · ' + c.phone : ''}`);
+  });
+  return out;
+}
+
 function leadQuickAdd() {
   const myAgent = cache.agents.find(a => a.profile_id === profile.id);
   openForm('ליד חדש — הזמן נרשם אוטומטית', LEAD_FIELDS(), { agent_id: myAgent?.id }, async (rec) => {
@@ -284,6 +310,12 @@ function leadQuickAdd() {
           throw new Error('duplicate-other-cancel');
         }
       }
+    }
+    /* שם דומה (טלפון שונה) — התראה בלבד, ההחלטה אצל הסוכן */
+    const similar = leadSimilarNames(rec.name);
+    if (similar.length && !confirm(
+      `שים לב: יש במערכת שם דומה:\n${similar.join('\n')}\n\nייתכן שזה אותו עסק עם טלפון אחר.\nלהוסיף את הליד בכל זאת?`)) {
+      throw new Error('similar-name-cancel');
     }
     rec.created_by = profile.id;
     const data = await run(db.from('leads').insert(rec).select().single());
