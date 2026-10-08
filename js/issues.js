@@ -263,7 +263,8 @@ ${_fpToolbarMenu('fpMenuEntry', 'מודעות ושיבוץ', [
 ${_fpToolbarMenu('fpMenuPrint', 'הפקה ודפוס', [
   `<button class="btn" onclick="ccMenuClose();fpPrint()">🖨 הדפסה</button>`,
   `<button class="btn" onclick="ccMenuClose();fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>`,
-  canEdit ? `<button class="btn" onclick="ccMenuClose();openPrintVerify(${_fpIssue.id})">🔍 אמת מול מודפס</button>` : ''
+  canEdit ? `<button class="btn" onclick="ccMenuClose();openPrintVerify(${_fpIssue.id})">🔍 אמת מול מודפס</button>` : '',
+  canEdit && typeof fpBuildPrintPdf === 'function' && typeof pibConfig === 'function' && pibConfig().master_path ? `<button class="btn" onclick="ccMenuClose();fpBuildPrintPdf()">📄 הרכבת PDF לדפוס</button>` : ''
 ])}
 ${_fpToolbarMenu('fpMenuMoney', 'כספים', [
   ['admin','sales'].includes(profile.role) ? `<button class="btn" onclick="ccMenuClose();openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : '',
