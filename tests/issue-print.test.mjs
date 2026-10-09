@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -70,6 +70,13 @@ t('slot: עמוד מלא = אזור התוכן; טור 0 = ימין', () => {
   assert.ok(Math.abs(full.x - 5) < 0.01 && Math.abs(full.w - 155) < 0.01 && Math.abs(full.y - 4.5) < 0.01 && Math.abs(full.h - 224.1) < 0.05);
   const right = pibSlotRect(cfg, g, 165, { col: 0, row: 0, w: 1, h: 1 });
   assert.ok(Math.abs(right.x - 85) < 0.01, right.x);
+});
+
+/* ---------- טקסט ישן בעמוד האב ---------- */
+t('masterLeftovers: מזהה תאריך/גיליון/מספר עמוד, לא את הטלפון', () => {
+  const found = pibMasterLeftovers(['050-000-0000 ', ':להצעת פרסום משתלמת במיוחד חייגו כעת', '05.10.26  |כ"ד תשרי306 גיליון', '2']);
+  assert.deepStrictEqual(found, ['05.10.26  |כ"ד תשרי306 גיליון', '2']);
+  assert.deepStrictEqual(pibMasterLeftovers(['050-000-0000 :להצעת פרסום משתלמת במיוחד חייגו כעת']), []);
 });
 
 /* ---------- עזרים ---------- */
