@@ -177,6 +177,15 @@ function pibPageSet(txt, pages) {
   return s;
 }
 
+/* טקסט שנשאר בעמוד האב ונראה כמו ערך משתנה (מספר עמוד/גיליון/תאריך) —
+   אם יישאר, הוא יודפס מתחת לטקסט שהמערכת כותבת (טקסט כפול בפס התחתון) */
+function pibMasterLeftovers(strings) {
+  return (strings || []).map(t => String(t || '').trim()).filter(t =>
+    /\b\d{1,2}\.\d{1,2}\.\d{2,4}\b/.test(t) ||          // תאריך 05.10.26
+    /גיליון\s*\d|\d\s*גיליון/.test(t) ||                  // "גיליון 306"
+    /^\d{1,3}$/.test(t));                                   // מספר עמוד בודד
+}
+
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : m);
@@ -241,6 +250,8 @@ async function fpBuildPrintPdf() {
   const step = t => { modal.innerHTML = `<h3>📄 הרכבת PDF לדפוס — גיליון ${esc(issue.issue_number)}</h3><p>${esc(t)}</p>`; };
   back.classList.add('open'); step('טוען ספריות...');
   const warn = [];
+  // block = חובה לתקן לפני דפוס · note = לבדיקה
+  const W = (sev, text) => warn.push({ sev, text });
   try {
     const PDFLib = await _apEnsureLib();
     const fontkit = await _pibLoadScript('js/vendor/fontkit.umd.min.js', 'fontkit');
@@ -251,6 +262,17 @@ async function fpBuildPrintPdf() {
     if (mres.error) throw new Error('עמוד האב לא נמצא: ' + mres.error.message);
     const masterBytes = new Uint8Array(await mres.data.arrayBuffer());
     const masterDoc = await PDFLib.PDFDocument.load(masterBytes, { ignoreEncryption: true });
+    // בדיקת טקסט ישן בעמוד האב (pdf.js, אם זמין) — רק כשהמערכת כותבת שדות בעצמה
+    if ((cfg.fields || []).length && typeof _pvEnsurePdfJs === 'function') {
+      try {
+        await _pvEnsurePdfJs();
+        const md = await window.pdfjsLib.getDocument({ data: masterBytes.slice() }).promise;
+        const strs = [];
+        for (let k = 1; k <= md.numPages; k++) (await (await md.getPage(k)).getTextContent()).items.forEach(it => strs.push(it.str));
+        const left = pibMasterLeftovers(strs);
+        if (left.length) W('block', `עמוד האב מכיל טקסט משתנה ישן (${left.slice(0, 3).join(' · ')}) — הוא יודפס מתחת לטקסט החדש. יש להעלות עמוד אב נקי בהגדרות`);
+      } catch (e) { console.warn('master text check', e); }
+    }
 
     const out = await PDFLib.PDFDocument.create();
     out.registerFontkit(fontkit);
@@ -279,22 +301,24 @@ async function fpBuildPrintPdf() {
     const ads = _fpAds.filter(a => a.page_number >= 1 && a.page_number <= pages && !['cancelled', 'rejected'].includes(a.status));
     const files = ads.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at').in('ad_id', ads.map(a => a.id)).order('created_at', { ascending: false })) : [];
     const fileFor = id => files.find(f => f.ad_id === id && f.kind === 'design') || files.find(f => f.ad_id === id && f.kind === 'source');
-    const loaded = {};
+    const loaded = {}, byHash = {};
     let i = 0;
     for (const a of ads) {
       step(`מוריד קבצי מודעות ${++i}/${ads.length}...`);
       const f = fileFor(a.id);
-      if (!f) { warn.push(`עמ' ${a.page_number}: ${_adLabel(a)} — אין קובץ`); continue; }
+      if (!f) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — אין קובץ`); continue; }
       try {
         const r = await db.storage.from('ad-files').download(f.storage_path);
         if (r.error) throw r.error;
         const bytes = new Uint8Array(await r.data.arrayBuffer());
         const kind = _pibKind(bytes);
-        if (!kind) { warn.push(`עמ' ${a.page_number}: ${_adLabel(a)} — סוג קובץ לא נתמך (${f.file_name || ''}) — נדרש PDF/JPG/PNG`); continue; }
+        const hash = await _pibHash(bytes);
+        (byHash[hash] = byHash[hash] || []).push(a);
+        if (!kind) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — סוג קובץ לא נתמך (${f.file_name || ''}) — נדרש PDF/JPG/PNG`); continue; }
         let emb, srcTrim = null, srcBleed = null, aspect;
         if (kind === 'pdf') {
           const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
-          if (src.getPageCount() > 1) warn.push(`עמ' ${a.page_number}: ${_adLabel(a)} — לקובץ ${src.getPageCount()} עמודים, נלקח הראשון`);
+          if (src.getPageCount() > 1) W('note', `עמ' ${a.page_number}: ${_adLabel(a)} — לקובץ ${src.getPageCount()} עמודים, נלקח הראשון`);
           const sp = src.getPage(0);
           srcTrim = sp.getTrimBox(); srcBleed = sp.getBleedBox();
           aspect = srcTrim.width / srcTrim.height;
@@ -304,8 +328,11 @@ async function fpBuildPrintPdf() {
           aspect = emb.width / emb.height;
         }
         loaded[a.id] = { kind, emb, srcTrim, srcBleed, aspect };
-      } catch (e) { warn.push(`עמ' ${a.page_number}: ${_adLabel(a)} — הקובץ לא נטען (${e.message || e})`); }
+      } catch (e) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — הקובץ לא נטען (${e.message || e})`); }
     }
+    // אותו קובץ ביותר ממודעה אחת (לפי תוכן הקובץ, לא לפי שם)
+    Object.values(byHash).filter(l => l.length > 1).forEach(l =>
+      W('note', `אותו קובץ מופיע ${l.length} פעמים: ${l.map(a => `עמ' ${a.page_number} (${_adLabel(a)})`).join(', ')}`));
 
     for (let p = 1; p <= pages; p++) {
       step(`מרכיב עמוד ${p}/${pages}...`);
@@ -314,15 +341,17 @@ async function fpBuildPrintPdf() {
       page.setTrimBox(trim.x, trim.y, trim.width, trim.height);
       page.setBleedBox(bleed.x, bleed.y, bleed.width, bleed.height);
       const onPage = ads.filter(a => a.page_number === p);
-      if (!onPage.length) warn.push(`עמ' ${p}: ריק`);
+      if (!onPage.length) W('block', `עמ' ${p}: ריק`);
       const items = onPage.map(a => {
         const u = (typeof alItemUnits === 'function') ? alItemUnits(a.price_item_id, U, sizeMap, cache.priceList || []).units : cellsPerPage;
         const c = pibCellsFor(u, U, cellsPerPage);
-        if (!c.exact) warn.push(`עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
+        if (!c.exact) W('note', `עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
         return { id: a.id, cells: c.cells, aspect: loaded[a.id] ? loaded[a.id].aspect : null };
       });
       const pack = pibPackPage(g, items);
-      pack.unplaced.forEach(id => warn.push(`עמ' ${p}: ${_adLabel(ads.find(a => a.id === id))} — אין מקום בעמוד (עמוד עמוס)`));
+      const used = pack.placed.reduce((n, s) => n + s.w * s.h, 0);
+      if (onPage.length && used < cellsPerPage) W('note', `עמ' ${p}: מלא ${used}/${cellsPerPage} — ${cellsPerPage - used} משבצות ריקות`);
+      pack.unplaced.forEach(id => W('block', `עמ' ${p}: ${_adLabel(ads.find(a => a.id === id))} — אין מקום בעמוד (עמוד עמוס)`));
 
       for (const s of pack.placed) {
         const a = ads.find(x => x.id === s.id), L = loaded[s.id];
@@ -350,7 +379,7 @@ async function fpBuildPrintPdf() {
         // התאמה למשבצת בלי עיוות, ממורכז
         const sw = r.w * _PIB_MM, sh = r.h * _PIB_MM, k = Math.min(sw / ew, sh / eh);
         const dw = ew * k, dh = eh * k;
-        if (Math.abs(Math.log((ew / eh) / (sw / sh))) > 0.06) warn.push(`עמ' ${p}: ${_adLabel(a)} — יחס הקובץ לא תואם למשבצת (${Math.round(r.w)}×${Math.round(r.h)} מ"מ) — יישאר שוליים לבנים`);
+        if (Math.abs(Math.log((ew / eh) / (sw / sh))) > 0.06) W('note', `עמ' ${p}: ${_adLabel(a)} — יחס הקובץ לא תואם למשבצת (${Math.round(r.w)}×${Math.round(r.h)} מ"מ) — יישאר שוליים לבנים`);
         draw({ x: X(r.x) + (sw - dw) / 2, y: Y(r.y + r.h) + (sh - dh) / 2, width: dw, height: dh });
       }
 
@@ -374,8 +403,7 @@ async function fpBuildPrintPdf() {
     const name = `גיליון-${issue.issue_number}.pdf`;
     modal.innerHTML = `<h3>📄 PDF לדפוס — גיליון ${esc(issue.issue_number)}</h3>
 <p>${pages} עמודים · ${(bytes.length / 1048576).toFixed(1)}MB. כדאי לעבור על הקובץ לפני השליחה לדפוס.</p>
-${warn.length ? `<div style="font-size:.84rem;color:#92400e;margin:6px 0"><b>לבדיקה (${warn.length}):</b>
-<ul style="margin:4px 18px 0;max-height:40vh;overflow:auto">${warn.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '<p style="color:var(--ok)">✓ כל המודעות נכנסו בלי הערות</p>'}
+${_pibWarnHtml(warn)}
 <div class="m-actions" style="margin-top:12px">
 <a class="btn" href="${url}" download="${esc(name)}">⬇ הורדת ה-PDF</a>
 <a class="btn btn-ghost" href="${url}" target="_blank" rel="noopener">👁 פתיחה לצפייה</a>
@@ -386,6 +414,25 @@ ${warn.length ? `<div style="font-size:.84rem;color:#92400e;margin:6px 0"><b>ל�
     modal.innerHTML = `<h3>📄 הרכבת PDF לדפוס</h3><p style="color:#b91c1c">שגיאה: ${esc(e.message || String(e))}</p>
 <div class="m-actions"><button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button></div>`;
   }
+}
+
+/* רשימת הבדיקה: קודם מה שחוסם דפוס, אחר כך הערות */
+function _pibWarnHtml(warn) {
+  if (!warn.length) return '<p style="color:var(--ok)">✓ כל המודעות נכנסו בלי הערות</p>';
+  const block = warn.filter(w => w.sev === 'block'), note = warn.filter(w => w.sev !== 'block');
+  const list = (arr, col, title) => arr.length ? `<div style="font-size:.84rem;color:${col};margin:6px 0"><b>${title} (${arr.length}):</b>
+<ul style="margin:4px 18px 0">${arr.map(w => `<li>${esc(w.text)}</li>`).join('')}</ul></div>` : '';
+  return `<div style="max-height:45vh;overflow:auto">
+${list(block, '#b91c1c', '🔴 חובה לתקן לפני דפוס')}
+${list(note, '#92400e', '🟡 לבדיקה')}</div>
+${block.length ? '' : '<p style="color:var(--ok);font-size:.84rem">✓ אין בעיות חוסמות</p>'}`;
+}
+
+async function _pibHash(bytes) {
+  try {
+    const d = await crypto.subtle.digest('SHA-1', bytes);
+    return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) { return bytes.length + ':' + bytes[0] + bytes[bytes.length - 1]; }
 }
 
 /* ==================== כרטיס הגדרות (מנהל) ==================== */
@@ -458,5 +505,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText };
 }
