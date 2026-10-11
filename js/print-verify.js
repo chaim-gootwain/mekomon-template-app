@@ -248,6 +248,7 @@ async function _pvNotPrinted(adId) {
   if (!confirm('לסמן שהמודעה של "' + nameOf('customers', a.customer_id) + '" לא הודפסה ולהסירה מהעימוד?')) return;
   await run(db.from('ads').update({ page_number: null }).eq('id', adId));
   st.changes.push({ t: 'not_printed', cust: nameOf('customers', a.customer_id), from: a.page_number });
+  _pvSyncFlatplan();
   a.page_number = null;
   toast('סומן כלא הודפס');
   _pvRender();
@@ -265,6 +266,7 @@ async function _pvMove(adId) {
   const patch = a.status === 'published' ? { page_number: N } : { page_number: N, status: 'placed' };
   await run(db.from('ads').update(patch).eq('id', adId));
   st.changes.push({ t: 'moved', cust: nameOf('customers', a.customer_id), from, to: N });
+  _pvSyncFlatplan();
   a.page_number = N; if (patch.status) a.status = patch.status;
   toast('עודכן לעמוד ' + N);
   _pvRender();
@@ -296,6 +298,7 @@ async function _pvAddDo(adId) {
   const patch = a.status === 'published' ? { page_number: st.page } : { page_number: st.page, status: 'placed' };
   await run(db.from('ads').update(patch).eq('id', adId));
   st.changes.push({ t: 'added', cust: nameOf('customers', a.customer_id), from, to: st.page });
+  _pvSyncFlatplan();
   a.page_number = st.page; if (patch.status) a.status = patch.status;
   toast('נוספה לעמוד ' + st.page);
   _pvRender();
@@ -320,6 +323,17 @@ async function _pvFinish() {
   _pvState = null;
 }
 
+
+/* הפלטפלן שמתחת לחלון האימות מחזיק עותק מקומי של המודעות (_fpAds) — אחרי כל שינוי
+   כאן טוענים אותו מחדש, אחרת מודעות שנוספו/הוזזו לא מופיעות בו עד רענון הדף */
+var _pvFpTimer = null;
+function _pvSyncFlatplan() {
+  if (!_pvState || typeof openFlatplan !== 'function' || typeof _fpIssue === 'undefined' || !_fpIssue) return;
+  if (_fpIssue.id !== _pvState.issue.id || !document.getElementById('fpGrid')) return;
+  var id = _fpIssue.id;
+  clearTimeout(_pvFpTimer);
+  _pvFpTimer = setTimeout(function () { openFlatplan(id).catch(function () { }); }, 400);
+}
 
 /* ---------- הזנת מודעת רגע-אחרון חדשה ממסך אמת מול מודפס ---------- */
 var _pvNewAd = null;
@@ -401,6 +415,7 @@ async function _pvNewAdSave(){
   try{
     var data=await run(db.from('ads').insert(rec).select().single());
     if(data){ _pvState.ads.push(data); _pvState.changes.push({ t:'added', cust:nameOf('customers', data.customer_id), from:null, to:_pvState.page }); }
+    _pvSyncFlatplan();
     toast('המודעה נוספה לעמוד '+_pvState.page);
     _pvNaClose();
     _pvRender();
