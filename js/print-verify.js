@@ -350,7 +350,28 @@ function _pvNewAdCustSearch(){
   var q=(i.value||'').trim();
   if(q.length<2){ res.innerHTML=''; return; }
   var list=(cache.customers||[]).filter(function(c){ return (c.name||'').includes(q) || (c.phone||'').includes(q); }).slice(0,8);
-  res.innerHTML = list.map(function(c){ return '<div style="padding:4px;cursor:pointer;border-bottom:1px solid #eee" onclick="_pvNewAdPick('+c.id+')">'+esc(c.name||'')+(c.phone?(' · '+esc(c.phone)):'')+'</div>'; }).join('') || '<div class="muted" style="padding:4px">לא נמצא לקוח</div>';
+  res.innerHTML = (list.map(function(c){ return '<div style="padding:4px;cursor:pointer;border-bottom:1px solid #eee" onclick="_pvNewAdPick('+c.id+')">'+esc(c.name||'')+(c.phone?(' · '+esc(c.phone)):'')+'</div>'; }).join('') || '<div class="muted" style="padding:4px">לא נמצא לקוח</div>')
+    +'<button class="btn btn-sm btn-ghost" style="margin-top:4px" onclick="_pvNewAdNewCust()">➕ לקוח חדש'+(list.length?'':' — "'+esc(q)+'"')+'</button>';
+}
+/* פתיחת כרטיס לקוח חדש מתוך הזנת המודעה — הטופס (modalBack) נפתח מעל חלון האימות */
+function _pvNewAdNewCust(){
+  var i=document.getElementById('pvNaCust');
+  var pre=i?(i.value||'').trim():'';
+  var done=async function(data){
+    if(!data||!_pvNewAd) return;
+    if(cache.customers && !cache.customers.some(function(x){ return x.id===data.id; })) cache.customers.push(data);
+    _pvNewAdPick(data.id);
+  };
+  if(typeof customerCreateFull==='function'){ customerCreateFull(pre, done); return; }
+  openForm('לקוח חדש', [
+    { name:'name', label:'שם העסק', required:true, default:pre },
+    { name:'phone', label:'טלפון', dir:'ltr' }
+  ], {}, async function(rec){
+    var data=await run(db.from('customers').insert(rec).select().single());
+    try{ await addInteraction('customer', data.id, 'הלקוח נוצר (מאימות גיליון מול מודפס)'); }catch(e){}
+    toast('✓ לקוח נוסף');
+    await done(data);
+  });
 }
 function _pvNewAdPick(id){
   var c=(cache.customers||[]).find(function(x){ return x.id===id; });
