@@ -266,6 +266,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_add_customer') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_customer' };
       await mgrProposeAddCustomer(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_cancel_charges') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'cancel_charges' };
+      await mgrProposeCancelCharges(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_update_customer') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'update_customer' };
       await mgrProposeUpdateCustomer(r.data.proposal);
@@ -644,6 +647,107 @@ async function mgrAddCustomerCancel() {
   const id = s.toolUseId;
   _mgrNewCust = null;
   await mgrResolveProposal(id, 'המשתמש ביטל — לא נפתח כרטיס לקוח.');
+}
+
+/* ---------- ביטול חיובים כפולים/שגויים (כרטיס אישור) ----------
+   אותם כללים של custChargeCancel (כפתור ה-✕ בכרטסת): רק חיוב פתוח,
+   בלי תשלומים רשומים (אחרת — זיכוי), מסמכי EZcount לא נגעים; רק
+   ספר החוב מתוקן, עם הערה וציר זמן. */
+let _mgrCancel = null;
+async function mgrProposeCancelCharges(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const ids = [...new Set((inp.charge_ids || []).map(Number).filter(n => n > 0))].slice(0, 20);
+  const reason = String(inp.reason || '').trim();
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!cid || !ids.length) { await fail('חסר לקוח או מזהי חיובים.'); return; }
+  mgrSetBusy(true);
+  const { data: charges } = await db.from('charges')
+    .select('id,customer_id,amount,description,status,notes').in('id', ids);
+  const { data: pays } = await db.from('payments').select('charge_id,amount').in('charge_id', ids);
+  mgrSetBusy(false);
+  const paidBy = {};
+  (pays || []).forEach(x => paidBy[x.charge_id] = (paidBy[x.charge_id] || 0) + Number(x.amount));
+  const rows = ids.map(id => {
+    const ch = (charges || []).find(c => c.id === id);
+    let block = '';
+    if (!ch) block = 'לא נמצא';
+    else if (ch.customer_id !== cid) block = 'שייך ללקוח אחר';
+    else if (['cancelled', 'lost', 'paid'].includes(ch.status)) block = 'כבר לא פתוח';
+    else if (paidBy[id]) block = 'נרשמו תשלומים (' + money(paidBy[id]) + ') — דרך זיכוי';
+    return { id, ch, block };
+  });
+  const eligible = rows.filter(r => !r.block);
+  if (!eligible.length) { await fail('אף חיוב לא ניתן לביטול: ' + rows.map(r => '#' + r.id + ' — ' + r.block).join(' · ')); return; }
+  _mgrCancel = { toolUseId: p.tool_use_id, cid, name: String(inp.customer_name || ''), rows, reason };
+  const total = eligible.reduce((s, r) => s + Number(r.ch.amount), 0);
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrCancelCard';
+  card.innerHTML = `
+    <div class="hd">✕ ביטול חיובים מהכרטסת — לאישור</div>
+    <div class="ic-warn">תיקון רישום בספר החוב בלבד — מסמכים ב-EZcount (אם קיימים) לא מבוטלים; לזיכוי מסמך יש חשבונית זיכוי.</div>
+    <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrCancel.name)}" disabled></div>
+    ${reason ? `<div class="field"><label>סיבה</label><input type="text" value="${esc(reason)}" disabled></div>` : ''}
+    <div class="table-wrap" style="max-height:240px;overflow:auto"><table class="data"><thead>
+      <tr><th>חיוב</th><th>סכום</th><th></th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${esc((r.ch && r.ch.description) || '#' + r.id)}</td>
+        <td>${r.ch ? money(r.ch.amount) : '—'}</td>
+        <td>${r.block ? '<span class="muted">⛔ ' + esc(r.block) + '</span>' : '✓ יבוטל'}</td>
+      </tr>`).join('')}</tbody></table></div>
+    <div class="ic-sum"><div class="row tot"><span>סה"כ יבוטל (${eligible.length} חיובים)</span><span>${money(total)}</span></div></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrCancelBtn" onclick="mgrCancelChargesApprove()">✕ בטל את החיובים</button>
+      <button class="btn btn-ghost" onclick="mgrCancelChargesCancel()">השאר כמו שזה</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrCancelChargesApprove() {
+  const s = _mgrCancel;
+  if (!s) return;
+  const btn = document.getElementById('mgrCancelBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'מבטל...'; }
+  mgrSetBusy(true);
+  const done = [], failed = [];
+  const noteSuffix = ' · בוטל מסוכן המקומון' + (s.reason ? ' (' + s.reason + ')' : ' (חוב כפול/שגוי)');
+  for (const r of s.rows) {
+    if (r.block) continue;
+    try {
+      const { error } = await db.from('charges').update({
+        status: 'cancelled',
+        notes: ((r.ch.notes || '') + noteSuffix).trim(),
+      }).eq('id', r.id);
+      if (error) throw error;
+      done.push(r);
+      try { await addInteraction('customer', s.cid, '✕ בוטל חיוב מהסוכן: ' + (r.ch.description || '#' + r.id) + ' — ' + money(r.ch.amount) + (s.reason ? ' (' + s.reason + ')' : '')); } catch (e) { }
+    } catch (e) { failed.push({ id: r.id, msg: String(e && e.message || e).slice(0, 100) }); }
+  }
+  mgrSetBusy(false);
+  document.getElementById('mgrCancelCard')?.remove();
+  const total = done.reduce((sum, r) => sum + Number(r.ch.amount), 0);
+  if (done.length) icSayOk('✅ בוטלו <b>' + done.length + '</b> חיובים של <b>' + esc(s.name) + '</b> בסך <b>' + money(total) + '</b> — ירדו מהכרטסת וממסכי הגבייה.');
+  if (failed.length) icSayErr('נכשלו: ' + failed.map(f => '#' + f.id + ' (' + esc(f.msg) + ')').join(' · '));
+  const skipped = s.rows.filter(r => r.block);
+  const outcome = (done.length ? 'בוטלו ' + done.length + ' חיובים בסך ' + money(total) + '. ' : 'לא בוטל דבר. ') +
+    (skipped.length ? 'דולגו: ' + skipped.map(r => '#' + r.id + ' — ' + r.block).join(', ') + '. ' : '') +
+    (failed.length ? 'נכשלו: ' + failed.map(f => '#' + f.id + ' — ' + f.msg).join(', ') : '');
+  const id = s.toolUseId;
+  _mgrCancel = null;
+  await mgrResolveProposal(id, outcome.trim());
+}
+async function mgrCancelChargesCancel() {
+  const s = _mgrCancel;
+  if (!s) return;
+  document.getElementById('mgrCancelCard')?.remove();
+  icSay('בוטל — החיובים נשארו כמו שהם.');
+  const id = s.toolUseId;
+  _mgrCancel = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — שום חיוב לא שונה.');
 }
 
 /* ---------- עדכון פרטים בכרטיס לקוח קיים (כרטיס אישור) ---------- */
