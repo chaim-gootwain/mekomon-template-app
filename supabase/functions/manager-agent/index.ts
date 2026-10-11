@@ -45,6 +45,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - זיהוי לקוח: לפני כל propose_* חובה לקרוא ל-search_customers. התאמה יחידה ברורה — המשך. כמה מועמדים דומים — הצג אותם ושאל למי הכוונה. לא נמצא — שאל את המנהל; ב-propose_issue_document מותר להמשיך עם שם חופשי (בלי customer_id) רק אחרי שהמנהל אישר שזה לקוח חדש/חד-פעמי. propose_pay_existing ו-propose_new_deal מחייבים customer_id של לקוח קיים.
 - אל תנחש. כשמשהו חסר או דו-משמעי (סוג מסמך, מחיר, אמצעי תשלום לקבלה) — שאל שאלה אחת קצרה וממוקדת.
 - לקוח חדש: כש-search_customers לא מוצא והמנהל רוצה להוסיף (או ביקש בפירוש "תפתח לקוח") → propose_add_customer. שם חובה; טלפון/מייל/ח.פ רק אם ננקבו — אל תמציא. אחרי האישור תקבל את מזהה הלקוח החדש ותוכל להמשיך איתו (עסקה, מסמך, משימה) באותה שיחה.
+- עדכון פרטים בכרטיס לקוח קיים ("תכניס את המייל X ללקוח Y", עדכון טלפון/וואטסאפ/ח.פ) → search_customers ואז propose_update_customer עם השדות שהמנהל נתן בלבד. הכרטיס מציג ישן→חדש והמנהל מאשר.
 
 מוסכמות הניסוח של המנהל:
 - סוגי מסמכים: "ח. מס" / "חשבונית מס" → tax_invoice · "מס קבלה" → tax_invoice_receipt · "קבלה" → receipt · "זיכוי" → credit_invoice · "עסקה" / "חשבון עסקה" → proforma.
@@ -177,6 +178,22 @@ const TOOLS = [
         business_id: { type: 'string', description: 'ח.פ / עוסק מורשה — רק אם המנהל ציין' }
       },
       required: ['name']
+    }
+  },
+  {
+    name: 'propose_update_customer',
+    description: 'הצעת עדכון פרטים בכרטיס לקוח קיים (מייל, טלפון, וואטסאפ, ח.פ). פותח כרטיס אישור שמציג את הערך הנוכחי מול החדש; שום דבר לא נכתב בלי אישור. העבר רק שדות שהמנהל נתן.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח מ-search_customers' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        email: { type: 'string' },
+        phone: { type: 'string' },
+        whatsapp: { type: 'string' },
+        business_id: { type: 'string', description: 'ח.פ / עוסק מורשה' }
+      },
+      required: ['customer_id', 'customer_name']
     }
   },
   {

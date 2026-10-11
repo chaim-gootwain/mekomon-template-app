@@ -266,6 +266,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_add_customer') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_customer' };
       await mgrProposeAddCustomer(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_update_customer') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'update_customer' };
+      await mgrProposeUpdateCustomer(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_debt_reminders') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'debt_reminders' };
       await mgrProposeReminders(r.data.proposal);
@@ -641,6 +644,87 @@ async function mgrAddCustomerCancel() {
   const id = s.toolUseId;
   _mgrNewCust = null;
   await mgrResolveProposal(id, 'המשתמש ביטל — לא נפתח כרטיס לקוח.');
+}
+
+/* ---------- עדכון פרטים בכרטיס לקוח קיים (כרטיס אישור) ---------- */
+const MGR_UPD_FIELDS = [
+  { k: 'email', label: 'מייל' },
+  { k: 'phone', label: 'טלפון' },
+  { k: 'whatsapp', label: 'וואטסאפ' },
+  { k: 'business_id', label: 'ח.פ / עוסק' },
+];
+let _mgrUpd = null;
+async function mgrProposeUpdateCustomer(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const changes = MGR_UPD_FIELDS.filter(f => String(inp[f.k] || '').trim());
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!cid) { await fail('חסר מזהה לקוח.'); return; }
+  if (!changes.length) { await fail('לא הועבר אף שדה לעדכון.'); return; }
+  const { data: cur, error } = await db.from('customers').select('id,name,email,phone,whatsapp,business_id').eq('id', cid).single();
+  if (error || !cur) { await fail('הלקוח לא נמצא.'); return; }
+  _mgrUpd = { toolUseId: p.tool_use_id, cid, name: cur.name || inp.customer_name || '', fields: changes.map(f => f.k), current: cur };
+  const rows = changes.map(f => `
+    <div class="grid2">
+      <div class="field"><label>${f.label} — נוכחי</label><input type="text" dir="ltr" value="${esc(String(cur[f.k] || '') || '—')}" disabled></div>
+      <div class="field"><label>${f.label} — חדש</label><input id="mgrUpd_${f.k}" type="text" dir="ltr" value="${esc(String(inp[f.k]).trim())}"></div>
+    </div>`).join('');
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrUpdCard';
+  card.innerHTML = `
+    <div class="hd">✏️ עדכון כרטיס לקוח — לאישור</div>
+    <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrUpd.name)}" disabled></div>
+    ${rows}
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrUpdBtn" onclick="mgrUpdateCustomerApprove()">✅ עדכן כרטיס</button>
+      <button class="btn btn-ghost" onclick="mgrUpdateCustomerCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrUpdateCustomerApprove() {
+  const s = _mgrUpd;
+  if (!s) return;
+  const rec = {}, desc = [];
+  for (const k of s.fields) {
+    const v = ((document.getElementById('mgrUpd_' + k) || {}).value || '').trim();
+    if (v && v !== String(s.current[k] || '')) {
+      rec[k] = v;
+      desc.push((MGR_UPD_FIELDS.find(f => f.k === k) || {}).label + ': ' + v);
+    }
+  }
+  if (!Object.keys(rec).length) { toast('אין שינוי לעדכן', true); return; }
+  const btn = document.getElementById('mgrUpdBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'מעדכן...'; }
+  const { error } = await db.from('customers').update(rec).eq('id', s.cid);
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ עדכן כרטיס'; }
+    toast('שגיאה בעדכון: ' + error.message, true);
+    return;
+  }
+  try {
+    const c = (cache.customers || []).find(x => x.id === s.cid);
+    if (c) Object.assign(c, rec);
+  } catch (e) { }
+  try { await addInteraction('customer', s.cid, '✏️ עודכן מהסוכן — ' + desc.join(' · ')); } catch (e) { }
+  document.getElementById('mgrUpdCard')?.remove();
+  icSayOk('✅ כרטיס <b>' + esc(s.name) + '</b> עודכן: ' + esc(desc.join(' · ')));
+  const id = s.toolUseId;
+  _mgrUpd = null;
+  await mgrResolveProposal(id, 'הכרטיס עודכן: ' + desc.join(', ') + '.');
+}
+async function mgrUpdateCustomerCancel() {
+  const s = _mgrUpd;
+  if (!s) return;
+  document.getElementById('mgrUpdCard')?.remove();
+  icSay('בוטל — הכרטיס לא השתנה.');
+  const id = s.toolUseId;
+  _mgrUpd = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — הכרטיס לא עודכן.');
 }
 
 /* ---------- הוספת משימה על כרטיס לקוח (כרטיס אישור) ---------- */
