@@ -652,7 +652,13 @@ const MGR_UPD_FIELDS = [
   { k: 'phone', label: 'טלפון' },
   { k: 'whatsapp', label: 'וואטסאפ' },
   { k: 'business_id', label: 'ח.פ / עוסק' },
+  { k: 'payment_terms', label: 'תנאי תשלום', select: true }, // PAY_TERMS מ-api.js
 ];
+/* ערך שדה לתצוגה — תנאי תשלום מוצגים בעברית */
+function mgrUpdShow(k, v) {
+  if (k === 'payment_terms') return (typeof PAY_TERMS !== 'undefined' && PAY_TERMS[v]) || v || '—';
+  return String(v || '') || '—';
+}
 let _mgrUpd = null;
 async function mgrProposeUpdateCustomer(p) {
   const inp = p.input || {};
@@ -664,13 +670,16 @@ async function mgrProposeUpdateCustomer(p) {
   };
   if (!cid) { await fail('חסר מזהה לקוח.'); return; }
   if (!changes.length) { await fail('לא הועבר אף שדה לעדכון.'); return; }
-  const { data: cur, error } = await db.from('customers').select('id,name,email,phone,whatsapp,business_id').eq('id', cid).single();
+  const { data: cur, error } = await db.from('customers').select('id,name,email,phone,whatsapp,business_id,payment_terms').eq('id', cid).single();
   if (error || !cur) { await fail('הלקוח לא נמצא.'); return; }
   _mgrUpd = { toolUseId: p.tool_use_id, cid, name: cur.name || inp.customer_name || '', fields: changes.map(f => f.k), current: cur };
   const rows = changes.map(f => `
     <div class="grid2">
-      <div class="field"><label>${f.label} — נוכחי</label><input type="text" dir="ltr" value="${esc(String(cur[f.k] || '') || '—')}" disabled></div>
-      <div class="field"><label>${f.label} — חדש</label><input id="mgrUpd_${f.k}" type="text" dir="ltr" value="${esc(String(inp[f.k]).trim())}"></div>
+      <div class="field"><label>${f.label} — נוכחי</label><input type="text" dir="ltr" value="${esc(mgrUpdShow(f.k, cur[f.k]))}" disabled></div>
+      <div class="field"><label>${f.label} — חדש</label>${f.select
+      ? `<select id="mgrUpd_${f.k}">${Object.keys(typeof PAY_TERMS !== 'undefined' ? PAY_TERMS : {}).map(v =>
+        `<option value="${v}" ${v === String(inp[f.k]).trim() ? 'selected' : ''}>${esc(PAY_TERMS[v])}</option>`).join('')}</select>`
+      : `<input id="mgrUpd_${f.k}" type="text" dir="ltr" value="${esc(String(inp[f.k]).trim())}">`}</div>
     </div>`).join('');
   const card = document.createElement('div');
   card.className = 'ic-card';
@@ -694,7 +703,7 @@ async function mgrUpdateCustomerApprove() {
     const v = ((document.getElementById('mgrUpd_' + k) || {}).value || '').trim();
     if (v && v !== String(s.current[k] || '')) {
       rec[k] = v;
-      desc.push((MGR_UPD_FIELDS.find(f => f.k === k) || {}).label + ': ' + v);
+      desc.push((MGR_UPD_FIELDS.find(f => f.k === k) || {}).label + ': ' + mgrUpdShow(k, v));
     }
   }
   if (!Object.keys(rec).length) { toast('אין שינוי לעדכן', true); return; }
