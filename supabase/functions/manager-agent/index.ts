@@ -46,6 +46,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - אל תנחש. כשמשהו חסר או דו-משמעי (סוג מסמך, מחיר, אמצעי תשלום לקבלה) — שאל שאלה אחת קצרה וממוקדת.
 - לקוח חדש: כש-search_customers לא מוצא והמנהל רוצה להוסיף (או ביקש בפירוש "תפתח לקוח") → propose_add_customer. שם חובה; טלפון/מייל/ח.פ רק אם ננקבו — אל תמציא. אחרי האישור תקבל את מזהה הלקוח החדש ותוכל להמשיך איתו (עסקה, מסמך, משימה) באותה שיחה.
 - עדכון פרטים בכרטיס לקוח קיים ("תכניס את המייל X ללקוח Y", טלפון/וואטסאפ/ח.פ, או תנאי תשלום — "תגדיר אותו כשוטף 60" → payment_terms='net60') → search_customers ואז propose_update_customer עם השדות שהמנהל נתן בלבד. הכרטיס מציג ישן→חדש והמנהל מאשר.
+- ביטול חיוב כפול/שגוי ("תבטל את החיובים שנכללו כבר בחוזה/בחשבון העסקה") → get_customer_status לזיהוי החיובים (charge_id), הצג למנהל אילו אתה מתכוון לבטל ולמה, ואז propose_cancel_charges עם המזהים והסיבה. זה מבטל רק בספר החוב — מסמך EZcount אם קיים מטופל בזיכוי (propose_issue_document עם credit_invoice). חיוב עם has_payments=true אי אפשר לבטל — הצע זיכוי.
 
 מוסכמות הניסוח של המנהל:
 - סוגי מסמכים: "ח. מס" / "חשבונית מס" → tax_invoice · "מס קבלה" → tax_invoice_receipt · "קבלה" → receipt · "זיכוי" → credit_invoice · "עסקה" / "חשבון עסקה" → proforma.
@@ -178,6 +179,20 @@ const TOOLS = [
         business_id: { type: 'string', description: 'ח.פ / עוסק מורשה — רק אם המנהל ציין' }
       },
       required: ['name']
+    }
+  },
+  {
+    name: 'propose_cancel_charges',
+    description: 'הצעת ביטול חיובים פתוחים מספר החוב (חוב כפול / נרשם בטעות) — אותו מנגנון של כפתור ה-✕ בכרטסת. פותח כרטיס אישור עם החיובים; חיוב שנרשמו עליו תשלומים ייחסם (מטופל בזיכוי). מסמכי EZcount לא מבוטלים — זה תיקון רישום בספר החוב בלבד. קח את charge_id מ-get_customer_status.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        charge_ids: { type: 'array', items: { type: 'number' }, maxItems: 20, description: 'מזהי החיובים לביטול (charge_id מ-get_customer_status)' },
+        reason: { type: 'string', description: 'סיבת הביטול בקצרה (למשל "נכלל בחשבון עסקה 90107")' }
+      },
+      required: ['customer_id', 'customer_name', 'charge_ids']
     }
   },
   {
@@ -376,7 +391,7 @@ async function runReadTool(caller, name, input) {
     let debtTotal = 0;
     const openCharges = (charges || []).map(c => {
       const bal = Math.round((Number(c.amount) - (paysByCharge[c.id] || 0)) * 100) / 100;
-      return { description: c.description || 'חיוב', balance: bal, status: c.status, due_date: c.due_date || null };
+      return { charge_id: c.id, description: c.description || 'חיוב', balance: bal, has_payments: (paysByCharge[c.id] || 0) > 0, status: c.status, due_date: c.due_date || null };
     }).filter(c => c.balance > 0.001);
     openCharges.forEach(c => debtTotal += c.balance);
     debtTotal = Math.round(debtTotal * 100) / 100;
