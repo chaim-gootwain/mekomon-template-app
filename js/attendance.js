@@ -74,6 +74,11 @@ ${isAdmin ? `<div class="card card-pad" style="margin-bottom:16px">
 </tr>`).join('') || '<tr><td colspan="4" class="empty">אין רישומים החודש</td></tr>'}</tbody>
 </table></div></div>` : ''}
 
+${isAdmin ? `<div class="card card-pad" style="margin-bottom:16px">
+<b>נוכחות אוטומטית</b> <span class="muted">— מחתים לבד כשעובדים בתוכנה, ונסגר אחרי 30 דק' בלי פעילות</span>
+<div id="attAutoList" style="display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:8px"><span class="muted">טוען…</span></div>
+</div>` : ''}
+
 <div class="card">
 <div class="card-pad"><b>${isAdmin ? 'כל הרישומים' : 'הרישומים שלי'}</b></div>
 <div id="attTable"></div>
@@ -85,11 +90,36 @@ renderTable(document.getElementById('attTable'), rows, [
 { h: 'כניסה', f: r => new Date(r.clock_in).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) },
 { h: 'יציאה', f: r => r.clock_out ? new Date(r.clock_out).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '<span class="pill green">פתוח</span>' },
 { h: 'שעות', f: r => r.clock_out ? fmtH(hours(r)) : '' },
-{ h: '', f: r => r.manual ? '<span class="pill amber">תיקון ידני</span>' : '' },
+{ h: '', f: r => r.manual ? '<span class="pill amber">תיקון ידני</span>' : (r.auto ? '<span class="pill">אוטומטי</span>' : '') },
 ...(isAdmin ? [{ h: '', f: r => `<button class="btn btn-ghost btn-sm" onclick="attAdminFix(${r.id})" title="תיקון שעות">✎</button>` }] : []),
 ], { empty: 'אין רישומי נוכחות החודש' });
+
+if (isAdmin) attRenderAutoList();
 }
 };
+
+/* רשימת העובדים עם מתג "נוכחות אוטומטית" (מסך המנהל) */
+async function attRenderAutoList() {
+const box = document.getElementById('attAutoList');
+if (!box) return;
+const { data, error } = await db.from('profiles').select('id,full_name,role,active,auto_attendance').eq('active', true).order('full_name');
+if (error || !data || (data.length && !('auto_attendance' in data[0]))) {
+box.innerHTML = '<span class="muted">יש להריץ את מיגרציית הנוכחות האוטומטית (2026-10-11_auto_attendance.sql)</span>';
+return;
+}
+const staff = data.filter(p => !['pending', 'committee'].includes(p.role));
+box.innerHTML = staff.map(p => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+<input type="checkbox" ${p.auto_attendance ? 'checked' : ''} onchange="attSetAuto('${p.id}', this.checked, this)" style="width:auto">
+${esc(p.full_name || '')}</label>`).join('') || '<span class="muted">אין עובדים פעילים</span>';
+}
+
+async function attSetAuto(pid, on, cb) {
+try {
+await run(db.rpc('set_auto_attendance', { p_profile: pid, p_on: on }));
+if (profile && pid === profile.id) { profile.auto_attendance = on; if (on) attAutoBeat(true); else await updateClockButton(); }
+toast(on ? 'נוכחות אוטומטית הופעלה' : 'נוכחות אוטומטית כובתה');
+} catch (e) { if (cb) cb.checked = !on; }
+}
 
 /* בקשת תיקון — עובד ששכח להחתים */
 function attRequestFix() {
@@ -186,6 +216,7 @@ async function attIsClockedIn() {
 async function attMaybeClockInBanner() {
   if (!profile || profile.role === 'committee') return;
   if (!document.getElementById('clockBtn')) return;        // רק למי שיש שעון נוכחות
+  if (attIsAuto()) return;                                  // נוכחות אוטומטית — אין צורך בתזכורת
   if (document.getElementById('attClockBanner')) return;    // כבר מוצג
   if (await attIsClockedIn()) return;                       // כבר מוחתם — אין צורך
   attEnsureBannerStyles();
@@ -229,12 +260,66 @@ function attShowClockOutReminder(origLogout) {
   document.body.appendChild(ov);
 }
 
+/* ============================================================
+   נוכחות אוטומטית — למי שמסומן auto_attendance (ברירת מחדל: מנהלים)
+   כל פעילות בתוכנה (עכבר/מקלדת/מגע/חזרה ללשונית) שולחת "דופק" לשרת,
+   לכל היותר פעם ב-4 דקות. השרת (attendance_heartbeat) פותח משמרת אם אין,
+   וסוגר משמרת שנזנחה (30 דק' בלי דופק) בשעת הפעילות האחרונה.
+============================================================ */
+const ATT_BEAT_MS = 4 * 60 * 1000;
+let _attLastBeat = 0, _attBeatBusy = false, _attAutoOn = false;
+
+function attIsAuto() { return !!(profile && profile.auto_attendance && profile.role !== 'committee'); }
+
+async function attAutoBeat(force) {
+  if (!attIsAuto() || _attBeatBusy) return;
+  if (!force && Date.now() - _attLastBeat < ATT_BEAT_MS) return;
+  _attBeatBusy = true; _attLastBeat = Date.now();
+  try {
+    const { data, error } = await db.rpc('attendance_heartbeat');
+    if (error) { console.warn('attendance_heartbeat', error.message); return; }
+    if (data === 'off') { profile.auto_attendance = false; }
+    if (data === 'started' || data === 'off') await updateClockButton();
+  } catch (e) { /* רשת — ננסה בפעילות הבאה */ }
+  finally { _attBeatBusy = false; }
+}
+
+function attAutoStart() {
+  if (!attIsAuto()) return;
+  attAutoBeat(true);
+  if (_attAutoOn) return;
+  _attAutoOn = true;
+  const onAct = () => attAutoBeat(false);
+  ['pointerdown', 'keydown', 'mousemove', 'touchstart', 'wheel'].forEach(ev =>
+    document.addEventListener(ev, onAct, { passive: true, capture: true }));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onAct(); });
+}
+
+/* כפתור השעון בתפריט — למשתמש אוטומטי מציג סטטוס (הלחיצה עדיין סוגרת/פותחת ידנית) */
+(function () {
+  const orig = window.updateClockButton;
+  if (typeof orig === 'function' && !orig._attWrapped) {
+    const wrapped = async function () {
+      const r = await orig.apply(this, arguments);
+      const btn = document.getElementById('clockBtn');
+      if (btn && attIsAuto()) {
+        btn.textContent = btn.dataset.state === 'in' ? '⏱ נוכח (אוטומטי)' : '⏱ אוטומטי';
+        btn.title = 'נוכחות אוטומטית: נרשמת כניסה כשעובדים בתוכנה, ויציאה אחרי 30 דק\' בלי פעילות';
+      } else if (btn) btn.title = '';
+      return r;
+    };
+    wrapped._attWrapped = true;
+    window.updateClockButton = wrapped;
+  }
+})();
+
 /* עטיפת afterLogin — הצגת הבאנר אחרי הכניסה */
 (function () {
   const orig = window.afterLogin;
   if (typeof orig === 'function' && !orig._attWrapped) {
     const wrapped = async function () {
       const r = await orig.apply(this, arguments);
+      try { attAutoStart(); } catch (e) { console.error('att auto', e); }
       try { await attMaybeClockInBanner(); } catch (e) { console.error('att banner', e); }
       return r;
     };
@@ -249,6 +334,10 @@ function attShowClockOutReminder(origLogout) {
   if (typeof orig === 'function' && !orig._attWrapped) {
     const wrapped = async function () {
       try {
+        if (attIsAuto()) {                                     // אוטומטי — סוגרים משמרת בשקט
+          if (await attIsClockedIn()) { try { await db.rpc('clock_out'); } catch (e) { /* ממשיכים */ } }
+          return orig.apply(this, arguments);
+        }
         if (await attIsClockedIn()) { attShowClockOutReminder(orig); return; }
       } catch (e) { /* אם הבדיקה נכשלה — ממשיכים ליציאה רגילה */ }
       return orig.apply(this, arguments);
