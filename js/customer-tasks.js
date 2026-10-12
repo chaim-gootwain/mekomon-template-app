@@ -21,12 +21,18 @@ function _ctMissing(err) { return /customer_tasks|does not exist|relation .* doe
 /* האם משימה פתוחה באיחור (יש תאריך יעד שעבר) */
 function _ctOverdue(t) { return !t.done && t.due_date && t.due_date < today(); }
 
+/* סוכן (sales) רואה רק משימות שהוא יצר או שהוקצו לו — משימות של המנהל נשארות אצל המנהל */
+function _ctScope(q) {
+  if (typeof profile === 'undefined' || !profile || profile.role !== 'sales') return q;
+  return q.or(`created_by.eq.${profile.id},assigned_to.eq.${profile.id}`);
+}
+
 /* מרנדר את סעיף המשימות בכרטיס הלקוח (טוען פתוחות + מציג טופס הוספה) */
 async function custTasksRender(customerId) {
   const box = document.getElementById('ctSection'); if (!box) return;
   let tasks = null, missing = false;
   try {
-    const r = await db.from('customer_tasks').select('*').eq('customer_id', customerId).eq('done', false).order('due_date', { ascending: true });
+    const r = await _ctScope(db.from('customer_tasks').select('*').eq('customer_id', customerId).eq('done', false)).order('due_date', { ascending: true });
     if (r.error) { if (_ctMissing(r.error)) missing = true; else throw r.error; } else tasks = r.data || [];
   } catch (e) { missing = _ctMissing(e); if (!missing) { box.innerHTML = '<p class="muted" style="font-size:.85rem">שגיאה בטעינת משימות</p>'; return; } }
 
@@ -78,7 +84,7 @@ async function custMyTasksWidget() {
   const box = document.getElementById('dashTasks'); if (!box) return;
   let tasks = null, missing = false;
   try {
-    const r = await db.from('customer_tasks').select('*').eq('done', false).not('due_date', 'is', null).lte('due_date', today()).order('due_date', { ascending: true }).limit(12);
+    const r = await _ctScope(db.from('customer_tasks').select('*').eq('done', false).not('due_date', 'is', null).lte('due_date', today())).order('due_date', { ascending: true }).limit(12);
     if (r.error) { missing = _ctMissing(r.error); if (!missing) { box.innerHTML = ''; return; } } else tasks = r.data || [];
   } catch (e) { box.innerHTML = ''; return; }
   if (missing) { box.innerHTML = ''; return; }              // לפני מיגרציה — לא מציגים כלום
