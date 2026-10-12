@@ -16,7 +16,7 @@
 // ERROR_NUMBER 4 — צריך לאשר את ה-IP / לבקש טוקן שאינו נעול ל-IP.
 //
 // הרשאות: משתמש מחובר מקבל רק את השלוחה של עצמו. מנהל רשאי לבקש
-// סוכן אחר (agent_id). call-dial לא נגעו בו.
+// סוכן אחר (agent_id). פונקציית החיוג לא שונתה.
 //
 // body: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', agent_id?: number }
 // תשובה: { ok, ext, days: { 'YYYY-MM-DD': {calls,answered,unanswered,talk_sec} } }
