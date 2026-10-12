@@ -39,3 +39,20 @@
   to = "/index.html"
   status = 404
   force = true
+
+# זמני מטמון: קובצי הקוד נטענים עם ?v=<גרסה> שמתחלף בכל פריסה — אפשר לשמור
+# אותם בדפדפן לשנה בלי לבדוק מול השרת (חוסך סבב רשת לכל קובץ, קריטי ברשת מסוננת).
+# ספריות vendor: יום שלם, ואחריו מוגשות מהמטמון בזמן שהגרסה החדשה נבדקת ברקע.
+[[headers]]
+  for = "/app.bundle.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    # שעה בלבד: set-password.html טוען את ה-CSS בלי ?v=
+    Cache-Control = "public, max-age=3600, stale-while-revalidate=604800"
+[[headers]]
+  for = "/js/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"

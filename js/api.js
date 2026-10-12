@@ -311,7 +311,24 @@ a.click();
 readSpreadsheet(file) — קורא xlsx/xls/csv ומחזיר מערך שורות,
 כשכל שורה היא אובייקט לפי כותרות העמודות בשורה הראשונה.
 pickField(row, [שמות אפשריים]) — מוצא ערך לפי כמה שמות עמודה נפוצים */
-function readSpreadsheet(file) {
+// ספריית האקסל (~900KB) נטענת רק כשצריך — לא בכל כניסה למערכת
+let _xlsxLoading = null;
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve();
+  if (!_xlsxLoading) {
+    _xlsxLoading = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'js/vendor/xlsx.full.min.js';
+      s.onload = () => res();
+      s.onerror = () => { _xlsxLoading = null; rej(new Error('ספריית האקסל לא נטענה')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _xlsxLoading;
+}
+
+async function readSpreadsheet(file) {
+await loadXlsx();
 return new Promise((resolve, reject) => {
 const reader = new FileReader();
 reader.onload = (e) => {
