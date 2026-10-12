@@ -611,7 +611,7 @@ async function reportLedgerExport() {
   });
   const fname = `כרטסות_${data.range.from}_${data.range.to}`;
   try {
-    if (typeof XLSX === 'undefined') throw new Error('no-xlsx');
+    await loadXlsx();
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = [{ wch: 24 }, { wch: 11 }, { wch: 11 }, { wch: 40 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 11 }];
     const wb = XLSX.utils.book_new();

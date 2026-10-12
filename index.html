@@ -6,7 +6,9 @@
 <title>@@PAPER_NAME@@ — מערכת ניהול</title>
 <!-- גופן עברי איכותי -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- נטען בלי לחסום את הצגת הדף: ברשת איטית/מסוננת המסך עולה מיד בגופן מערכת -->
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <!-- PWA: פתיחה מהטלפון כאפליקציה -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="@@COLOR_BRAND@@">
@@ -64,8 +66,7 @@ if (/[#&]type=(invite|recovery)/.test(location.hash)) {
 </script>
 <!-- ספריית Supabase (מסד הנתונים) -->
 <script defer src="js/vendor/supabase.min.js"></script>
-<!-- ספריית קריאת קובצי אקסל (לייבוא לקוחות ולידים) -->
-<script defer src="js/vendor/xlsx.full.min.js"></script>
+<!-- ספריית האקסל נטענת לפי דרישה (loadXlsx ב-api.js) -->
 </head>
 <body>
 
