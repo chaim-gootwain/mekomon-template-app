@@ -45,6 +45,9 @@ function psNameKey(n) {
     .replace(/(^| )(בע מ|בעמ|ltd)(?= |$)/g, ' ')
     .replace(/\s+/g, ' ').trim();
 }
+function psAllowed() { return profile.role === 'admin' || profile.role === 'sales'; }
+/* מפתח שם להשוואה מול לקוחות/לידים בשרת (prospect_match) — זהה לנרמול שבפונקציה */
+function psSqlNameKey(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9א-ת]/g, ''); }
 function psScore(p) { return (p.size_rank || 0) * 2 + (p.appearances || 1) * 3 + (p.winback ? 4 : 0); }
 function psRegion() {
   const s = cache.settings || {};
@@ -55,13 +58,13 @@ function psRegion() {
 Pages.prospects = {
   title: 'מפרסמים פוטנציאליים',
   render: async (el) => {
-    if (profile.role !== 'admin') { el.innerHTML = '<div class="empty">מסך זה זמין למנהל בלבד</div>'; return; }
+    if (!psAllowed()) { el.innerHTML = '<div class="empty">מסך זה זמין למנהל ולסוכנים בלבד</div>'; return; }
     psEnsureStyles();
     if (!_ps) _ps = { tab: 'new', q: '', rows: [], urls: {} };
     el.innerHTML = `
       <div class="page-head"><h2>מפרסמים פוטנציאליים</h2>
         <div class="actions">
-          <button class="btn btn-ghost" onclick="psSettings()">⚙ הגדרות סינון</button>
+          ${profile.role === 'admin' ? '<button class="btn btn-ghost" onclick="psSettings()">⚙ הגדרות סינון</button>' : ''}
         </div>
       </div>
       <div id="psScanBox"></div>
@@ -196,42 +199,30 @@ async function psStartScan() {
   }
 }
 
-/* אינדקס השוואה: לקוחות, לידים ומפרסמים קיימים — נטען פעם אחת לסריקה */
+/* אינדקס השוואה מול מפרסמים שכבר ברשימה — נטען פעם אחת לסריקה.
+   ההשוואה מול לקוחות ולידים נעשית בשרת (prospect_match) — כך גם סוכן,
+   שרואה רק את הלקוחות שלו, לא יוסיף לקוח/ליד של סוכן אחר כ"מפרסם חדש". */
 async function psLoadIndex() {
-  const [custs, leads, pros] = await Promise.all([
-    runAll((f, t) => db.from('customers').select('id,name,phone,crm_status').order('id').range(f, t)),
-    runAll((f, t) => db.from('leads').select('id,name,phone,whatsapp,status').order('id').range(f, t)),
-    runAll((f, t) => db.from('prospects').select('id,name,name_key,phone_key,size_rank,best_size,appearances,sources,image_path,status').order('id').range(f, t)),
-  ]);
-  const ix = { custPh: {}, custName: {}, leadPh: {}, leadName: {}, proPh: {}, proName: {}, lastAd: {} };
-  custs.forEach(c => {
-    const k = psPhKey(c.phone); if (psPhReal(k)) ix.custPh[k] = c;
-    const n = psNameKey(c.name); if (n) ix.custName[n] = c;
-  });
-  leads.forEach(l => {
-    [l.phone, l.whatsapp].forEach(p => { const k = psPhKey(p); if (psPhReal(k)) ix.leadPh[k] = l; });
-    const n = psNameKey(l.name); if (n) ix.leadName[n] = l;
-  });
+  const pros = await runAll((f, t) => db.from('prospects').select('id,name,name_key,phone_key,size_rank,best_size,appearances,sources,image_path,status').order('id').range(f, t));
+  const ix = { proPh: {}, proName: {}, match: {} };
   pros.forEach(p => psIndexPro(ix, p));
   _psScan.ix = ix;
+}
+async function psMatch(phKeys, name, memo) {
+  const nk = psSqlNameKey(name);
+  const key = phKeys.join(',') + '|' + nk;
+  if (memo && key in memo) return memo[key];
+  const { data, error } = await db.rpc('prospect_match', { p_phones: phKeys, p_name: nk });
+  if (error) throw error;
+  const row = (data && data[0]) || { kind: null, customer_id: null, past: false };
+  if (memo) memo[key] = row;
+  return row;
 }
 function psIndexPro(ix, p) {
   if (psPhReal(p.phone_key)) ix.proPh[p.phone_key] = p;
   if (p.name_key) ix.proName[p.name_key] = p;
 }
 
-/* לקוח בעבר: crm_status=past, או שאין לו מודעה ב-180 הימים האחרונים */
-async function psIsPastCustomer(c) {
-  if (c.crm_status === 'past') return true;
-  const ix = _psScan.ix;
-  if (!(c.id in ix.lastAd)) {
-    const { data } = await db.from('ads').select('created_at').eq('customer_id', c.id).order('created_at', { ascending: false }).limit(1);
-    ix.lastAd[c.id] = data && data[0] ? data[0].created_at : null;
-  }
-  const last = ix.lastAd[c.id];
-  if (!last) return false; // לקוח שעוד לא פרסם (למשל חדש) — לא "לקוח עבר"
-  return (Date.now() - new Date(last).getTime()) > 180 * 864e5;
-}
 
 /* ---------- סריקת עמוד ---------- */
 async function psScanPage(doc, pageNum) {
@@ -345,16 +336,14 @@ async function psHandleAd(ad, pageNum, jobs) {
   const sizeRank = (PS_SIZE[ad.size] || PS_SIZE.small)[1];
   const src = { kind: s.kind, pub: s.pub || null, date: s.date, page: pageNum, size: ad.size, file: s.fileName, at: today() };
 
-  // 1. לקוח / ליד קיים
-  const cust = phKeys.map(k => ix.custPh[k]).find(Boolean) || (nKey && ix.custName[nKey]);
+  // 1. לקוח / ליד קיים (בדיקה בשרת — מול כל המערכת)
+  // לקוח עבר = crm_status=past או בלי מודעה 180 יום
+  const m = await psMatch(phKeys, ad.business_name, ix.match);
   let winback = false, customerId = null;
-  if (cust) {
-    if (await psIsPastCustomer(cust)) { winback = true; customerId = cust.id; }
+  if (m.kind === 'customer') {
+    if (m.past) { winback = true; customerId = m.customer_id; }
     else { psNoteExisting(ad.business_name + ' (לקוח)'); return; }
-  } else {
-    const lead = phKeys.map(k => ix.leadPh[k]).find(Boolean) || (nKey && ix.leadName[nKey]);
-    if (lead) { psNoteExisting(ad.business_name + ' (ליד)'); return; }
-  }
+  } else if (m.kind === 'lead') { psNoteExisting(ad.business_name + ' (ליד)'); return; }
 
   // 2. כבר ברשימת המפרסמים → מצטבר
   const pro = phKeys.map(k => ix.proPh[k]).find(Boolean) || (nKey && ix.proName[nKey]);
@@ -547,21 +536,23 @@ function psToLead(id) {
     { name: 'city', label: 'יישוב', half: true },
     { name: 'field', label: 'תחום העסק', half: true },
     { name: 'competitor', label: 'מפרסם היום אצל' },
-    { name: 'agent_id', label: 'סוכן מטפל (ריק = מאגר ללא שיוך)', type: 'select', options: 'agents' },
+    ...(profile.role === 'admin' ? [{ name: 'agent_id', label: 'סוכן מטפל (ריק = מאגר ללא שיוך)', type: 'select', options: 'agents' }] : []),
     { name: 'notes', label: 'הערות', type: 'textarea', rows: 4 },
   ], { name: r.name, phone: r.phone, email: r.email, city: r.location, field: r.field, competitor, notes }, async (rec) => {
-    // בדיקת כפילות אחרונה מול המסד
+    // בדיקת כפילות אחרונה מול כל המערכת (גם לידים/לקוחות של סוכנים אחרים)
     const k = psPhKey(rec.phone);
-    if (psPhReal(k)) {
-      const [{ data: l }, { data: c }] = await Promise.all([
-        db.from('leads').select('id,name,phone').ilike('phone', '%' + k.slice(-7) + '%').limit(20),
-        db.from('customers').select('id,name,phone').ilike('phone', '%' + k.slice(-7) + '%').limit(20),
-      ]);
-      const hitL = (l || []).find(x => psPhKey(x.phone) === k);
-      const hitC = (c || []).find(x => psPhKey(x.phone) === k);
-      if (hitL && !confirm(`הטלפון כבר קיים אצל הליד "${hitL.name}". להוסיף ליד נוסף בכל זאת?`)) throw new Error('dup');
-      if (hitC && !r.winback && !confirm(`הטלפון כבר קיים אצל הלקוח "${hitC.name}". להוסיף ליד בכל זאת?`)) throw new Error('dup');
+    const m = await psMatch(psPhReal(k) ? [k] : [], rec.name);
+    const isMgr = profile.role === 'admin';
+    if (m.kind === 'lead' || (m.kind === 'customer' && !m.past)) {
+      const what = m.kind === 'lead' ? 'כליד' : 'כלקוח פעיל';
+      if (!isMgr) {
+        toast(`העסק כבר קיים במערכת ${what} — לא ניתן להוסיף אותו שוב`, true);
+        try { await run(db.from('prospects').update({ status: 'rejected', filter_reason: 'כבר קיים במערכת ' + what, updated_at: new Date().toISOString() }).eq('id', id)); r.status = 'rejected'; psDrawList(); } catch (e) { }
+        throw new Error('dup');
+      }
+      if (!confirm(`העסק כבר קיים במערכת ${what}. להוסיף ליד בכל זאת?`)) throw new Error('dup');
     }
+    if (!isMgr) rec.agent_id = (typeof myAgentId === 'function' && myAgentId()) || null;
     const lead = await run(db.from('leads').insert({
       ...rec, source: 'חילוץ מ-PDF', source_detail: srcDetail, created_by: profile.id,
     }).select('id').single(), 'שגיאה ביצירת הליד');
@@ -605,7 +596,7 @@ function psSettings() {
   openLeadCard = async function (id) {
     const res = await orig.apply(this, arguments);
     try {
-      if (profile.role !== 'admin') return res;
+      if (!psAllowed()) return res;
       const { data } = await db.from('prospects').select('image_path,sources').eq('lead_id', id).not('image_path', 'is', null).limit(1);
       const p = data && data[0];
       if (!p) return res;
@@ -651,7 +642,7 @@ function psEnsureStyles() {
 /* ---------- רישום בתפריט (מנהל בלבד, אחרי "ייבוא לידים"/"לידים") ---------- */
 (function () {
   if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'prospects')) {
-    const item = { id: 'prospects', title: 'מפרסמים פוטנציאליים', icon: '🔎', roles: ['admin'], group: 'מכירות' };
+    const item = { id: 'prospects', title: 'מפרסמים פוטנציאליים', icon: '🔎', roles: ['admin', 'sales'], group: 'מכירות' };
     let idx = NAV.findIndex(n => n.id === 'lead-import');
     if (idx < 0) idx = NAV.findIndex(n => n.id === 'leads');
     if (idx >= 0) NAV.splice(idx + 1, 0, item); else NAV.push(item);

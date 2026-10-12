@@ -1,7 +1,7 @@
 // extract-advertisers — זיהוי מפרסמים בעמוד של עיתון/מגזין/עלון (Claude Vision)
 // הדפדפן (js/prospects.js) ממיר כל עמוד PDF לתמונה ושולח עמוד אחד בכל קריאה —
 // כך אין מגבלת עמודים ואין חשש מ-timeout. הפונקציה רק מזהה ומחזירה JSON;
-// לא כותבת לטבלאות. מנהל בלבד. הסוד ANTHROPIC_API_KEY משותף עם parse-entry.
+// לא כותבת לטבלאות. מנהל וסוכנים. הסוד ANTHROPIC_API_KEY משותף עם parse-entry.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const cors = {
@@ -135,12 +135,12 @@ Deno.serve(async (req: Request) => {
     const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
     const body: any = await req.json().catch(() => ({}));
 
-    // הרשאה: מנהל פעיל בלבד
+    // הרשאה: מנהל או סוכן פעיל
     const caller = createClient(SUPABASE_URL, ANON, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } });
     const { data: { user } } = await caller.auth.getUser();
     if (!user) return json({ error: 'לא מזוהה' }, 401);
     const { data: prof } = await svc.from('profiles').select('role,active').eq('id', user.id).single();
-    if (!prof || !prof.active || prof.role !== 'admin') return json({ error: 'אין הרשאה' }, 403);
+    if (!prof || !prof.active || (prof.role !== 'admin' && prof.role !== 'sales')) return json({ error: 'אין הרשאה' }, 403);
 
     if (!API_KEY) return json({ error: 'ANTHROPIC_API_KEY לא הוגדר ב-Supabase' }, 500);
     if (body.probe) return json({ probe: true, ok: true });
