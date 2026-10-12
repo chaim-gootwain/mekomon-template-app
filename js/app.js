@@ -69,6 +69,7 @@ show('app');
 await refreshCache();
 await updateClockButton();
 openPage('dash');
+try { if (typeof agentBarInit === 'function') agentBarInit(); } catch (e) { }
 // התראות ופעמון ההודעות נדחים — כל אחד יורה שאילתה משלו, ואם הם רצים יחד עם
 // טעינת המטמון והדשבורד הם מעמיסים על רגע הכניסה. דחייה קצרה נותנת לדשבורד
 // להיטען קודם, ומורידה את "סופת השאילתות" הראשונית מול המסד.
