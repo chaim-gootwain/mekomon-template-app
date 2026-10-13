@@ -73,7 +73,18 @@ display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; 
 .sidebar .brand { padding: 22px 20px 14px; font-size: 1.25rem; font-weight: 800; letter-spacing: .3px; }
 .sidebar .brand small { display: block; font-weight: 400; font-size: .72rem; opacity: .65; margin-top: 2px; }
 .sidebar nav { flex: 1; padding: 6px 10px; }
-.sidebar nav .nav-group { font-size: .7rem; opacity: .5; padding: 14px 10px 4px; letter-spacing: .5px; }
+.sidebar nav .nav-sec { margin-top: 4px; }
+.sidebar nav button.nav-group {
+font-size: .78rem; font-weight: 600; color: rgba(255,255,255,.6); padding: 10px 10px 6px; letter-spacing: .5px;
+}
+.sidebar nav button.nav-group:hover { background: rgba(255,255,255,.06); color: #fff; }
+.sidebar nav .nav-caret { order: 2; margin-right: auto; font-size: .7rem; transition: transform .15s; transform: rotate(90deg); }
+.sidebar nav .nav-sec.open .nav-caret { transform: none; }
+.sidebar nav .nav-sec:not(.open) .nav-items { display: none; }
+/* קבוצה סגורה שיש בתוכה התראה — נקודה ליד שם הקבוצה */
+.sidebar nav .nav-sec:not(.open):has(.badge:not(.hidden)) .nav-group::after {
+content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 6px; order: 1;
+}
 .sidebar nav button {
 display: flex; align-items: center; gap: 10px; width: 100%;
 background: none; border: none; color: #d7e3f0; text-align: right;
@@ -257,6 +268,8 @@ border-bottom: 3px solid transparent; margin-bottom: -2px; }
 .sidebar .brand { padding: 12px 16px; font-size: 1rem; }
 .sidebar nav { display: flex; overflow-x: auto; padding: 0 8px 8px; flex-basis: 100%; order: 3; }
 .sidebar nav .nav-group { display: none; }
+/* בנייד התפריט הוא פס גלילה אופקי — כל הפריטים מוצגים בלי קבוצות */
+.sidebar nav .nav-sec, .sidebar nav .nav-sec:not(.open) .nav-items { display: contents; }
 .sidebar nav button { white-space: nowrap; width: auto; }
 .sidebar .user-box { border-top: none; margin-right: auto; padding: 8px 16px; }
 .content { padding: 14px; }

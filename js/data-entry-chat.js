@@ -632,7 +632,7 @@ function deInjectNav() {
   btn.innerHTML = '<span>📝</span> הזנת נתונים <span class="badge hidden" id="badge-entrychat"></span>';
   btn.onclick = () => openPage('entrychat');
   const anchor = document.getElementById('nav-quotes') || document.getElementById('nav-contracts') || document.getElementById('nav-leads');
-  if (anchor && anchor.parentElement === nav) anchor.after(btn);
+  if (anchor && nav.contains(anchor)) anchor.after(btn);
   else nav.appendChild(btn);
 }
 (function () {
