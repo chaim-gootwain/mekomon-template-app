@@ -57,6 +57,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
 - שליחת גזירים במייל ללקוח → propose_send_clips עם מספרי הגיליונות. אם המנהל לא ציין גיליונות — בדוק ב-get_customer_publications אילו גיליונות רלוונטיים (למשל האחרון שפורסם) והצע. המייל נשלח לכתובת שבכרטיס הלקוח, והמנהל מאשר בכרטיס לפני שליחה.
 - "צרף לי את החשבונית" / "תראה לי את המסמך" → get_customer_documents, ותן את הקישור בפורמט markdown: [חשבונית מס 10009 — PDF](pdf_url). הקישור נפתח בלחיצה אצל המנהל. מסמך בלי pdf_url — אמור שהקובץ לא זמין במערכת (הופק מחוץ למסלול הרגיל).
+- "שלח לה את הקבלה במייל" / שליחת מסמך חשבונאי ללקוח → get_customer_documents למצוא את המסמך, ואז propose_send_document עם doc_number. המסמך נשלח כ-PDF מצורף לכתובת שבכרטיס הלקוח, אחרי אישור בכרטיס.
 - תזכורות חוב: "מי חייב" / "שלח תזכורות למי שחייב מעל X" → get_debtors, הצג את הרשימה, ואז propose_debt_reminders עם הלקוחות שנבחרו וערוץ (whatsapp או email — שאל אם לא צוין). וואטסאפ נפתח לשליחה ידנית אצל המנהל; מייל נשלח מהמערכת. שום תזכורת לא יוצאת בלי אישור בכרטיס.
 - משימות: "תזכיר לי ל..." / "מה המשימות שלי" → get_customer_tasks לקריאה, propose_add_task להוספה (משימה יושבת על כרטיס לקוח — חובה customer_id). תאריכים יחסיים ("יום חמישי", "עוד שבוע") — חשב לתאריך לפי התאריך של היום.
 - עסקה/חבילה של כמה פרסומים עם גיליון התחלה או רצף גיליונות → propose_new_deal. אם כל הפרסומים באותו גיליון אחד ("8 עמודים בגיליון 305") → propose_new_deal עם same_issue=true ו-start_issue=אותו גיליון. אמר המנהל בפירוש "בלי מסמך" / "בלי חשבון עסקה" → include_proforma=false; "בלי חוזה" → include_contract=false. אחרי אישור הכרטיס דווח רק את מה שכתוב ב-tool_result ("הוקם בפועל: ...") — אל תניח שהכול הוקם.
@@ -247,6 +248,20 @@ const TOOLS = [
         due_date: { type: 'string', description: 'תאריך יעד YYYY-MM-DD (אופציונלי)' }
       },
       required: ['customer_id', 'customer_name', 'title']
+    }
+  },
+  {
+    name: 'propose_send_document',
+    description: 'הצעת שליחת מסמך חשבונאי קיים (חשבונית/קבלה/חשבון עסקה) במייל ללקוח, עם ה-PDF מצורף. פותח כרטיס אישור (נמען, מסמך, הודעה אישית) — שום מייל לא נשלח בלי אישור. מצא את המסמך קודם ב-get_customer_documents.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        doc_number: { type: 'string', description: 'מספר המסמך מ-get_customer_documents' },
+        note: { type: 'string', description: 'משפט אישי לגוף המייל אם המנהל ביקש (אופציונלי)' }
+      },
+      required: ['customer_id', 'customer_name', 'doc_number']
     }
   },
   {
