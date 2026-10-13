@@ -281,9 +281,18 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_add_task') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_task' };
       await mgrProposeTask(r.data.proposal);
-    } else {
+    } else if (['propose_issue_document', 'propose_pay_existing', 'propose_new_deal'].includes(r.data.proposal.name)) {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'invoice' };
       await mgrOpenProposal(r.data.proposal);
+    } else {
+      // השרת מציע כלי שהבאנדל בטאב הזה עוד לא מכיר — גרסה ישנה בדפדפן
+      icSayErr('יש עדכון חדש למערכת שהטאב הזה עוד לא טעון איתו — <b>רענן את הדף (Ctrl+F5)</b> ובקש שוב.');
+      _mgrState.pending = null;
+      _mgrState.messages.push({
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: r.data.proposal.tool_use_id, content: 'הדפדפן של המנהל מריץ גרסה ישנה שלא מכירה את הכלי ' + r.data.proposal.name + '. ביקשתי ממנו לרענן את הדף ולבקש שוב — אל תנסה שוב בשיחה הזו עד שיאשר שרענן.' }]
+      });
+      mgrSaveChat();
     }
   }
   mgrSaveChat();
