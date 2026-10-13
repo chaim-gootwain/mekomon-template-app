@@ -254,17 +254,19 @@ Deno.serve(async (req)=>{
           const last = ls[ls.length - 1] || "";
           return last.slice(0, 3);
         };
-        const _cmd = async (c, ok)=>{
+        // label: מה שמופיע בהודעת השגיאה — לעולם לא תוכן הפקודה עצמה (שלבי AUTH
+        // מכילים את שם המשתמש והסיסמה ב-base64, והשגיאה חוזרת ללקוח ב-emailError).
+        const _cmd = async (c, ok, label)=>{
           await _writeAll(_te.encode(c + CRLF));
           const rep = await _reply();
-          if (ok && _code(rep) !== ok) throw new Error("SMTP " + c.split(" ")[0] + " => " + rep.slice(0, 120));
+          if (ok && _code(rep) !== ok) throw new Error("SMTP " + (label || c.split(" ")[0]) + " => " + rep.slice(0, 120));
           return rep;
         };
         await _reply();
         await _cmd("EHLO emanuel-sheli.local", "250");
         await _cmd("AUTH LOGIN", "334");
-        await _cmd(_b64s(user), "334");
-        await _cmd(_b64s(pass), "235");
+        await _cmd(_b64s(user), "334", "AUTH-USER");
+        await _cmd(_b64s(pass), "235", "AUTH-PASS");
         await _cmd("MAIL FROM:<" + user + ">", "250");
         await _cmd("RCPT TO:<" + _rcpt + ">", "250");
         await _cmd("DATA", "354");

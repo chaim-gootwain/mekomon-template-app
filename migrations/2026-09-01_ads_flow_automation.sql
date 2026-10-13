@@ -190,7 +190,7 @@ declare
   v_published integer := 0;
   v_errors    jsonb := '[]'::jsonb;
 begin
-  if public.my_role() <> 'admin' then
+  if coalesce(public.my_role(), '') <> 'admin' then
     raise exception 'אין הרשאה — פרסום מרוכז למנהל בלבד';
   end if;
 

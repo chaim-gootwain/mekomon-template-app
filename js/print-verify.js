@@ -111,7 +111,7 @@ async function _pvLoadPdfAndStart(issue, ads) {
   const src = await PDFLib.PDFDocument.load(srcBytes);
   const { map, pageCount } = _apPageMap(src);
   _pvState = { issue, ads, PDFLib, src, map, pageCount, page: 1, changes: [], url: null, pdfjsDoc: null, thumbs: {} };
-  try { await _pvEnsurePdfJs(); _pvState.pdfjsDoc = await window.pdfjsLib.getDocument({ data: new Uint8Array(srcBytes) }).promise; } catch (e) { }
+  try { await _pvEnsurePdfJs(); _pvState.pdfjsDoc = await window.pdfjsLib.getDocument({ data: new Uint8Array(srcBytes), isEvalSupported: false }).promise; } catch (e) { }
   _pvRenderGrid();
 }
 

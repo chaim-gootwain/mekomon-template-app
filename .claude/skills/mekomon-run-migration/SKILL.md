@@ -27,7 +27,6 @@ description: הרצת מיגרציה/SQL ב-Supabase של מופעי המקומ�
 | מופע | Project ref | קישור ישיר ל-SQL Editor |
 |---|---|---|
 | עמנואל שלי | `hkbstegusfdjtkjxkmjc` | https://supabase.com/dashboard/project/hkbstegusfdjtkjxkmjc/sql/new |
-| אמצעש | `lnpvebpqtogwegvudvou` | https://supabase.com/dashboard/project/lnpvebpqtogwegvudvou/sql/new |
 
 (מופע חדש שנוסף למערך — הוסף שורה לטבלה ועדכן את הסקיל.)
 

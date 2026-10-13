@@ -266,7 +266,7 @@ async function fpBuildPrintPdf() {
     if ((cfg.fields || []).length && typeof _pvEnsurePdfJs === 'function') {
       try {
         await _pvEnsurePdfJs();
-        const md = await window.pdfjsLib.getDocument({ data: masterBytes.slice() }).promise;
+        const md = await window.pdfjsLib.getDocument({ data: masterBytes.slice(), isEvalSupported: false }).promise;
         const strs = [];
         for (let k = 1; k <= md.numPages; k++) (await (await md.getPage(k)).getTextContent()).items.forEach(it => strs.push(it.str));
         const left = pibMasterLeftovers(strs);
