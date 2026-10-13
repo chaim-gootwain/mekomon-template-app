@@ -115,6 +115,13 @@ async function issueBillingOpen(issueId) {
       if (isLast) monthCloseBtn = `<button class="btn btn-sm" style="background:@@COLOR_BRAND@@;color:#fff" onclick="monthlyBillingReview('${ym}')">🗓️ סוף חודש — חיוב חודשי (אישור אחד-אחד)</button>`;
     }
   } catch (e) { }
+  // גזירים שכבר נשלחו אוטומטית (במופע שבו עובד סוכן ששולח גזירים — settings.clips_sent_<issueId> = "cid,cid,…")
+  // → במקום כפתור "גזיר" מוצג "נשלח ✓", כדי שלקוח לא יקבל את אותו גזיר פעמיים
+  const clipsSent = new Set();
+  try {
+    const { data: _cs } = await db.from('settings').select('value').eq('key', 'clips_sent_' + issueId).maybeSingle();
+    String((_cs && _cs.value) || '').split(',').forEach(x => { if (x) clipsSent.add(Number(x)); });
+  } catch (e) { }
   document.getElementById('viewModal').innerHTML = `
     <h3>🧾 חיוב הגיליון — גיליון ${issue.issue_number}</h3>
     <p class="muted" style="font-size:.85rem">כפתור נפרד לכל לקוח · תצוגה מקדימה של הפירוט לפני ההפקה</p>
@@ -127,7 +134,7 @@ async function issueBillingOpen(issueId) {
         <td>${r.isCenter ? `<button class="btn btn-sm" style="background:@@COLOR_BRAND@@;color:#fff" onclick="ecCatsModal(${issueId}, ${r.cid})" title="סיווג כל מודעה: רגיל / חברתי כלכלי">🏷️ קטגוריות${r.social ? ' · ' + r.social + ' חברתי' : ''}</button> ` : ''}${r.monthly
       ? `${r.monthlyDone ? '<span class="pill green" title="החשבונית החודשית של חודש זה כבר הופקה">🧾 חשבונית חודשית הופקה ✓</span>' : '<span class="pill amber">חיוב חודשי</span>'} <button class="btn btn-sm btn-ghost" onclick="issueBillingSetMonthly(${issueId}, ${r.cid})">בטל חודשי</button>`
       : `${r.done ? '<span class="pill green">חויב ✓</span>' : `<button class="btn btn-sm" onclick="issueBillingPreview(${issueId}, ${r.cid})">תצוגה והפקה</button> <button class="btn btn-sm btn-ghost" style="color:var(--ok)" onclick="issueBillingPaidMenu(${issueId}, ${r.cid})" title="שולם — ללא חשבונית או חשבונית מס קבלה">💰 שולם</button> <button class="btn btn-sm btn-ghost" onclick="issueBillingMarkInvoiced(${issueId}, ${r.cid})" title="סמן שחשבונית כבר הופקה — בלי להפיק ובלי לרשום חוב">🧾 סמן הופקה</button>`} <button class="btn btn-sm btn-ghost" onclick="issueBillingSetMonthly(${issueId}, ${r.cid})">🔁 חודשי</button>`}
-          <button class="btn btn-sm btn-ghost" onclick="issueSendClip(${issueId}, ${r.cid})">📎 גזיר</button> <button class="btn btn-sm btn-ghost" onclick="adProofOpen(${issueId}, ${r.cid})">🖼️ הוכחת פרסום</button></td>
+          ${clipsSent.has(r.cid) ? '<span class="pill green" title="הגזיר נשלח ללקוח אוטומטית">📎 גזיר נשלח ✓</span>' : `<button class="btn btn-sm btn-ghost" onclick="issueSendClip(${issueId}, ${r.cid})">📎 גזיר</button>`} <button class="btn btn-sm btn-ghost" onclick="adProofOpen(${issueId}, ${r.cid})">🖼️ הוכחת פרסום</button></td>
       </tr>`).join('')}
     </tbody></table></div>` : '<p class="empty" style="margin-top:10px">אין מודעות בגיליון זה לחיוב</p>'}
     <div class="m-actions" style="margin-top:12px;flex-wrap:wrap">
@@ -301,6 +308,17 @@ async function issueBillingReceipt(issueId, customerId) {
   } else { toast('מודל החשבונית לא זמין', true); }
 }
 
+/* רישום "גזיר נשלח" ללקוח בגיליון (settings.clips_sent_<issueId>) — כדי שלא יישלח שוב, ידנית או אוטומטית */
+async function issueMarkClipSent(issueId, customerId) {
+  try {
+    const key = 'clips_sent_' + issueId;
+    const { data } = await db.from('settings').select('value').eq('key', key).maybeSingle();
+    const ids = new Set(String((data && data.value) || '').split(',').filter(Boolean));
+    ids.add(String(customerId));
+    await db.from('settings').upsert({ key, value: [...ids].join(',') });
+  } catch (e) { console.error('clip-mark', e); }
+}
+
 /* שליחת גזיר (עמוד המודעה מה-PDF) במייל ללקוח */
 async function issueSendClip(issueId, customerId) {
   toast('שולח גזיר במייל...');
@@ -308,6 +326,7 @@ async function issueSendClip(issueId, customerId) {
     const { data, error } = await db.functions.invoke('send-clip', { body: { customer_id: customerId, issue_id: issueId } });
     if (!error && data && data.ok) {
       toast('✅ הגזיר נשלח במייל ל' + (data.email || 'לקוח') + ' (עמוד ' + (data.pages || []).join(', ') + ')');
+      issueMarkClipSent(issueId, customerId);
       return;
     }
     // שליחה אוטומטית לא זמינה / נכשלה → מפיקים את הגזיר להורדה ושליחה ידנית
