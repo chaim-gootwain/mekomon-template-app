@@ -1252,7 +1252,7 @@ function mgrInjectNav() {
   btn.innerHTML = '<span>🤖</span> סוכן המקומון';
   btn.onclick = () => openPage('mgragent');
   const anchor = document.getElementById('nav-invchat') || document.getElementById('nav-billing') || document.getElementById('nav-finhub');
-  if (anchor && anchor.parentElement === nav) anchor.after(btn);
+  if (anchor && nav.contains(anchor)) anchor.after(btn);
   else nav.appendChild(btn);
 }
 (function () {

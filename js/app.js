@@ -158,16 +158,37 @@ document.querySelectorAll('.paper-name-slot').forEach(el =>
 el.textContent = cache.settings.paper_name || '@@PAPER_NAME@@');
 // תפריט צד לפי תפקיד
 const nav = document.getElementById('sideNav');
+// כל קבוצה היא תפריט נפתח; מצב פתוח/סגור נשמר בדפדפן
+let openGroups = navOpenGroups();
+if (window.matchMedia('(max-width: 820px)').matches) openGroups = openGroups.slice(-1);
 let html = '', lastGroup = null;
 NAV.filter(n => n.roles.includes(profile.role)).forEach(n => {
-if (n.group && n.group !== lastGroup) { html += `<div class="nav-group">${n.group}</div>`; lastGroup = n.group; }
+if ((n.group || '') !== (lastGroup || '')) {
+if (lastGroup) html += '</div></div>';
+if (n.group) html += `<div class="nav-sec${openGroups.includes(n.group) ? ' open' : ''}" data-group="${n.group}">
+<button type="button" class="nav-group" onclick="toggleNavGroup(this.parentElement)">${n.group}<span class="nav-caret">▾</span></button><div class="nav-items">`;
+lastGroup = n.group;
+}
 html += `<button id="nav-${n.id}" onclick="openPage('${n.id}')">
 <span>${n.icon}</span> ${n.title} <span class="badge hidden" id="badge-${n.id}"></span>
 </button>`;
 });
+if (lastGroup) html += '</div></div>';
 nav.innerHTML = html;
 document.getElementById('userName').textContent = profile.full_name || session.user.email;
 document.getElementById('userRole').textContent = ROLE_NAMES[profile.role];
+}
+
+function navOpenGroups() {
+try { return JSON.parse(localStorage.getItem('navOpenGroups') || '[]'); } catch (e) { return []; }
+}
+function toggleNavGroup(sec, open) {
+const isOpen = sec.classList.toggle('open', open);
+// בנייד רק קבוצה אחת פתוחה בכל פעם
+if (isOpen && window.matchMedia('(max-width: 820px)').matches)
+document.querySelectorAll('#sideNav .nav-sec.open').forEach(o => { if (o !== sec) o.classList.remove('open'); });
+const list = [...document.querySelectorAll('#sideNav .nav-sec.open')].map(o => o.dataset.group);
+try { localStorage.setItem('navOpenGroups', JSON.stringify(list)); } catch (e) { }
 }
 
 /* ---------- 3. ניתוב ---------- */
@@ -176,6 +197,8 @@ const page = Pages[id];
 if (!page) { toast('הדף עדיין לא קיים: ' + id, true); return; }
 currentPage = id;
 document.querySelectorAll('.sidebar nav button').forEach(b => b.classList.toggle('active', b.id === 'nav-' + id));
+const activeSec = document.getElementById('nav-' + id)?.closest('.nav-sec');
+if (activeSec && !activeSec.classList.contains('open')) toggleNavGroup(activeSec, true);
 const navItem = NAV.find(n => n.id === id);
 document.getElementById('pageTitle').textContent = navItem ? navItem.title : page.title || '';
 const el = document.getElementById('content');
