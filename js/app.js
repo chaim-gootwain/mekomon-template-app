@@ -159,7 +159,8 @@ el.textContent = cache.settings.paper_name || '@@PAPER_NAME@@');
 // תפריט צד לפי תפקיד
 const nav = document.getElementById('sideNav');
 // כל קבוצה היא תפריט נפתח; מצב פתוח/סגור נשמר בדפדפן
-const openGroups = navOpenGroups();
+let openGroups = navOpenGroups();
+if (window.matchMedia('(max-width: 820px)').matches) openGroups = openGroups.slice(-1);
 let html = '', lastGroup = null;
 NAV.filter(n => n.roles.includes(profile.role)).forEach(n => {
 if ((n.group || '') !== (lastGroup || '')) {
@@ -183,9 +184,10 @@ try { return JSON.parse(localStorage.getItem('navOpenGroups') || '[]'); } catch 
 }
 function toggleNavGroup(sec, open) {
 const isOpen = sec.classList.toggle('open', open);
-const g = sec.dataset.group;
-const list = navOpenGroups().filter(x => x !== g);
-if (isOpen) list.push(g);
+// בנייד רק קבוצה אחת פתוחה בכל פעם
+if (isOpen && window.matchMedia('(max-width: 820px)').matches)
+document.querySelectorAll('#sideNav .nav-sec.open').forEach(o => { if (o !== sec) o.classList.remove('open'); });
+const list = [...document.querySelectorAll('#sideNav .nav-sec.open')].map(o => o.dataset.group);
 try { localStorage.setItem('navOpenGroups', JSON.stringify(list)); } catch (e) { }
 }
 

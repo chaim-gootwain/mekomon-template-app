@@ -266,10 +266,18 @@ border-bottom: 3px solid transparent; margin-bottom: -2px; }
 .layout { flex-direction: column; }
 .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; }
 .sidebar .brand { padding: 12px 16px; font-size: 1rem; }
-.sidebar nav { display: flex; overflow-x: auto; padding: 0 8px 8px; flex-basis: 100%; order: 3; }
-.sidebar nav .nav-group { display: none; }
-/* בנייד התפריט הוא פס גלילה אופקי — כל הפריטים מוצגים בלי קבוצות */
-.sidebar nav .nav-sec, .sidebar nav .nav-sec:not(.open) .nav-items { display: contents; }
+/* בנייד: שורת כפתורי קבוצות; הקבוצה הפתוחה מציגה את הפריטים שלה בשורה מתחת */
+.sidebar nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 8px; flex-basis: 100%; min-width: 0; max-width: 100%; order: 3; }
+.sidebar nav .nav-sec { display: contents; }
+.sidebar nav button.nav-group {
+width: auto; white-space: nowrap; padding: 8px 10px; font-size: .9rem; color: #d7e3f0;
+background: rgba(255,255,255,.08); border-radius: 8px;
+}
+.sidebar nav .nav-sec.open button.nav-group { background: rgba(255,255,255,.2); color: #fff; }
+.sidebar nav .nav-sec.open .nav-items {
+display: flex; order: 10; flex-basis: 100%; min-width: 0; max-width: 100%; overflow-x: auto; gap: 4px;
+padding-top: 6px; border-top: 1px solid rgba(255,255,255,.12);
+}
 .sidebar nav button { white-space: nowrap; width: auto; }
 .sidebar .user-box { border-top: none; margin-right: auto; padding: 8px 16px; }
 .content { padding: 14px; }
