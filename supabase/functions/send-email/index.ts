@@ -49,7 +49,7 @@ Deno.serve(async (req)=>{
         error: "forbidden"
       }, 403);
     }
-    const { to, subject, body, html, customer_id, attachments } = await req.json();
+    const { to, subject, body, html, customer_id, attachments, attach_document_id } = await req.json();
     let dest = String(to || "").trim();
     if (!dest && customer_id) {
       const { data: cust } = await admin.from("customers").select("email").eq("id", customer_id).single();
@@ -78,6 +78,36 @@ Deno.serve(async (req)=>{
         encoding: "base64",
         contentType: a.contentType || "application/octet-stream"
       })) : [];
+    // צירוף מסמך חשבונאי לפי מזהה מטבלת documents (למשל מסוכן המקומון):
+    // הפונקציה מורידה בעצמה את ה-PDF מהקישור השמור בטבלה — לא מקבלת
+    // כתובות חופשיות מהדפדפן. כשל בהורדה מוחזר כשגיאה ברורה, בלי לשלוח.
+    if (attach_document_id) {
+      const { data: doc } = await admin.from("documents").select("id,customer_id,doc_number,pdf_url")
+        .eq("id", Number(attach_document_id)).single();
+      if (!doc || !doc.pdf_url || !/^https:\/\//.test(String(doc.pdf_url))) return json({
+        ok: false, error: "no-doc-pdf", detail: "למסמך אין קובץ PDF זמין במערכת"
+      }, 400);
+      if (customer_id && doc.customer_id && Number(customer_id) !== Number(doc.customer_id)) return json({
+        ok: false, error: "doc-mismatch", detail: "המסמך לא שייך ללקוח הזה"
+      }, 400);
+      const pdfRes = await fetch(String(doc.pdf_url));
+      if (!pdfRes.ok) return json({
+        ok: false, error: "doc-fetch", detail: "הורדת ה-PDF נכשלה (" + pdfRes.status + ") — אפשר לשלוח קישור במקום"
+      }, 502);
+      const buf = new Uint8Array(await pdfRes.arrayBuffer());
+      if (buf.length > 10 * 1024 * 1024) return json({
+        ok: false, error: "doc-too-big", detail: "קובץ המסמך גדול מדי לצירוף"
+      }, 400);
+      let bin = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < buf.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + chunk)));
+      atts.push({
+        filename: "מסמך-" + String(doc.doc_number || doc.id) + ".pdf",
+        content: btoa(bin),
+        encoding: "base64",
+        contentType: "application/pdf"
+      });
+    }
     const client = new SMTPClient({
       connection: {
         hostname: "smtp.gmail.com",

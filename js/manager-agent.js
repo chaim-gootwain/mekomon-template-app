@@ -266,6 +266,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_add_customer') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_customer' };
       await mgrProposeAddCustomer(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_send_document') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_document' };
+      await mgrProposeSendDocument(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_cancel_charges') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'cancel_charges' };
       await mgrProposeCancelCharges(r.data.proposal);
@@ -647,6 +650,94 @@ async function mgrAddCustomerCancel() {
   const id = s.toolUseId;
   _mgrNewCust = null;
   await mgrResolveProposal(id, 'המשתמש ביטל — לא נפתח כרטיס לקוח.');
+}
+
+/* ---------- שליחת מסמך חשבונאי במייל (כרטיס אישור) ----------
+   ה-PDF מצורף למייל: send-email מוריד אותו בעצמו לפי מזהה המסמך
+   (attach_document_id) — הדפדפן לא נוגע בקובץ. שום מייל בלי אישור. */
+const MGR_DOC_HE = { tax_invoice: 'חשבונית מס', invoice_receipt: 'חשבונית מס קבלה', receipt: 'קבלה', proforma: 'חשבון עסקה', credit: 'חשבונית זיכוי' };
+let _mgrSendDoc = null;
+async function mgrProposeSendDocument(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const num = String(inp.doc_number || '').trim();
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!cid || !num) { await fail('חסר לקוח או מספר מסמך.'); return; }
+  mgrSetBusy(true);
+  // select('*') בכוונה — עמודות אופציונליות אולי לא קיימות בכל מופע
+  const { data: docs } = await db.from('documents').select('*').eq('customer_id', cid).eq('doc_number', num).limit(2);
+  const { data: cust } = await db.from('customers').select('id,name,email').eq('id', cid).single();
+  mgrSetBusy(false);
+  const doc = (docs || [])[0];
+  if (!doc) { await fail('מסמך ' + num + ' לא נמצא אצל הלקוח הזה.'); return; }
+  if (!doc.pdf_url) { await fail('למסמך ' + num + ' אין קובץ PDF במערכת — אי אפשר לצרף.'); return; }
+  const email = String(cust && cust.email || '').trim();
+  if (!email) { await fail('ללקוח ' + (cust && cust.name || '') + ' אין כתובת מייל בכרטיס — השלם אותה קודם ("תכניס את המייל... ללקוח...").'); return; }
+  const kindHe = MGR_DOC_HE[doc.doc_kind] || 'מסמך';
+  const name = (cust && cust.name) || String(inp.customer_name || '');
+  const defBody = 'שלום ' + name + ',\n\n' +
+    'מצורף ' + kindHe + ' מספר ' + num + (doc.total ? ' על סך ' + money(Number(doc.total)) : '') + '.\n' +
+    (String(inp.note || '').trim() ? String(inp.note).trim() + '\n' : '') +
+    '\nתודה רבה,\n@@PAPER_NAME@@';
+  _mgrSendDoc = { toolUseId: p.tool_use_id, cid, name, docId: doc.id, num, kindHe };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrDocCard';
+  card.innerHTML = `
+    <div class="hd">📧 שליחת ${esc(kindHe)} במייל — לאישור לפני שליחה</div>
+    <div class="grid2">
+      <div class="field"><label>לקוח</label><input type="text" value="${esc(name)}" disabled></div>
+      <div class="field"><label>אל (מכרטיס הלקוח)</label><input id="mgrDocTo" type="text" dir="ltr" value="${esc(email)}"></div>
+    </div>
+    <div class="field"><label>מסמך מצורף</label>
+      <input type="text" value="${esc(kindHe)} ${esc(num)}${doc.total ? ' · ' + money(Number(doc.total)) : ''} (PDF)" disabled></div>
+    <div class="field"><label>גוף המייל</label>
+      <textarea id="mgrDocBody" rows="5" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit">${esc(defBody)}</textarea></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrDocBtn" onclick="mgrSendDocumentApprove()">✅ שלח במייל</button>
+      <button class="btn btn-ghost" onclick="mgrSendDocumentCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrSendDocumentApprove() {
+  const s = _mgrSendDoc;
+  if (!s) return;
+  const to = ((document.getElementById('mgrDocTo') || {}).value || '').trim();
+  const body = ((document.getElementById('mgrDocBody') || {}).value || '').trim();
+  if (!to) { toast('חסרה כתובת מייל', true); return; }
+  const btn = document.getElementById('mgrDocBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  mgrSetBusy(true);
+  const r = await invChatFn('send-email', {
+    to, customer_id: s.cid,
+    subject: s.kindHe + ' ' + s.num + ' — @@PAPER_NAME@@',
+    body, attach_document_id: s.docId,
+  });
+  mgrSetBusy(false);
+  if (r.errMsg || !r.data || !r.data.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ שלח במייל'; }
+    toast('השליחה נכשלה: ' + (r.errMsg || (r.data && (r.data.detail || r.data.error)) || ''), true);
+    return;
+  }
+  try { await addInteraction('customer', s.cid, '📧 נשלח ' + s.kindHe + ' ' + s.num + ' במייל ל-' + to + ' (מהסוכן)'); } catch (e) { }
+  document.getElementById('mgrDocCard')?.remove();
+  icSayOk('✅ ' + esc(s.kindHe) + ' <b dir="ltr">' + esc(s.num) + '</b> נשלח במייל ל<b>' + esc(s.name) + '</b> (' + esc(to) + ') עם ה-PDF מצורף.');
+  const id = s.toolUseId;
+  _mgrSendDoc = null;
+  await mgrResolveProposal(id, 'המסמך ' + s.kindHe + ' ' + s.num + ' נשלח במייל ל-' + to + ' עם PDF מצורף.');
+}
+async function mgrSendDocumentCancel() {
+  const s = _mgrSendDoc;
+  if (!s) return;
+  document.getElementById('mgrDocCard')?.remove();
+  icSay('השליחה בוטלה — לא נשלח מייל.');
+  const id = s.toolUseId;
+  _mgrSendDoc = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — המסמך לא נשלח.');
 }
 
 /* ---------- ביטול חיובים כפולים/שגויים (כרטיס אישור) ----------
