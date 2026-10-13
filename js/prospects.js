@@ -159,7 +159,7 @@ async function psStartScan() {
   let doc;
   try {
     await psEnsurePdfJs();
-    doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
   } catch (e) { console.error(e); toast('לא הצלחתי לפתוח את קובץ ה-PDF', true); return; }
 
   _psScan = {

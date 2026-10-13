@@ -59,7 +59,7 @@ create or replace function public.generate_contract_ads(p_issue_id bigint)
 as $function$
 declare v_c record; v_used int; v_created int := 0;
 begin
-  if public.my_role() not in ('admin','sales') then raise exception 'אין הרשאה'; end if;
+  if coalesce(public.my_role(), '') not in ('admin','sales') then raise exception 'אין הרשאה'; end if;
   for v_c in select ct.*, pl.name as item_name, c.name as customer_name
     from public.contracts ct
     join public.customers c on c.id = ct.customer_id
@@ -89,3 +89,6 @@ begin
   end loop;
   return v_created;
 end; $function$;
+
+revoke all on function public.generate_contract_ads(bigint) from public, anon;
+grant execute on function public.generate_contract_ads(bigint) to authenticated, service_role;

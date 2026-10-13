@@ -91,7 +91,7 @@ async function _ppAnalyzeFile() {
   try {
     document.getElementById('ppPdfBox').innerHTML = '<p class="muted">מנתח את הגיליון... (עשוי לקחת דקה בגיליון גדול)</p>';
     await _pvEnsurePdfJs();
-    const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
     const map = await _ppPageMap(doc);
     const images = [], text = {};
     for (let idx = 0; idx < doc.numPages; idx++) {
@@ -343,7 +343,7 @@ async function _ppDesignThumb(a) {
     if (/\.(png|jpe?g|gif|webp)$/i.test(f.storage_path)) {
       el.innerHTML = `<a href="${data.signedUrl}" target="_blank"><img src="${data.signedUrl}" style="max-width:110px;max-height:80px"></a>`;
     } else if (/\.pdf$/i.test(f.storage_path)) {
-      const d = await window.pdfjsLib.getDocument(data.signedUrl).promise;
+      const d = await window.pdfjsLib.getDocument({ url: data.signedUrl, isEvalSupported: false }).promise;
       const pg = await d.getPage(1); const vp0 = pg.getViewport({ scale: 1 });
       const vp = pg.getViewport({ scale: Math.min(110 / vp0.width, 80 / vp0.height) });
       const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
