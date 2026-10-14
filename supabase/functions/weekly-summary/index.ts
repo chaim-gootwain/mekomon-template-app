@@ -170,7 +170,7 @@ async function execSummary(data) {
       method: 'POST',
       headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: Deno.env.get('MANAGER_AGENT_MODEL') || 'claude-opus-5',
+        model: Deno.env.get('MANAGER_AGENT_MODEL') || 'claude-sonnet-5-5',
         max_tokens: 1000,
         system: 'אתה סוכן המקומון — העוזר של מנהל מקומון. קיבלת נתוני סיכום שבועי כ-JSON. כתוב תקציר מנהלים בעברית: 3-5 משפטים, חמים וענייניים, עם המספרים החשובים באמת והדבר האחד שהכי דורש תשומת לב השבוע. בלי כותרות, בלי markdown, בלי רשימות — פסקה אחת זורמת. אל תמציא נתונים שלא ב-JSON.',
         messages: [{ role: 'user', content: JSON.stringify(data) }]

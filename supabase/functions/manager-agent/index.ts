@@ -10,7 +10,7 @@
 //   החשבוניות. שום מסמך כספי לא מופק בלי אישור מפורש של המשתמש.
 // - הרשאה: admin פעיל בלבד (לסוכני מכירות יש את בוט הזנת הנתונים).
 // סודות: ANTHROPIC_API_KEY (קיים מצ'אט החשבוניות); אופציונלי
-// MANAGER_AGENT_MODEL (ברירת מחדל claude-opus-5).
+// MANAGER_AGENT_MODEL (ברירת מחדל claude-sonnet-5-5 — זול פי 2.5 מ-Opus 5).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const cors = {
@@ -26,9 +26,9 @@ function json(body, status = 200) {
 }
 
 const API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
-const MODEL = Deno.env.get('MANAGER_AGENT_MODEL') || 'claude-opus-5';
+const MODEL = Deno.env.get('MANAGER_AGENT_MODEL') || 'claude-sonnet-5-5';
 const MAX_TURNS = 8;          // תקרת סבבי כלים לפנייה אחת
-const MAX_MESSAGES = 60;      // תקרת אורך תמליל שנשלח מהדפדפן
+const MAX_MESSAGES = 24;      // תקרת אורך תמליל שנשלח מהדפדפן (כל סבב שולח את כולו — שומרים קצר)
 const MAX_BODY_CHARS = 400000;
 
 /* ==================== פרומפט המערכת ====================
@@ -638,6 +638,24 @@ function sanitizeMessages(raw) {
   return msgs;
 }
 
+/* ==================== מטמון על התמליל ====================
+   בכל סבב כלים כל התמליל נשלח שוב. נקודת מטמון על ההודעה האחרונה
+   גורמת לכך שבסבב הבא כל מה שכבר נשלח נקרא מהמטמון (~עשירית מהמחיר).
+   עובדים על עותק — כדי שה-cache_control לא יישמר בתמליל שחוזר לדפדפן
+   ויצטבר (מותר לכל היותר 4 נקודות מטמון בבקשה). */
+function withHistoryCache(messages) {
+  if (!messages.length) return messages;
+  const out = messages.slice();
+  const last = out[out.length - 1];
+  const blocks = typeof last.content === 'string'
+    ? [{ type: 'text', text: last.content }]
+    : last.content.map(b => ({ ...b }));
+  if (!blocks.length) return messages;
+  blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: 'ephemeral' } };
+  out[out.length - 1] = { ...last, content: blocks };
+  return out;
+}
+
 /* ==================== קריאה ל-Claude ==================== */
 async function callClaude(systemBlocks, messages) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -654,7 +672,7 @@ async function callClaude(systemBlocks, messages) {
       tools: TOOLS,
       // כלי אחד לכל סבב — מפשט את פרוטוקול ההצעות מול הדפדפן
       tool_choice: { type: 'auto', disable_parallel_tool_use: true },
-      messages
+      messages: withHistoryCache(messages)
     })
   });
   const text = await r.text();
