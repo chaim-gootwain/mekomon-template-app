@@ -20,7 +20,7 @@ function json(body, status = 200) {
   });
 }
 const API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
-const MODEL = Deno.env.get('ENTRY_PARSE_MODEL') || Deno.env.get('INVOICE_PARSE_MODEL') || 'claude-sonnet-4-5';
+const MODEL = Deno.env.get('ENTRY_PARSE_MODEL') || Deno.env.get('INVOICE_PARSE_MODEL') || 'claude-sonnet-5-5';
 const SYSTEM = `אתה מפענח בקשות בעברית של סוכני מכירות במקומון (עיתון מקומי) להזנת נתונים תפעוליים.
 המשתמש כותב משפט חופשי, ואתה מחזיר JSON בלבד — בלי שום טקסט נוסף, בלי גדרות קוד.
 
