@@ -183,7 +183,11 @@ routeButtons += `<button class="btn btn-sm btn-danger-ghost" onclick="adRoute(${
 const filesHtml = files.length
 ? files.map(f => `<li style="display:flex;justify-content:space-between;padding:5px 0">
 <span>${f.kind === 'source' ? '📎 מקור מהלקוח' : '🎨 עיצוב'} — ${esc(f.file_name) || 'קובץ'}</span>
-<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${esc(f.storage_path)}')">צפייה</button></li>`).join('')
+<span style="display:flex;gap:6px">
+<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${esc(f.storage_path)}')">צפייה</button>
+${canRoute ? `<button class="btn btn-sm btn-ghost" onclick="adFileReplacePick(${id},${f.id})">החלפה</button>
+<button class="btn btn-sm btn-danger-ghost" onclick="adFileRemove(${id},${f.id})">🗑 הסרה</button>` : ''}
+</span></li>`).join('')
 : '<li class="muted">אין קבצים</li>';
 
 document.getElementById('viewModal').innerHTML = `
@@ -209,6 +213,7 @@ ${typeof proofCardBlock === 'function' ? proofCardBlock(a) : ''}
 <ul style="list-style:none;margin:6px 0 12px">${filesHtml}</ul>
 ${['admin', 'sales', 'graphics'].includes(profile.role) ? `
 <input type="file" id="adFileInput" class="hidden" onchange="adFileUpload(${id})">
+<input type="file" id="adFileReplaceInput" class="hidden" onchange="adFileReplace(${id})">
 <button class="btn btn-sm btn-ghost" onclick="document.getElementById('adFileInput').click()">⬆ העלאת קובץ</button>` : ''}
 
 <div class="m-actions" style="flex-wrap:wrap">
@@ -370,6 +375,55 @@ const kind = profile.role === 'graphics' ? 'design' : 'source';
 await run(db.from('ad_files').insert({ ad_id: adId, storage_path: path, file_name: file.name, kind, uploaded_by: profile.id }));
 await addInteraction('ad', adId, `הועלה קובץ: ${file.name}`);
 toast('הקובץ הועלה');
+openAdCard(adId);
+}
+
+/* מחיקת שורת קובץ, ומחיקת האובייקט ב-Storage רק אם אף שורה אחרת לא מצביעה עליו
+   (מודעות מתעדכנות יכולות לחלוק את אותו קובץ עיצוב) */
+async function _adFileDelete(f) {
+const { data, error } = await db.from('ad_files').delete().eq('id', f.id).select('id');
+if (error) throw error;
+// RLS שחוסם מחיקה לא מחזיר שגיאה — רק אפס שורות
+if (!data || !data.length) throw new Error('אין הרשאה למחוק את הקובץ (ייתכן שהמיגרציה 2026-10-14_ad_files_delete לא הורצה)');
+const others = await run(db.from('ad_files').select('id').eq('storage_path', f.storage_path).limit(1));
+if (!others.length) await db.storage.from('ad-files').remove([f.storage_path]);
+}
+
+async function adFileRemove(adId, fileId) {
+const f = await run(db.from('ad_files').select('*').eq('id', fileId).single());
+if (!f) return;
+if (!confirm(`להסיר את הקובץ "${f.file_name || 'קובץ'}"?`)) return;
+try { await _adFileDelete(f); }
+catch (e) { toast('שגיאה בהסרה: ' + (e.message || e), true); return; }
+await addInteraction('ad', adId, `הוסר קובץ: ${f.file_name || 'קובץ'}`);
+toast('הקובץ הוסר');
+openAdCard(adId);
+}
+
+let _adReplaceFileId = null;
+function adFileReplacePick(adId, fileId) {
+_adReplaceFileId = fileId;
+const input = document.getElementById('adFileReplaceInput');
+input.value = '';
+input.click();
+}
+
+/* החלפה: מעלה את הקובץ החדש באותו סוג (מקור/עיצוב), ורק אחרי שהצליח — מסיר את הישן */
+async function adFileReplace(adId) {
+const file = document.getElementById('adFileReplaceInput').files[0];
+if (!file || !_adReplaceFileId) return;
+const old = await run(db.from('ad_files').select('*').eq('id', _adReplaceFileId).single());
+_adReplaceFileId = null;
+if (!old) return;
+const path = `staff/${adId}/${Date.now()}_${safeKey(file.name)}`;
+const { error } = await db.storage.from('ad-files').upload(path, file);
+if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
+const { error: insErr } = await db.from('ad_files').insert({ ad_id: adId, storage_path: path, file_name: file.name, kind: old.kind, uploaded_by: profile.id });
+if (insErr) { await db.storage.from('ad-files').remove([path]); toast('שגיאה בשמירת הקובץ: ' + insErr.message, true); return; }
+try { await _adFileDelete(old); }
+catch (e) { toast('הקובץ החדש נשמר, אבל הישן לא הוסר: ' + (e.message || e), true); }
+await addInteraction('ad', adId, `הוחלף קובץ: ${old.file_name || 'קובץ'} ← ${file.name}`);
+toast('הקובץ הוחלף');
 openAdCard(adId);
 }
 
