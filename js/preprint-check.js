@@ -53,7 +53,7 @@ async function openPreprintCheck(issueId) {
       .eq('issue_id', issueId).not('status', 'in', '("cancelled","rejected")'));
     const ids = (ads || []).map(a => a.id);
     // קובץ עיצוב סופי, ואם אין — קובץ שהלקוח שלח (source, כולל מה שבני מצרף מהמייל)
-    const files = ids.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind').in('ad_id', ids).in('kind', ['design', 'source'])) : [];
+    const files = ids.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind').in('ad_id', ids).in('kind', ['design', 'source']).order('created_at', { ascending: false })) : [];
     const design = {};
     (files || []).forEach(f => { const cur = design[f.ad_id]; if (!cur || (cur.kind !== 'design' && f.kind === 'design')) design[f.ad_id] = f; });
     _ppState = { issue, ads: ads || [], design, data: _ppDataChecks(ads || [], design), pdf: null };
