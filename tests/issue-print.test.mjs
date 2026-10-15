@@ -114,4 +114,20 @@ t('rotation: ציור מסובב תופס בדיוק את המלבן', () => {
   for (const rot of [0, 90, 180, 270]) assert.deepStrictEqual(box(pibRotPlace(rot, 10, 20, 100, 300)), [10, 20, 110, 320], 'rot ' + rot);
 });
 
+/* ---------- כיוון שנבחר ידנית ---------- */
+t('orient: חצי עמוד (4 משבצות) — מאונך מקבל טור, מאוזן מקבל רוחב מלא', () => {
+  // קובץ ריבועי בערך: בלי בחירה ייבחר 2×2; עם בחירה — לפי הכיוון
+  const sq = ar(1, 1);
+  const auto = pibPackPage(g, [{ id: 1, cells: 4, aspect: sq }]).placed[0];
+  const v = pibPackPage(g, [{ id: 1, cells: 4, aspect: sq, orient: 'v' }]).placed[0];
+  const h = pibPackPage(g, [{ id: 1, cells: 2, aspect: sq, orient: 'h' }]).placed[0];
+  assert.deepStrictEqual([auto.w, auto.h], [2, 2]);
+  assert.deepStrictEqual([v.w, v.h], [1, 4]);
+  assert.deepStrictEqual([h.w, h.h], [2, 1]);
+});
+t('orient: משבצת בודדת — אין כיוון, נשארת כמו שהיא', () => {
+  const one = pibPackPage(g, [{ id: 1, cells: 1, aspect: null, orient: 'h' }]).placed[0];
+  assert.deepStrictEqual([one.w, one.h], [1, 1]);
+});
+
 console.log(`\n${passed} בדיקות עברו`);

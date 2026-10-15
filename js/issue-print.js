@@ -99,8 +99,10 @@ function pibCellsFor(units, unitsPerPage, cells) {
   return { cells: Math.min(n, cells), exact: Math.abs(exact - n) < 1e-6 && n <= cells };
 }
 
-/* צורות אפשריות (w×h משבצות) לפריט, ממוינות לפי קרבה ליחס הקובץ */
-function _pibShapes(cells, g, aspect) {
+/* צורות אפשריות (w×h משבצות) לפריט, ממוינות לפי קרבה ליחס הקובץ.
+   orient ('v' מאונך / 'h' מאוזן, נבחר ידנית במודעה) — רק צורות בכיוון הזה;
+   אם אין כאלה (משבצת בודדת, ריבוע) — כל הצורות */
+function _pibShapes(cells, g, aspect, orient) {
   const out = [];
   for (let w = 1; w <= g.cols; w++) {
     if (cells % w) continue;
@@ -110,10 +112,12 @@ function _pibShapes(cells, g, aspect) {
     out.push({ w, h, ar });
   }
   const score = s => aspect ? Math.abs(Math.log(s.ar / aspect)) : -s.w; // בלי קובץ: הרחב קודם
-  return out.sort((a, b) => score(a) - score(b) || a.w - b.w);
+  const sorted = out.sort((a, b) => score(a) - score(b) || a.w - b.w);
+  const want = orient === 'v' ? sorted.filter(s => s.ar < 0.97) : orient === 'h' ? sorted.filter(s => s.ar > 1.03) : sorted;
+  return want.length ? want : sorted;
 }
 
-/* סידור פריטים בעמוד: g = {cols, rows, mw, mh, gx, gy}; items = [{id, cells, aspect}]
+/* סידור פריטים בעמוד: g = {cols, rows, mw, mh, gx, gy}; items = [{id, cells, aspect, orient?}]
    סריקה מלמטה למעלה (או מלמעלה, g.fromTop) ומימין לשמאל; חיפוש לעומק כדי שכל הפריטים ייכנסו אם אפשר.
    מחזיר { placed:[{id,col,row,w,h}], unplaced:[id] } — col 0 = הטור הימני */
 function pibPackPage(g, items) {
@@ -131,7 +135,7 @@ function pibPackPage(g, items) {
     if (i === order.length) return true;
     if (++nodes > 50000) return false;
     const it = order[i];
-    for (const s of _pibShapes(it.cells, g, it.aspect)) {
+    for (const s of _pibShapes(it.cells, g, it.aspect, it.orient)) {
       for (const r of anchors(s.h)) for (let c = 0; c < g.cols; c++) {
         if (!fits(r, c, s.w, s.h)) continue;
         mark(r, c, s.w, s.h, true); placed.push({ id: it.id, col: c, row: r, w: s.w, h: s.h });
@@ -147,7 +151,7 @@ function pibPackPage(g, items) {
   const greedy = [], unplaced = [];
   for (const it of order) {
     let done = false;
-    for (const s of _pibShapes(it.cells, g, it.aspect)) {
+    for (const s of _pibShapes(it.cells, g, it.aspect, it.orient)) {
       for (const r of anchors(s.h)) for (let c = 0; c < g.cols && !done; c++) {
         if (fits(r, c, s.w, s.h)) { mark(r, c, s.w, s.h, true); greedy.push({ id: it.id, col: c, row: r, w: s.w, h: s.h }); done = true; }
       }
@@ -452,12 +456,18 @@ async function fpBuildPrintPdf(proof) {
         const u = (typeof alItemUnits === 'function') ? alItemUnits(a.price_item_id, U, sizeMap, cache.priceList || []).units : cellsPerPage;
         const c = pibCellsFor(u, U, cellsPerPage);
         if (!c.exact) W('note', `עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
-        return { id: a.id, cells: c.cells, aspect: loaded[a.id] ? loaded[a.id].aspect : null };
+        return { id: a.id, cells: c.cells, aspect: loaded[a.id] ? loaded[a.id].aspect : null, orient: a.layout_orient || null };
       });
       const pack = pibPackPage(g, items);
       const used = pack.placed.reduce((n, s) => n + s.w * s.h, 0);
       if (onPage.length && used < cellsPerPage) W('note', `עמ' ${p}: מלא ${used}/${cellsPerPage} — ${cellsPerPage - used} משבצות ריקות`);
       pack.unplaced.forEach(id => W('block', `עמ' ${p}: ${_adLabel(ads.find(a => a.id === id))} — אין מקום בעמוד (עמוד עמוס)`));
+      for (const s of pack.placed) { // כיוון שנבחר ידנית ולא התקיים (אין צורה כזו לגודל, או שהעמוד לא אפשר)
+        const o = (ads.find(a => a.id === s.id) || {}).layout_orient;
+        const sar = (s.w * g.mw + (s.w - 1) * g.gx) / (s.h * g.mh + (s.h - 1) * g.gy);
+        if ((o === 'v' && sar >= 0.97) || (o === 'h' && sar <= 1.03))
+          W('note', `עמ' ${p}: ${_adLabel(ads.find(a => a.id === s.id))} — סומנה ${o === 'v' ? 'מאונכת' : 'מאוזנת'} אבל לגודל שלה אין משבצת בכיוון הזה בעמוד`);
+      }
 
       for (const s of pack.placed) {
         const a = ads.find(x => x.id === s.id), L = loaded[s.id];
