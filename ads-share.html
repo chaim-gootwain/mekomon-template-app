@@ -8,9 +8,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700;800&display=swap" rel="stylesheet">
 <!--
   ads-share.html — דף שיתוף של כל קבצי המודעות של גיליון (לגרפיקאית/דפוס).
-  נפתח מהקישור שהכפתור "🔗 קישור לכל המודעות" בפלטפלן יוצר (js/issue-print.js).
-  אחרי ה-# יש קישור חתום ל-JSON קטן עם רשימת הקבצים, ולכל קובץ קישור חתום משלו —
-  בלי התחברות ובלי Supabase client. הקישורים פגים אחרי 7 ימים.
+  נפתח מהקישור שהכפתור "🔗 קישור לכל המודעות" בפלטפלן יוצר (js/issue-print.js):
+  ads-share.html?i=<מזהה גיליון>&t=<טוקן חתום> — הדף בונה ממנו את הקישור החתום
+  ל-JSON הקטן עם רשימת הקבצים (shares/ads_issue_<i>.json), ולכל קובץ קישור חתום
+  משלו — בלי התחברות ובלי Supabase client. הקישורים פגים אחרי 7 ימים.
+  (קישור ישן עם # — עדיין נתמך.)
   "הורדת הכול" מרכיב ZIP בדפדפן של המקבל (store, שמות UTF-8 — כמו _zipStore ב-reports.js).
 -->
 <style>
@@ -40,13 +42,18 @@
 </div></div>
 <script>
 'use strict';
+const SB_URL = '@@SUPABASE_URL@@';
 let M = null;
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = id => document.getElementById(id);
 
 async function load() {
-  const src = decodeURIComponent(location.hash.slice(1) || '');
-  if (!/^https:\/\//.test(src)) { $('sub').innerHTML = '<span class="err">הקישור לא שלם — בקשו קישור חדש.</span>'; return; }
+  const q = new URLSearchParams(location.search);
+  const id = q.get('i'), tok = q.get('t');
+  const src = (id && /^\d+$/.test(id) && tok)
+    ? `${SB_URL}/storage/v1/object/sign/issues-archive/shares/ads_issue_${id}.json?token=${encodeURIComponent(tok)}`
+    : decodeURIComponent(location.hash.slice(1) || '');
+  if (!/^https:\/\//.test(src)) { $('sub').innerHTML = '<span class="err">הקישור לא שלם — חסר בו החלק הארוך שאחרי ads-share.html. בקשו שישלחו שוב את הקישור המלא.</span>'; return; }
   try {
     const r = await fetch(src, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'פג תוקף' : 'שגיאה ' + r.status);

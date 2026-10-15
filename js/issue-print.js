@@ -696,7 +696,10 @@ async function fpDownloadAllAds() {
     if (up.error) throw up.error;
     const sg = await db.storage.from('issues-archive').createSignedUrl(path, ttl);
     if (sg.error) throw sg.error;
-    const link = new URL('ads-share.html', location.href).href + '#' + encodeURIComponent(sg.data.signedUrl);
+    // קישור קצר ובלי '#': אפליקציות (וואטסאפ/מייל) מורידות לפעמים את מה שאחרי ה-#,
+    // ואז הדף נפתח בלי רשימה. הדף בונה את הקישור החתום מעצמו לפי מספר הגיליון והטוקן
+    const tok = new URL(sg.data.signedUrl).searchParams.get('token');
+    const link = new URL('ads-share.html', location.href).href.split('#')[0].split('?')[0] + '?i=' + issue.id + '&t=' + encodeURIComponent(tok);
     const until = new Date(expires).toLocaleDateString('he-IL');
     const wa = 'https://wa.me/?text=' + encodeURIComponent(`כל המודעות של גיליון ${issue.issue_number}:\n${link}`);
     modal.innerHTML = `${head}
