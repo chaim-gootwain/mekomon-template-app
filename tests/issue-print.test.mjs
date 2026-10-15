@@ -130,13 +130,13 @@ t('orient: משבצת בודדת — אין כיוון, נשארת כמו שהי
   assert.deepStrictEqual([one.w, one.h], [1, 1]);
 });
 
-t('rotated ad: ראש המודעה פונה החוצה — זוגי (ימין בכפולה) עם השעון, אי-זוגי נגד', () => {
-  assert.deepStrictEqual([2, 3, 10, 11].map(pibOutwardRot), [90, 270, 90, 270]);
-  // ראש הקובץ (u=0..w, v=h) אחרי הסיבוב: בעמוד זוגי בצד ימין של המשבצת, באי-זוגי בצד שמאל
-  const topSide = rot => { const pl = pibRotPlace(rot, 0, 0, 100, 300); const r = pl.deg * Math.PI / 180;
-    const x = pl.x + (pl.width / 2) * Math.round(Math.cos(r)) - pl.height * Math.round(Math.sin(r)); return x > 50 ? 'right' : 'left'; };
-  assert.strictEqual(topSide(pibOutwardRot(2)), 'right');
-  assert.strictEqual(topSide(pibOutwardRot(3)), 'left');
+t('rotated ad: רגלי המודעה פונות החוצה — זוגי (ימין בכפולה) נגד השעון, אי-זוגי עם', () => {
+  assert.deepStrictEqual([2, 3, 10, 11].map(pibOutwardRot), [270, 90, 270, 90]);
+  // רגלי הקובץ (u=0..w, v=0) אחרי הסיבוב: בעמוד זוגי בצד ימין (חוץ), באי-זוגי בצד שמאל (חוץ)
+  const footSide = rot => { const pl = pibRotPlace(rot, 0, 0, 100, 300); const r = pl.deg * Math.PI / 180;
+    const x = pl.x + (pl.width / 2) * Math.round(Math.cos(r)); return x > 50 ? 'right' : 'left'; };
+  assert.strictEqual(footSide(pibOutwardRot(2)), 'right');
+  assert.strictEqual(footSide(pibOutwardRot(3)), 'left');
 });
 
 console.log(`\n${passed} בדיקות עברו`);
