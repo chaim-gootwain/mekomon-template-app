@@ -206,6 +206,20 @@ function pibEditorialMap(pages, adPages, n) {
 }
 function _pibEditorialPath(issueId) { return `editorial/issue_${issueId}.pdf`; }
 
+/* קובץ הכתבות של הגיליון: bytes, או null אם לא הועלה. שגיאה אחרת — נזרקת
+   (לא "לא הועלה"). קישור חתום + no-store: אחרי החלפה לא מקבלים גרסה ישנה מהמטמון */
+async function _pibEditorialFetch(issueId) {
+  const { data, error } = await db.storage.from('issues-archive').createSignedUrl(_pibEditorialPath(issueId), 300);
+  if (error) {
+    if (/not.?found|404|does not exist/i.test(String(error.message || '') + ' ' + String(error.statusCode || error.status || ''))) return null;
+    throw new Error('קובץ הכתבות לא נקרא: ' + (error.message || error));
+  }
+  const r = await fetch(data.signedUrl, { cache: 'no-store' });
+  if (r.status === 404 || r.status === 400) return null;
+  if (!r.ok) throw new Error('קובץ הכתבות לא נקרא (' + r.status + ')');
+  return new Uint8Array(await r.arrayBuffer());
+}
+
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : m);
@@ -356,10 +370,11 @@ async function fpBuildPrintPdf(proof) {
     // עמודי כתבות (אם הועלו לגיליון) — לפי העימוד, לעמודים בלי מודעות
     let edDoc = null, edMap = { map: {}, empty: [], extra: 0 };
     step('בודק עמודי כתבות...');
-    const er = await db.storage.from('issues-archive').download(_pibEditorialPath(issue.id));
-    if (!er.error && er.data) {
+    let edBytes = null;
+    try { edBytes = await _pibEditorialFetch(issue.id); } catch (e) { W('block', e.message || String(e)); }
+    if (edBytes) {
       try {
-        edDoc = await PDFLib.PDFDocument.load(new Uint8Array(await er.data.arrayBuffer()), { ignoreEncryption: true });
+        edDoc = await PDFLib.PDFDocument.load(edBytes, { ignoreEncryption: true });
         edMap = pibEditorialMap(pages, new Set(ads.map(a => a.page_number)), edDoc.getPageCount());
         if (edMap.extra) W('block', `קובץ הכתבות: ${edMap.extra} עמודים אחרונים לא נכנסו — אין מספיק עמודים בלי מודעות בעימוד`);
         if (edMap.empty.length) W('note', `קובץ הכתבות קצר מהעימוד — עמודים בלי מודעות שנשארו ריקים: ${edMap.empty.join(', ')}`);
@@ -520,36 +535,41 @@ async function _pibHash(bytes) {
 /* ==================== עמודי כתבות — העלאה ותצוגת שיבוץ ==================== */
 function fpEditorialUpload() {
   if (!['admin', 'editor'].includes(profile.role)) return;
+  // השדה מחובר לדף: בספארי/אייפון שדה קובץ מנותק לא תמיד מפעיל onchange
   const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = 'application/pdf';
+  inp.type = 'file'; inp.accept = 'application/pdf,.pdf'; inp.style.display = 'none';
+  document.body.appendChild(inp);
   inp.onchange = async () => {
-    const file = inp.files && inp.files[0]; if (!file) return;
-    if (!/\.pdf$/i.test(file.name)) { toast('נדרש קובץ PDF', true); return; }
-    const { error } = await db.storage.from('issues-archive').upload(_pibEditorialPath(_fpIssue.id), file, { upsert: true, contentType: 'application/pdf' });
+    const file = inp.files && inp.files[0];
+    inp.remove();
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { toast('נדרש קובץ PDF', true); return; }
+    toast('מעלה את עמודי הכתבות...');
+    const { error } = await db.storage.from('issues-archive').upload(_pibEditorialPath(_fpIssue.id), file, { upsert: true, contentType: 'application/pdf', cacheControl: '0' });
     if (error) { toast('העלאה נכשלה: ' + error.message, true); return; }
     toast('✓ עמודי הכתבות נשמרו לגיליון');
-    fpEditorialShow();
+    fpEditorialShow(new Uint8Array(await file.arrayBuffer())); // מציגים מהקובץ שנבחר — בלי קריאה חוזרת מהשרת
   };
   inp.click();
 }
 
 /* מה נכנס לאן — לפי העימוד הנוכחי */
-async function fpEditorialShow() {
+async function fpEditorialShow(localBytes) {
   const issue = _fpIssue, pages = Number(issue.pages_count) || 0;
   const modal = document.getElementById('viewModal'), back = document.getElementById('viewBack');
   const close = `<button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>`;
   modal.innerHTML = `<h3>📰 עמודי כתבות — גיליון ${esc(issue.issue_number)}</h3><p>טוען...</p>`;
   back.classList.add('open');
   try {
-    const r = await db.storage.from('issues-archive').download(_pibEditorialPath(issue.id));
-    if (r.error || !r.data) {
+    const bytes = localBytes instanceof Uint8Array ? localBytes : await _pibEditorialFetch(issue.id);
+    if (!bytes) {
       modal.innerHTML = `<h3>📰 עמודי כתבות — גיליון ${esc(issue.issue_number)}</h3>
 <p>עוד לא הועלה קובץ כתבות לגיליון. מעלים PDF אחד עם כל עמודי הכתבות הסגורים, לפי הסדר — המערכת מכניסה אותם לעמודים שאין בהם מודעות.</p>
 <div class="m-actions"><button class="btn" onclick="fpEditorialUpload()">⬆ העלאת PDF</button>${close}</div>`;
       return;
     }
     const PDFLib = await _apEnsureLib();
-    const doc = await PDFLib.PDFDocument.load(new Uint8Array(await r.data.arrayBuffer()), { ignoreEncryption: true });
+    const doc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
     const n = doc.getPageCount();
     const adPages = new Set(_fpAds.filter(a => a.page_number >= 1 && a.page_number <= pages).map(a => a.page_number));
     const m = pibEditorialMap(pages, adPages, n);
