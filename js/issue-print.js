@@ -19,6 +19,8 @@ PDF אחד של כל הגיליון. לא כותב שום דבר למסד.
 - גרסה לאישור ראשוני ("📝 PDF לאישור"): אותה הרכבה בדיוק, ואחריה כל עמוד
   מצויר מחדש כתמונת JPG ברזולוציה נמוכה (pdf.js) עם הכיתוב "טיוטה לאישור".
   קובץ קל לשליחה במייל/וואטסאפ — לא לדפוס.
+- קובץ מודעה של כמה עמודים: עמוד 1 → המודעה שהקובץ עליה, והשאר → המודעות
+  הבאות של אותו לקוח בגיליון שאין להן קובץ (pibChainAds).
 - עמודי כתבות ("📰 עמודי כתבות"): PDF אחד עם כמה עמודים סגורים מהגרפיקאית.
   נשמר לגיליון (issues-archive: editorial/issue_<id>.pdf) ובהרכבה נכנס לפי
   העימוד: עמוד 1 בקובץ → העמוד הראשון בגיליון שאין בו מודעות, עמוד 2 → הבא,
@@ -272,6 +274,24 @@ function pibAdTurn(orient, page) {
   return orient === 'r' ? pibOutwardRot(page) : orient === 'rr' ? 90 : orient === 'rl' ? 270 : 0;
 }
 
+/* קובץ מודעה של כמה עמודים (למשל כתבות של מועצה): עמוד 1 בקובץ → המודעה
+   שהקובץ עליה; עמוד 2 והלאה → המודעות הבאות של אותו לקוח בגיליון שאין להן
+   קובץ משלהן, לפי סדר העמודים. ads = [{id, customer_id, page_number}],
+   sources = {adId: מספר עמודים בקובץ}, hasFile = Set של מודעות עם קובץ.
+   מחזיר { assign: {adId: {from: adId, idx}}, leftover: {adId: עמודים שלא שובצו} } */
+function pibChainAds(ads, sources, hasFile) {
+  const assign = {}, leftover = {};
+  const srcAds = ads.filter(a => (sources[a.id] || 0) > 1).sort((x, y) => x.page_number - y.page_number || x.id - y.id);
+  for (const s of srcAds) {
+    const next = ads.filter(a => a.customer_id === s.customer_id && a.page_number > s.page_number && !hasFile.has(a.id) && !assign[a.id])
+      .sort((x, y) => x.page_number - y.page_number || x.id - y.id)
+      .slice(0, sources[s.id] - 1);
+    next.forEach((a, k) => { assign[a.id] = { from: s.id, idx: k + 1 }; });
+    if (sources[s.id] - 1 > next.length) leftover[s.id] = sources[s.id] - 1 - next.length;
+  }
+  return { assign, leftover };
+}
+
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : m);
@@ -390,12 +410,19 @@ async function fpBuildPrintPdf(proof) {
     const ads = _fpAds.filter(a => a.page_number >= 1 && a.page_number <= pages && !['cancelled', 'rejected'].includes(a.status));
     const files = ads.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at').in('ad_id', ads.map(a => a.id)).order('created_at', { ascending: false })) : [];
     const fileFor = id => files.find(f => f.ad_id === id && f.kind === 'design') || files.find(f => f.ad_id === id && f.kind === 'source');
-    const loaded = {}, byHash = {};
+    const loaded = {}, byHash = {}, pdfSrc = {}, noFile = [];
+    // עמוד מתוך PDF → פריט לציור (חיתוך, גלישה, סיבוב, יחס)
+    const pdfItem = (src, idx) => {
+      const sp = src.getPage(idx), srcTrim = sp.getTrimBox(), srcBleed = sp.getBleedBox();
+      let rot = 0; try { rot = pibNormRot(sp.getRotation().angle); } catch (e) { }
+      const aspect = rot % 180 ? srcTrim.height / srcTrim.width : srcTrim.width / srcTrim.height;
+      return { kind: 'pdf', emb: { src, sp }, srcTrim, srcBleed, aspect, rot };
+    };
     let i = 0;
     for (const a of ads) {
       step(`מוריד קבצי מודעות ${++i}/${ads.length}...`);
       const f = fileFor(a.id);
-      if (!f) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — אין קובץ`); continue; }
+      if (!f) { noFile.push(a); continue; }
       try {
         const r = await db.storage.from('ad-files').download(f.storage_path);
         if (r.error) throw r.error;
@@ -404,24 +431,30 @@ async function fpBuildPrintPdf(proof) {
         const hash = await _pibHash(bytes);
         (byHash[hash] = byHash[hash] || []).push(a);
         if (!kind) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — סוג קובץ לא נתמך (${f.file_name || ''}) — נדרש PDF/JPG/PNG`); continue; }
-        let emb, srcTrim = null, srcBleed = null, aspect, rot = 0;
         if (kind === 'pdf') {
           const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
-          if (src.getPageCount() > 1) W('note', `עמ' ${a.page_number}: ${_adLabel(a)} — לקובץ ${src.getPageCount()} עמודים, נלקח הראשון`);
-          const sp = src.getPage(0);
-          srcTrim = sp.getTrimBox(); srcBleed = sp.getBleedBox();
-          try { rot = pibNormRot(sp.getRotation().angle); } catch (e) { }
-          aspect = srcTrim.width / srcTrim.height;
-          emb = { src, sp };
+          pdfSrc[a.id] = src;
+          loaded[a.id] = pdfItem(src, 0);
         } else {
-          emb = kind === 'jpg' ? await out.embedJpg(bytes) : await out.embedPng(bytes);
-          if (kind === 'jpg') rot = pibJpegRotation(bytes);
-          aspect = emb.width / emb.height;
+          const emb = kind === 'jpg' ? await out.embedJpg(bytes) : await out.embedPng(bytes);
+          const rot = kind === 'jpg' ? pibJpegRotation(bytes) : 0;
+          loaded[a.id] = { kind, emb, srcTrim: null, srcBleed: null, aspect: rot % 180 ? emb.height / emb.width : emb.width / emb.height, rot };
         }
-        if (rot % 180) aspect = 1 / aspect; // היחס כפי שהקובץ נראה בפועל
-        loaded[a.id] = { kind, emb, srcTrim, srcBleed, aspect, rot };
       } catch (e) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — הקובץ לא נטען (${e.message || e})`); }
     }
+    // קובץ של כמה עמודים ממשיך למודעות הבאות של אותו לקוח שאין להן קובץ
+    const pageCounts = {};
+    Object.keys(pdfSrc).forEach(id => { pageCounts[id] = pdfSrc[id].getPageCount(); });
+    const chain = pibChainAds(ads, pageCounts, new Set(ads.filter(a => fileFor(a.id)).map(a => a.id)));
+    for (const a of noFile) {
+      const c = chain.assign[a.id];
+      if (c) loaded[a.id] = pdfItem(pdfSrc[c.from], c.idx);
+      else W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — אין קובץ`);
+    }
+    Object.keys(chain.leftover).forEach(id => {
+      const a = ads.find(x => String(x.id) === String(id));
+      W('note', `עמ' ${a.page_number}: ${_adLabel(a)} — לקובץ ${pageCounts[id]} עמודים, ${chain.leftover[id]} אחרונים לא נכנסו (אין עוד מודעות של הלקוח בלי קובץ בעמודים הבאים)`);
+    });
     // עמודי כתבות (אם הועלו לגיליון) — לפי העימוד, לעמודים בלי מודעות
     let edDoc = null, edMap = { map: {}, empty: [], extra: 0 };
     step('בודק עמודי כתבות...');
@@ -736,5 +769,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds };
 }

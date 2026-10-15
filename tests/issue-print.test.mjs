@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -144,6 +144,22 @@ t('rotated ad: בחירת כיוון ידנית — ראש ימינה/שמאלה
   assert.deepStrictEqual([2, 3].map(p => pibAdTurn('rl', p)), [270, 270]);
   assert.deepStrictEqual([2, 3].map(p => pibAdTurn('r', p)), [270, 90]);
   assert.deepStrictEqual([null, 'v', 'h'].map(o => pibAdTurn(o, 2)), [0, 0, 0]);
+});
+
+/* ---------- קובץ של כמה עמודים ---------- */
+t('chain: קובץ 5 עמודים בעמוד 22 ממשיך למודעות הלקוח בעמודים 23–26', () => {
+  const ads = [{ id: 1, customer_id: 9, page_number: 22 }, { id: 2, customer_id: 9, page_number: 24 }, { id: 3, customer_id: 9, page_number: 23 },
+    { id: 4, customer_id: 9, page_number: 26 }, { id: 5, customer_id: 9, page_number: 25 }, { id: 6, customer_id: 7, page_number: 24 }];
+  const r = pibChainAds(ads, { 1: 5 }, new Set([1, 6]));
+  assert.deepStrictEqual(r.assign, { 3: { from: 1, idx: 1 }, 2: { from: 1, idx: 2 }, 5: { from: 1, idx: 3 }, 4: { from: 1, idx: 4 } });
+  assert.deepStrictEqual(r.leftover, {});
+});
+t('chain: לא נוגע במודעות עם קובץ משלהן, בלקוח אחר או בעמוד קודם; עודף מדווח', () => {
+  const ads = [{ id: 1, customer_id: 9, page_number: 5 }, { id: 2, customer_id: 9, page_number: 4 }, { id: 3, customer_id: 9, page_number: 6 },
+    { id: 4, customer_id: 8, page_number: 7 }, { id: 5, customer_id: 9, page_number: 8 }];
+  const r = pibChainAds(ads, { 1: 4, 3: 1 }, new Set([1, 3]));
+  assert.deepStrictEqual(r.assign, { 5: { from: 1, idx: 1 } });
+  assert.deepStrictEqual(r.leftover, { 1: 2 });
 });
 
 console.log(`\n${passed} בדיקות עברו`);
