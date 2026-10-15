@@ -639,8 +639,7 @@ async function _pibHash(bytes) {
 /* ==================== הורדת כל קבצי המודעות של הגיליון ==================== */
 /* כל קובץ כמו שהועלה (בלי הקטנה/המרה), ב-ZIP אחד. שם הקובץ מתחיל במספר העמוד
    כדי שיסתדר לפי העימוד; מודעה שלא שובצה — "לא_משובצת". קובץ עיצוב קודם,
-   ואם אין — קובץ המקור. ה-ZIP נשמר ב-issues-archive (shares/) ומתקבל קישור
-   שיתוף חתום ל-7 ימים — לשליחה בוואטסאפ/מייל, בלי חשבון במערכת. */
+   ואם אין — קובץ המקור. הקישור לשיתוף תקף 7 ימים (ר' fpDownloadAllAds). */
 const _PIB_SHARE_DAYS = 7;
 function pibZipName(a, fileName, used) {
   const ext = (String(fileName || '').match(/\.[A-Za-z0-9]{1,6}$/) || [''])[0];
@@ -651,56 +650,94 @@ function pibZipName(a, fileName, used) {
   return name;
 }
 
-async function fpDownloadAllAds() {
-  if (typeof _zipStore !== 'function') { toast('הורדת ZIP לא זמינה', true); return; }
-  const issue = _fpIssue;
+/* רשימת קבצי המודעות של הגיליון (קובץ עיצוב קודם, אחרת מקור), לפי סדר העמודים */
+async function _pibAdFiles() {
   const ads = _fpAds.filter(a => !['cancelled', 'rejected'].includes(a.status))
     .sort((x, y) => (x.page_number || 999) - (y.page_number || 999) || x.id - y.id);
-  if (!ads.length) { toast('אין מודעות בגיליון', true); return; }
-  const files = await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at').in('ad_id', ads.map(a => a.id)).order('created_at', { ascending: false }));
+  const files = ads.length ? await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at').in('ad_id', ads.map(a => a.id)).order('created_at', { ascending: false })) : [];
   const fileFor = id => files.find(f => f.ad_id === id && f.kind === 'design') || files.find(f => f.ad_id === id && f.kind === 'source');
-  const withFile = ads.filter(a => fileFor(a.id));
-  if (!withFile.length) { toast('לאף מודעה בגיליון אין קובץ', true); return; }
+  const used = {};
+  const list = ads.filter(a => fileFor(a.id)).map(a => { const f = fileFor(a.id); return { ad: a, path: f.storage_path, name: pibZipName(a, f.file_name || f.storage_path, used) }; });
+  return { list, missing: ads.filter(a => !fileFor(a.id)) };
+}
+
+/* הרצה במקביל, n בכל פעם — הורדה אחת-אחת איטית מדי בעשרות קבצים */
+async function _pibPool(items, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; await fn(items[k], k); } }));
+}
+
+/* קישור שיתוף: לא מעלים שום קובץ גדול. הקבצים כבר בשרת — לכל אחד נוצר קישור
+   חתום, והרשימה (JSON קטן) נשמרת ב-issues-archive/shares. הקישור פותח את
+   ads-share.html, שמציג את הקבצים ומאפשר הורדה של הכול ב-ZIP אצל המקבל. */
+async function fpDownloadAllAds() {
+  const issue = _fpIssue;
   const modal = document.getElementById('viewModal'), back = document.getElementById('viewBack');
   const head = `<h3>🔗 קישור לכל המודעות — גיליון ${esc(issue.issue_number)}</h3>`;
-  back.classList.add('open');
-  const entries = [], used = {}, errs = [];
-  for (let i = 0; i < withFile.length; i++) {
-    const a = withFile[i], f = fileFor(a.id);
-    modal.innerHTML = `${head}<p>מוריד ${i + 1}/${withFile.length}...</p>`;
-    const { data, error } = await db.storage.from('ad-files').download(f.storage_path);
-    if (error || !data) { errs.push(_adLabel(a)); continue; }
-    entries.push({ name: pibZipName(a, f.file_name || f.storage_path, used), data: new Uint8Array(await data.arrayBuffer()) });
-  }
-  const missing = ads.filter(a => !fileFor(a.id));
   const close = `<button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>`;
-  if (!entries.length) { modal.innerHTML = `${head}<p style="color:#b91c1c">לא הצלחתי להוריד אף קובץ.</p><div class="m-actions">${close}</div>`; return; }
-  const zip = _zipStore(entries);
-  const url = URL.createObjectURL(zip);
-  const name = `מודעות-גיליון-${issue.issue_number}.zip`;
-  // קישור שיתוף: העלאה לאחסון + קישור חתום. אם נכשל — נשארת הורדה ישירה
-  modal.innerHTML = `${head}<p>יוצר קישור שיתוף...</p>`;
-  let link = '', linkErr = '';
+  back.classList.add('open');
+  modal.innerHTML = `${head}<p>אוסף את המודעות...</p>`;
   try {
-    const path = `shares/ads_issue_${issue.id}.zip`;
-    const up = await db.storage.from('issues-archive').upload(path, zip, { upsert: true, contentType: 'application/zip', cacheControl: '0' });
+    const { list, missing } = await _pibAdFiles();
+    if (!list.length) { modal.innerHTML = `${head}<p>לאף מודעה בגיליון אין קובץ.</p><div class="m-actions">${close}</div>`; return; }
+    const ttl = _PIB_SHARE_DAYS * 86400, errs = [], out = [];
+    let done = 0;
+    await _pibPool(list, 6, async (it, k) => {
+      const { data, error } = await db.storage.from('ad-files').createSignedUrl(it.path, ttl, { download: it.name });
+      if (error || !data) errs.push(_adLabel(it.ad)); else out[k] = { name: it.name, url: data.signedUrl, page: it.ad.page_number || null };
+      modal.innerHTML = `${head}<p>מכין קישורים ${++done}/${list.length}...</p>`;
+    });
+    const files = out.filter(Boolean);
+    if (!files.length) throw new Error('לא נוצרו קישורים לקבצים');
+    const expires = new Date(Date.now() + ttl * 1000).toISOString();
+    const manifest = { v: 1, issue: issue.issue_number, date: issue.publish_date || null, expires, files };
+    const path = `shares/ads_issue_${issue.id}.json`;
+    const up = await db.storage.from('issues-archive').upload(path, new Blob([JSON.stringify(manifest)], { type: 'application/json' }), { upsert: true, contentType: 'application/json', cacheControl: '0' });
     if (up.error) throw up.error;
-    const sg = await db.storage.from('issues-archive').createSignedUrl(path, _PIB_SHARE_DAYS * 86400, { download: name });
+    const sg = await db.storage.from('issues-archive').createSignedUrl(path, ttl);
     if (sg.error) throw sg.error;
-    link = sg.data.signedUrl;
-  } catch (e) { linkErr = e.message || String(e); }
-  const until = new Date(Date.now() + _PIB_SHARE_DAYS * 86400000).toLocaleDateString('he-IL');
-  const wa = 'https://wa.me/?text=' + encodeURIComponent(`כל המודעות של גיליון ${issue.issue_number}:\n${link}`);
-  modal.innerHTML = `${head}
-<p>${entries.length} קבצים בגודל המקורי, כמו שהועלו. שם כל קובץ מתחיל במספר העמוד.</p>
-${link ? `<div class="field"><label>🔗 קישור לכל המודעות (בתוקף עד ${esc(until)})</label>
+    const link = new URL('ads-share.html', location.href).href + '#' + encodeURIComponent(sg.data.signedUrl);
+    const until = new Date(expires).toLocaleDateString('he-IL');
+    const wa = 'https://wa.me/?text=' + encodeURIComponent(`כל המודעות של גיליון ${issue.issue_number}:\n${link}`);
+    modal.innerHTML = `${head}
+<p>${files.length} מודעות בגודל המקורי. המקבל רואה רשימה, מוריד מודעה בודדת או את כולן ב-ZIP.</p>
+<div class="field"><label>🔗 הקישור (בתוקף עד ${esc(until)})</label>
 <input id="pibShareLink" readonly dir="ltr" value="${esc(link)}" onclick="this.select()" style="width:100%;font-size:.78rem"></div>
 <div class="m-actions"><button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('pibShareLink').value).then(()=>toast('✓ הקישור הועתק'))">📋 העתקת הקישור</button>
-<a class="btn btn-ghost" href="${esc(wa)}" target="_blank" rel="noopener">שליחה בוואטסאפ</a></div>`
-  : `<p style="color:#b91c1c;font-size:.84rem">לא נוצר קישור שיתוף (${esc(linkErr)}) — אפשר להוריד ישירות.</p>`}
-${errs.length ? `<p style="color:#b91c1c;font-size:.84rem">🔴 לא ירדו (${errs.length}): ${esc(errs.join(', '))}</p>` : ''}
+<a class="btn btn-ghost" href="${esc(wa)}" target="_blank" rel="noopener">שליחה בוואטסאפ</a>
+<a class="btn btn-ghost" href="${esc(link)}" target="_blank" rel="noopener">👁 פתיחה</a></div>
+${errs.length ? `<p style="color:#b91c1c;font-size:.84rem">🔴 לא נכנסו לקישור (${errs.length}): ${esc(errs.join(', '))}</p>` : ''}
 ${missing.length ? `<p style="color:#92400e;font-size:.84rem">🟡 בלי קובץ במערכת (${missing.length}): ${esc(missing.map(a => (a.page_number ? "עמ' " + a.page_number + ' ' : '') + _adLabel(a)).join(', '))}</p>` : ''}
-<div class="m-actions" style="margin-top:12px"><a class="btn btn-ghost" href="${url}" download="${esc(name)}">⬇ הורדה למחשב</a>${close}</div>`;
+<div class="m-actions" style="margin-top:12px"><button class="btn btn-ghost" onclick="fpDownloadAllAdsZip()">⬇ הורדה למחשב (ZIP)</button>${close}</div>`;
+  } catch (e) {
+    modal.innerHTML = `${head}<p style="color:#b91c1c">לא נוצר קישור: ${esc(e.message || String(e))}</p>
+<div class="m-actions"><button class="btn btn-ghost" onclick="fpDownloadAllAdsZip()">⬇ הורדה למחשב (ZIP)</button>${close}</div>`;
+  }
+}
+
+/* הורדה למחשב: כל הקבצים ב-ZIP אחד, מורכב בדפדפן (בלי העלאה חזרה לשרת) */
+async function fpDownloadAllAdsZip() {
+  if (typeof _zipStore !== 'function') { toast('הורדת ZIP לא זמינה', true); return; }
+  const issue = _fpIssue, modal = document.getElementById('viewModal');
+  const head = `<h3>⬇ הורדת כל המודעות — גיליון ${esc(issue.issue_number)}</h3>`;
+  const close = `<button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>`;
+  const { list } = await _pibAdFiles();
+  if (!list.length) { toast('לאף מודעה בגיליון אין קובץ', true); return; }
+  const entries = [], errs = [];
+  let done = 0, mb = 0;
+  await _pibPool(list, 4, async (it, k) => {
+    const { data, error } = await db.storage.from('ad-files').download(it.path);
+    if (error || !data) errs.push(_adLabel(it.ad));
+    else { const u8 = new Uint8Array(await data.arrayBuffer()); entries[k] = { name: it.name, data: u8 }; mb += u8.length / 1048576; }
+    modal.innerHTML = `${head}<p>מוריד ${++done}/${list.length} · ${mb.toFixed(0)}MB...</p>`;
+  });
+  const ok = entries.filter(Boolean);
+  if (!ok.length) { modal.innerHTML = `${head}<p style="color:#b91c1c">לא הצלחתי להוריד אף קובץ.</p><div class="m-actions">${close}</div>`; return; }
+  const url = URL.createObjectURL(_zipStore(ok)), name = `מודעות-גיליון-${issue.issue_number}.zip`;
+  modal.innerHTML = `${head}<p>${ok.length} קבצים · ${mb.toFixed(0)}MB.</p>
+${errs.length ? `<p style="color:#b91c1c;font-size:.84rem">🔴 לא ירדו (${errs.length}): ${esc(errs.join(', '))}</p>` : ''}
+<div class="m-actions"><a class="btn" href="${url}" download="${esc(name)}">⬇ שמירת ה-ZIP</a>${close}</div>`;
+  const dl = document.createElement('a'); dl.href = url; dl.download = name; dl.click();
 }
 
 /* ==================== עמודי כתבות — העלאה ותצוגת שיבוץ ==================== */
