@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds, pibZipName } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -160,6 +160,13 @@ t('chain: לא נוגע במודעות עם קובץ משלהן, בלקוח אח
   const r = pibChainAds(ads, { 1: 4, 3: 1 }, new Set([1, 3]));
   assert.deepStrictEqual(r.assign, { 5: { from: 1, idx: 1 } });
   assert.deepStrictEqual(r.leftover, { 1: 2 });
+});
+
+t('zip: שם קובץ לפי עמוד, סיומת מקורית, בלי כפילויות ותווים אסורים', () => {
+  const used = {};
+  assert.strictEqual(pibZipName({ page_number: 5, title: 'פיצה/בורקס' }, 'a.PDF', used), 'עמ_05_פיצה_בורקס.PDF');
+  assert.strictEqual(pibZipName({ page_number: 5, title: 'פיצה/בורקס' }, 'b.PDF', used), 'עמ_05_פיצה_בורקס_2.PDF');
+  assert.strictEqual(pibZipName({ page_number: null, title: 'ירקן' }, 'x.jpg', used), 'לא_משובצת_ירקן.jpg');
 });
 
 console.log(`\n${passed} בדיקות עברו`);

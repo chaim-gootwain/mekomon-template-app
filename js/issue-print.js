@@ -636,6 +636,53 @@ async function _pibHash(bytes) {
   } catch (e) { return bytes.length + ':' + bytes[0] + bytes[bytes.length - 1]; }
 }
 
+/* ==================== הורדת כל קבצי המודעות של הגיליון ==================== */
+/* כל קובץ כמו שהועלה (בלי הקטנה/המרה), ב-ZIP אחד. שם הקובץ מתחיל במספר העמוד
+   כדי שיסתדר לפי העימוד; מודעה שלא שובצה — "לא_משובצת". קובץ עיצוב קודם,
+   ואם אין — קובץ המקור. */
+function pibZipName(a, fileName, used) {
+  const ext = (String(fileName || '').match(/\.[A-Za-z0-9]{1,6}$/) || [''])[0];
+  const pg = a.page_number ? 'עמ_' + String(a.page_number).padStart(2, '0') : 'לא_משובצת';
+  let name = (pg + '_' + String(a.title || 'מודעה')).replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) + ext;
+  if (used[name]) { const n = ++used[name], dot = name.lastIndexOf('.'); name = dot > 0 ? name.slice(0, dot) + '_' + n + name.slice(dot) : name + '_' + n; }
+  else used[name] = 1;
+  return name;
+}
+
+async function fpDownloadAllAds() {
+  if (typeof _zipStore !== 'function') { toast('הורדת ZIP לא זמינה', true); return; }
+  const issue = _fpIssue;
+  const ads = _fpAds.filter(a => !['cancelled', 'rejected'].includes(a.status))
+    .sort((x, y) => (x.page_number || 999) - (y.page_number || 999) || x.id - y.id);
+  if (!ads.length) { toast('אין מודעות בגיליון', true); return; }
+  const files = await run(db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at').in('ad_id', ads.map(a => a.id)).order('created_at', { ascending: false }));
+  const fileFor = id => files.find(f => f.ad_id === id && f.kind === 'design') || files.find(f => f.ad_id === id && f.kind === 'source');
+  const withFile = ads.filter(a => fileFor(a.id));
+  if (!withFile.length) { toast('לאף מודעה בגיליון אין קובץ', true); return; }
+  const modal = document.getElementById('viewModal'), back = document.getElementById('viewBack');
+  const head = `<h3>⬇ הורדת כל המודעות — גיליון ${esc(issue.issue_number)}</h3>`;
+  back.classList.add('open');
+  const entries = [], used = {}, errs = [];
+  for (let i = 0; i < withFile.length; i++) {
+    const a = withFile[i], f = fileFor(a.id);
+    modal.innerHTML = `${head}<p>מוריד ${i + 1}/${withFile.length}...</p>`;
+    const { data, error } = await db.storage.from('ad-files').download(f.storage_path);
+    if (error || !data) { errs.push(_adLabel(a)); continue; }
+    entries.push({ name: pibZipName(a, f.file_name || f.storage_path, used), data: new Uint8Array(await data.arrayBuffer()) });
+  }
+  const missing = ads.filter(a => !fileFor(a.id));
+  const close = `<button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>`;
+  if (!entries.length) { modal.innerHTML = `${head}<p style="color:#b91c1c">לא הצלחתי להוריד אף קובץ.</p><div class="m-actions">${close}</div>`; return; }
+  const url = URL.createObjectURL(_zipStore(entries));
+  const name = `מודעות-גיליון-${issue.issue_number}.zip`;
+  modal.innerHTML = `${head}
+<p>${entries.length} קבצים בגודל המקורי, כמו שהועלו. שם כל קובץ מתחיל במספר העמוד.</p>
+${errs.length ? `<p style="color:#b91c1c;font-size:.84rem">🔴 לא ירדו (${errs.length}): ${esc(errs.join(', '))}</p>` : ''}
+${missing.length ? `<p style="color:#92400e;font-size:.84rem">🟡 בלי קובץ במערכת (${missing.length}): ${esc(missing.map(a => (a.page_number ? "עמ' " + a.page_number + ' ' : '') + _adLabel(a)).join(', '))}</p>` : ''}
+<div class="m-actions" style="margin-top:12px"><a class="btn" href="${url}" download="${esc(name)}">⬇ הורדת ה-ZIP</a>${close}</div>`;
+  const dl = document.createElement('a'); dl.href = url; dl.download = name; dl.click();
+}
+
 /* ==================== עמודי כתבות — העלאה ותצוגת שיבוץ ==================== */
 function fpEditorialUpload() {
   if (!['admin', 'editor'].includes(profile.role)) return;
@@ -769,5 +816,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds, pibZipName };
 }
