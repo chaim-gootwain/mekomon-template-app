@@ -275,4 +275,27 @@ t('חודש בלי נתוני שעות — עלות קבועה למודעה שס
   eq(m.totals.graphics, 90);
 });
 
+t('פירוט חודש לעובד: מודעות בודדות נספרות, מודעות חוזה ממתינות עד הכרה בסגירה', () => {
+  const data = {
+    issues: [{ id: 1, issue_number: 306, print_date: '2026-10-01' }, { id: 2, issue_number: 308, print_date: '2026-10-15' }],
+    contracts: [{ id: 18, customer_id: 50, agent_id: 5, total_inserts: 4 }],
+    customers: [], comps: [], recognition: [],
+    ads: [
+      { id: 1, agent_id: 5, customer_id: 60, issue_id: 2, price: 300, status: 'approved' },
+      { id: 2, agent_id: 5, customer_id: 50, contract_id: 18, issue_id: 1, price: 150, status: 'published' },
+      { id: 3, agent_id: 5, customer_id: 50, contract_id: 18, issue_id: 2, price: 150, status: 'approved' },
+      { id: 4, agent_id: 7, customer_id: 70, issue_id: 2, price: 999, status: 'approved' },
+      { id: 5, agent_id: 5, customer_id: 60, issue_id: 2, price: 500, status: 'cancelled' },
+    ],
+  };
+  const L = E.pfAgentMonthLines('2026-10', data, 5);
+  assert.deepStrictEqual(L.ads.map(a => a.id + ':' + a.kind), ['1:single', '2:deal', '3:deal']);
+  const single = L.ads.filter(a => a.kind === 'single').reduce((s, a) => s + a.net, 0);
+  eq(single, E.pfComputeMonth('2026-10', data).agents[5].revenue, 'סכום הבודדות = ההכנסה במסך');
+  const closed = { ...data, recognition: [{ contract_id: 18, month: '2026-10', included: true, amount_recognized: 300 }] };
+  const L2 = E.pfAgentMonthLines('2026-10', closed, 5);
+  assert.deepStrictEqual(L2.deals, [{ contract_id: 18, customer_id: 50, amount: 300 }]);
+  eq(single + L2.deals[0].amount, E.pfComputeMonth('2026-10', closed).agents[5].revenue, 'אחרי סגירה: בודדות + עסקאות = ההכנסה');
+});
+
 console.log(`\n${passed} בדיקות עברו`);
