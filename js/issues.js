@@ -421,7 +421,7 @@ openForm('עריכת מודעה — ' + (nameOf('customers', a.customer_id) || '
 { name: 'page_number', label: 'עמוד', type: 'number' },
 { name: 'deal_stage', label: 'שלב עסקה', type: 'select', options: stageOpts },
 { name: 'requested_placement', label: 'מיקום מבוקש / הערה' },
-{ name: 'layout_orient', label: 'כיוון בהרכבת PDF (ללא = אוטומטי לפי הקובץ)', type: 'select', options: [{ v: 'v', t: '↕ מאונך' }, { v: 'h', t: '↔ מאוזן' }] },
+{ name: 'layout_orient', label: 'כיוון בהרכבת PDF (ללא = אוטומטי לפי הקובץ)', type: 'select', options: [{ v: 'v', t: '↕ מאונך' }, { v: 'h', t: '↔ מאוזן' }, { v: 'r', t: '⟳ מסובבת — קוראים בסיבוב העיתון (ראש המודעה החוצה)' }] },
 ], a, async (rec) => {
 const upd = {
 title: (rec.title || '').trim() || a.title,

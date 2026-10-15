@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -128,6 +128,15 @@ t('orient: חצי עמוד (4 משבצות) — מאונך מקבל טור, מא
 t('orient: משבצת בודדת — אין כיוון, נשארת כמו שהיא', () => {
   const one = pibPackPage(g, [{ id: 1, cells: 1, aspect: null, orient: 'h' }]).placed[0];
   assert.deepStrictEqual([one.w, one.h], [1, 1]);
+});
+
+t('rotated ad: ראש המודעה פונה החוצה — זוגי (ימין בכפולה) עם השעון, אי-זוגי נגד', () => {
+  assert.deepStrictEqual([2, 3, 10, 11].map(pibOutwardRot), [90, 270, 90, 270]);
+  // ראש הקובץ (u=0..w, v=h) אחרי הסיבוב: בעמוד זוגי בצד ימין של המשבצת, באי-זוגי בצד שמאל
+  const topSide = rot => { const pl = pibRotPlace(rot, 0, 0, 100, 300); const r = pl.deg * Math.PI / 180;
+    const x = pl.x + (pl.width / 2) * Math.round(Math.cos(r)) - pl.height * Math.round(Math.sin(r)); return x > 50 ? 'right' : 'left'; };
+  assert.strictEqual(topSide(pibOutwardRot(2)), 'right');
+  assert.strictEqual(topSide(pibOutwardRot(3)), 'left');
 });
 
 console.log(`\n${passed} בדיקות עברו`);

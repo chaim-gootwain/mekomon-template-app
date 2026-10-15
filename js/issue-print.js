@@ -260,6 +260,12 @@ function pibRotPlace(rot, X0, Y0, DW, DH) {
   return { x: X0, y: Y0, width: sw, height: sh, deg: 0 };
 }
 
+/* מודעה מסובבת (layout_orient='r') — הקורא מסובב את העיתון. ראש המודעה תמיד
+   פונה החוצה (לשוליים החיצוניים, לא לשדרה). עיתון עברי נפתח מימין: עמוד זוגי
+   הוא הימני בכפולה (חוץ = ימין) → סיבוב 90° עם כיוון השעון; עמוד אי-זוגי
+   שמאלי (חוץ = שמאל) → 270° */
+function pibOutwardRot(page) { return page % 2 === 0 ? 90 : 270; }
+
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : m);
@@ -456,7 +462,10 @@ async function fpBuildPrintPdf(proof) {
         const u = (typeof alItemUnits === 'function') ? alItemUnits(a.price_item_id, U, sizeMap, cache.priceList || []).units : cellsPerPage;
         const c = pibCellsFor(u, U, cellsPerPage);
         if (!c.exact) W('note', `עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
-        return { id: a.id, cells: c.cells, aspect: loaded[a.id] ? loaded[a.id].aspect : null, orient: a.layout_orient || null };
+        const asp = loaded[a.id] ? loaded[a.id].aspect : null;
+        // מסובבת: המשבצת נבחרת לפי הקובץ כשהוא מסובב (קובץ רחב → משבצת גבוהה)
+        if (a.layout_orient === 'r') return { id: a.id, cells: c.cells, aspect: asp ? 1 / asp : null, orient: null };
+        return { id: a.id, cells: c.cells, aspect: asp, orient: a.layout_orient || null };
       });
       const pack = pibPackPage(g, items);
       const used = pack.placed.reduce((n, s) => n + s.w * s.h, 0);
@@ -479,7 +488,8 @@ async function fpBuildPrintPdf(proof) {
           continue;
         }
         // מודעת עמוד מלא בגודל החיתוך → נכנסת לכל הדף כולל הגלישה
-        const isTrimSized = L.srcTrim && !L.rot && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
+        const R = pibNormRot(L.rot + (a.layout_orient === 'r' ? pibOutwardRot(p) : 0)); // סיבוב הקובץ + סיבוב החוצה
+        const isTrimSized = L.srcTrim && !R && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
         if (full && isTrimSized) {
           const b = L.srcBleed;
           const ep = await out.embedPage(L.emb.sp, { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height });
@@ -492,12 +502,12 @@ async function fpBuildPrintPdf(proof) {
           const ep = await out.embedPage(L.emb.sp, { left: t.x, bottom: t.y, right: t.x + t.width, top: t.y + t.height });
           ew = t.width; eh = t.height; draw = (o) => page.drawPage(ep, o);
         } else { ew = L.emb.width; eh = L.emb.height; draw = (o) => page.drawImage(L.emb, o); }
-        if (L.rot % 180) [ew, eh] = [eh, ew]; // מידות כפי שהקובץ נראה
+        if (R % 180) [ew, eh] = [eh, ew]; // מידות כפי שהקובץ ייראה בעמוד
         // התאמה למשבצת בלי עיוות, ממורכז
         const sw = r.w * _PIB_MM, sh = r.h * _PIB_MM, k = Math.min(sw / ew, sh / eh);
         const dw = ew * k, dh = eh * k;
         if (Math.abs(Math.log((ew / eh) / (sw / sh))) > 0.06) W('note', `עמ' ${p}: ${_adLabel(a)} — יחס הקובץ לא תואם למשבצת (${Math.round(r.w)}×${Math.round(r.h)} מ"מ) — יישאר שוליים לבנים`);
-        const pl = pibRotPlace(L.rot, X(r.x) + (sw - dw) / 2, Y(r.y + r.h) + (sh - dh) / 2, dw, dh);
+        const pl = pibRotPlace(R, X(r.x) + (sw - dw) / 2, Y(r.y + r.h) + (sh - dh) / 2, dw, dh);
         draw({ x: pl.x, y: pl.y, width: pl.width, height: pl.height, rotate: PDFLib.degrees(pl.deg) });
       }
 
@@ -720,5 +730,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot };
 }
