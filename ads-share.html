@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>מודעות הגיליון — @@PAPER_NAME@@</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<!--
+  ads-share.html — דף שיתוף של כל קבצי המודעות של גיליון (לגרפיקאית/דפוס).
+  נפתח מהקישור שהכפתור "🔗 קישור לכל המודעות" בפלטפלן יוצר (js/issue-print.js).
+  אחרי ה-# יש קישור חתום ל-JSON קטן עם רשימת הקבצים, ולכל קובץ קישור חתום משלו —
+  בלי התחברות ובלי Supabase client. הקישורים פגים אחרי 7 ימים.
+  "הורדת הכול" מרכיב ZIP בדפדפן של המקבל (store, שמות UTF-8 — כמו _zipStore ב-reports.js).
+-->
+<style>
+  body{font-family:Heebo,sans-serif;background:#f4f6fb;margin:0;color:#1f2937}
+  .wrap{max-width:720px;margin:0 auto;padding:24px 16px}
+  .card{background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.08);padding:22px}
+  h1{color:@@COLOR_BRAND@@;font-size:1.35rem;margin:0 0 4px}
+  .sub{color:#6b7280;font-size:.9rem;margin-bottom:16px}
+  .btn{display:inline-block;padding:11px 18px;border:0;border-radius:10px;background:@@COLOR_BRAND@@;color:#fff;font-weight:700;font-size:1rem;cursor:pointer;text-decoration:none;font-family:inherit}
+  .btn:disabled{opacity:.5;cursor:default}
+  ul{list-style:none;padding:0;margin:16px 0 0}
+  li{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #eef0f4;font-size:.92rem}
+  li .pg{min-width:58px;color:#6b7280;font-size:.82rem}
+  li .nm{flex:1;word-break:break-all}
+  li a{color:@@COLOR_BRAND@@;font-weight:600;text-decoration:none;white-space:nowrap}
+  .msg{margin-top:12px;font-size:.9rem}
+  .err{color:#b91c1c}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+  <h1 id="title">מודעות הגיליון</h1>
+  <div class="sub" id="sub">טוען...</div>
+  <button class="btn" id="allBtn" style="display:none" onclick="downloadAll()">⬇ הורדת כל המודעות (ZIP)</button>
+  <div class="msg" id="msg"></div>
+  <ul id="list"></ul>
+</div></div>
+<script>
+'use strict';
+let M = null;
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = id => document.getElementById(id);
+
+async function load() {
+  const src = decodeURIComponent(location.hash.slice(1) || '');
+  if (!/^https:\/\//.test(src)) { $('sub').innerHTML = '<span class="err">הקישור לא שלם — בקשו קישור חדש.</span>'; return; }
+  try {
+    const r = await fetch(src, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'פג תוקף' : 'שגיאה ' + r.status);
+    M = await r.json();
+  } catch (e) {
+    $('sub').innerHTML = `<span class="err">הקישור לא זמין (${esc(e.message)}) — ייתכן שפג תוקפו. בקשו קישור חדש.</span>`;
+    return;
+  }
+  $('title').textContent = `מודעות גיליון ${M.issue} — @@PAPER_NAME@@`;
+  document.title = $('title').textContent;
+  const until = M.expires ? new Date(M.expires).toLocaleDateString('he-IL') : '';
+  $('sub').textContent = `${M.files.length} מודעות בגודל המקורי` + (until ? ` · הקישור בתוקף עד ${until}` : '');
+  $('allBtn').style.display = M.files.length ? '' : 'none';
+  $('list').innerHTML = M.files.map(f => `<li><span class="pg">${f.page ? 'עמ׳ ' + esc(f.page) : 'לא משובצת'}</span>
+    <span class="nm">${esc(f.name)}</span><a href="${esc(f.url)}">⬇ הורדה</a></li>`).join('');
+}
+
+/* ---------- ZIP (store) ---------- */
+const crcT = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = crcT[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const u16 = v => new Uint8Array([v & 255, (v >> 8) & 255]);
+  const u32 = v => new Uint8Array([v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]);
+  const d = new Date();
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  const parts = [], central = [];
+  let offset = 0;
+  files.forEach(f => {
+    const name = enc.encode(f.name), crc = crc32(f.data);
+    parts.push(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(crc), u32(f.data.length), u32(f.data.length), u16(name.length), u16(0), name, f.data);
+    central.push({ name, crc, size: f.data.length, offset });
+    offset += 30 + name.length + f.data.length;
+  });
+  const cdStart = offset;
+  central.forEach(c => {
+    parts.push(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(c.crc), u32(c.size), u32(c.size), u16(c.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(c.offset), c.name);
+    offset += 46 + c.name.length;
+  });
+  parts.push(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(offset - cdStart), u32(cdStart), u16(0));
+  return new Blob(parts, { type: 'application/zip' });
+}
+
+async function downloadAll() {
+  const btn = $('allBtn'); btn.disabled = true;
+  const out = [], errs = [];
+  let i = 0, done = 0, mb = 0;
+  const worker = async () => {
+    while (i < M.files.length) {
+      const k = i++, f = M.files[k];
+      try {
+        const r = await fetch(f.url);
+        if (!r.ok) throw new Error(r.status);
+        const u8 = new Uint8Array(await r.arrayBuffer());
+        out[k] = { name: f.name, data: u8 }; mb += u8.length / 1048576;
+      } catch (e) { errs.push(f.name); }
+      $('msg').textContent = `מוריד ${++done}/${M.files.length} · ${mb.toFixed(0)}MB...`;
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  const ok = out.filter(Boolean);
+  btn.disabled = false;
+  if (!ok.length) { $('msg').innerHTML = '<span class="err">ההורדה נכשלה — ייתכן שפג תוקף הקישור.</span>'; return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zipStore(ok));
+  a.download = `מודעות-גיליון-${M.issue}.zip`;
+  document.body.appendChild(a); a.click(); a.remove();
+  $('msg').innerHTML = `✓ ירדו ${ok.length} קבצים (${mb.toFixed(0)}MB)` + (errs.length ? ` · <span class="err">לא ירדו: ${esc(errs.join(', '))}</span>` : '');
+}
+
+load();
+</script>
+</body>
+</html>
