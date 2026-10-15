@@ -421,6 +421,7 @@ openForm('עריכת מודעה — ' + (nameOf('customers', a.customer_id) || '
 { name: 'page_number', label: 'עמוד', type: 'number' },
 { name: 'deal_stage', label: 'שלב עסקה', type: 'select', options: stageOpts },
 { name: 'requested_placement', label: 'מיקום מבוקש / הערה' },
+{ name: 'layout_orient', label: 'כיוון בהרכבת PDF (ללא = אוטומטי לפי הקובץ)', type: 'select', options: [{ v: 'v', t: '↕ מאונך' }, { v: 'h', t: '↔ מאוזן' }, { v: 'r', t: '⟳ מסובבת — רגלי המודעה החוצה (לפי העמוד)' }, { v: 'rr', t: '⟳ מסובבת — ראש המודעה ימינה' }, { v: 'rl', t: '⟲ מסובבת — ראש המודעה שמאלה' }] },
 ], a, async (rec) => {
 const upd = {
 title: (rec.title || '').trim() || a.title,
@@ -436,6 +437,13 @@ if (upd.page_number && a.status === 'approved') upd.status = 'placed';
 if (!upd.page_number && a.status === 'placed') upd.status = 'approved';
 await run(db.from('ads').update(upd).eq('id', id));
 Object.assign(a, upd);
+// הכיוון נשמר בנפרד: בלי העמודה (מיגרציה 2026-10-15_ads_layout_orient) שאר העריכה לא נכשלת
+const orient = rec.layout_orient || null;
+if (orient !== (a.layout_orient || null)) {
+  const { error } = await db.from('ads').update({ layout_orient: orient }).eq('id', id);
+  if (error) { toast('המודעה עודכנה, אבל הכיוון לא נשמר — צריך להריץ את מיגרציית layout_orient', true); _fpPaint(); return; }
+  a.layout_orient = orient;
+}
 toast('✓ המודעה עודכנה');
 _fpPaint();
 });

@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -112,6 +112,38 @@ t('rotation: ציור מסובב תופס בדיוק את המלבן', () => {
     const pts = [[0, 0], [pl.width, 0], [0, pl.height], [pl.width, pl.height]].map(([u, v]) => [pl.x + u * c - v * s, pl.y + u * s + v * c]);
     return [Math.min(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1])), Math.max(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1]))]; };
   for (const rot of [0, 90, 180, 270]) assert.deepStrictEqual(box(pibRotPlace(rot, 10, 20, 100, 300)), [10, 20, 110, 320], 'rot ' + rot);
+});
+
+/* ---------- כיוון שנבחר ידנית ---------- */
+t('orient: חצי עמוד (4 משבצות) — מאונך מקבל טור, מאוזן מקבל רוחב מלא', () => {
+  // קובץ ריבועי בערך: בלי בחירה ייבחר 2×2; עם בחירה — לפי הכיוון
+  const sq = ar(1, 1);
+  const auto = pibPackPage(g, [{ id: 1, cells: 4, aspect: sq }]).placed[0];
+  const v = pibPackPage(g, [{ id: 1, cells: 4, aspect: sq, orient: 'v' }]).placed[0];
+  const h = pibPackPage(g, [{ id: 1, cells: 2, aspect: sq, orient: 'h' }]).placed[0];
+  assert.deepStrictEqual([auto.w, auto.h], [2, 2]);
+  assert.deepStrictEqual([v.w, v.h], [1, 4]);
+  assert.deepStrictEqual([h.w, h.h], [2, 1]);
+});
+t('orient: משבצת בודדת — אין כיוון, נשארת כמו שהיא', () => {
+  const one = pibPackPage(g, [{ id: 1, cells: 1, aspect: null, orient: 'h' }]).placed[0];
+  assert.deepStrictEqual([one.w, one.h], [1, 1]);
+});
+
+t('rotated ad: רגלי המודעה פונות החוצה — זוגי (ימין בכפולה) נגד השעון, אי-זוגי עם', () => {
+  assert.deepStrictEqual([2, 3, 10, 11].map(pibOutwardRot), [270, 90, 270, 90]);
+  // רגלי הקובץ (u=0..w, v=0) אחרי הסיבוב: בעמוד זוגי בצד ימין (חוץ), באי-זוגי בצד שמאל (חוץ)
+  const footSide = rot => { const pl = pibRotPlace(rot, 0, 0, 100, 300); const r = pl.deg * Math.PI / 180;
+    const x = pl.x + (pl.width / 2) * Math.round(Math.cos(r)); return x > 50 ? 'right' : 'left'; };
+  assert.strictEqual(footSide(pibOutwardRot(2)), 'right');
+  assert.strictEqual(footSide(pibOutwardRot(3)), 'left');
+});
+
+t('rotated ad: בחירת כיוון ידנית — ראש ימינה/שמאלה בכל עמוד', () => {
+  assert.deepStrictEqual([2, 3].map(p => pibAdTurn('rr', p)), [90, 90]);
+  assert.deepStrictEqual([2, 3].map(p => pibAdTurn('rl', p)), [270, 270]);
+  assert.deepStrictEqual([2, 3].map(p => pibAdTurn('r', p)), [270, 90]);
+  assert.deepStrictEqual([null, 'v', 'h'].map(o => pibAdTurn(o, 2)), [0, 0, 0]);
 });
 
 console.log(`\n${passed} בדיקות עברו`);

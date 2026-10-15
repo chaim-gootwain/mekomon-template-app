@@ -99,8 +99,10 @@ function pibCellsFor(units, unitsPerPage, cells) {
   return { cells: Math.min(n, cells), exact: Math.abs(exact - n) < 1e-6 && n <= cells };
 }
 
-/* צורות אפשריות (w×h משבצות) לפריט, ממוינות לפי קרבה ליחס הקובץ */
-function _pibShapes(cells, g, aspect) {
+/* צורות אפשריות (w×h משבצות) לפריט, ממוינות לפי קרבה ליחס הקובץ.
+   orient ('v' מאונך / 'h' מאוזן, נבחר ידנית במודעה) — רק צורות בכיוון הזה;
+   אם אין כאלה (משבצת בודדת, ריבוע) — כל הצורות */
+function _pibShapes(cells, g, aspect, orient) {
   const out = [];
   for (let w = 1; w <= g.cols; w++) {
     if (cells % w) continue;
@@ -110,10 +112,12 @@ function _pibShapes(cells, g, aspect) {
     out.push({ w, h, ar });
   }
   const score = s => aspect ? Math.abs(Math.log(s.ar / aspect)) : -s.w; // בלי קובץ: הרחב קודם
-  return out.sort((a, b) => score(a) - score(b) || a.w - b.w);
+  const sorted = out.sort((a, b) => score(a) - score(b) || a.w - b.w);
+  const want = orient === 'v' ? sorted.filter(s => s.ar < 0.97) : orient === 'h' ? sorted.filter(s => s.ar > 1.03) : sorted;
+  return want.length ? want : sorted;
 }
 
-/* סידור פריטים בעמוד: g = {cols, rows, mw, mh, gx, gy}; items = [{id, cells, aspect}]
+/* סידור פריטים בעמוד: g = {cols, rows, mw, mh, gx, gy}; items = [{id, cells, aspect, orient?}]
    סריקה מלמטה למעלה (או מלמעלה, g.fromTop) ומימין לשמאל; חיפוש לעומק כדי שכל הפריטים ייכנסו אם אפשר.
    מחזיר { placed:[{id,col,row,w,h}], unplaced:[id] } — col 0 = הטור הימני */
 function pibPackPage(g, items) {
@@ -131,7 +135,7 @@ function pibPackPage(g, items) {
     if (i === order.length) return true;
     if (++nodes > 50000) return false;
     const it = order[i];
-    for (const s of _pibShapes(it.cells, g, it.aspect)) {
+    for (const s of _pibShapes(it.cells, g, it.aspect, it.orient)) {
       for (const r of anchors(s.h)) for (let c = 0; c < g.cols; c++) {
         if (!fits(r, c, s.w, s.h)) continue;
         mark(r, c, s.w, s.h, true); placed.push({ id: it.id, col: c, row: r, w: s.w, h: s.h });
@@ -147,7 +151,7 @@ function pibPackPage(g, items) {
   const greedy = [], unplaced = [];
   for (const it of order) {
     let done = false;
-    for (const s of _pibShapes(it.cells, g, it.aspect)) {
+    for (const s of _pibShapes(it.cells, g, it.aspect, it.orient)) {
       for (const r of anchors(s.h)) for (let c = 0; c < g.cols && !done; c++) {
         if (fits(r, c, s.w, s.h)) { mark(r, c, s.w, s.h, true); greedy.push({ id: it.id, col: c, row: r, w: s.w, h: s.h }); done = true; }
       }
@@ -254,6 +258,18 @@ function pibRotPlace(rot, X0, Y0, DW, DH) {
   if (rot === 180) return { x: X0 + DW, y: Y0 + DH, width: sw, height: sh, deg: 180 };
   if (rot === 270) return { x: X0 + DW, y: Y0, width: sw, height: sh, deg: 90 };
   return { x: X0, y: Y0, width: sw, height: sh, deg: 0 };
+}
+
+/* מודעה מסובבת (layout_orient='r') — הקורא מסובב את העיתון. רגלי המודעה
+   (התחתית) תמיד פונות החוצה, לשוליים החיצוניים, והראש לשדרה — קוראים אותה
+   מצד החוץ של הדף (החלטת חיים 15.10.2026). עיתון עברי נפתח מימין: עמוד זוגי
+   הוא הימני בכפולה (חוץ = ימין) → סיבוב 270° (נגד השעון, הראש שמאלה);
+   עמוד אי-זוגי שמאלי (חוץ = שמאל) → 90° (עם השעון, הראש ימינה) */
+function pibOutwardRot(page) { return page % 2 === 0 ? 270 : 90; }
+/* סיבוב נוסף למודעה לפי הבחירה: 'r' = רגליים החוצה (לפי העמוד),
+   'rr' = ראש המודעה ימינה (90° עם השעון), 'rl' = ראש המודעה שמאלה (270°) */
+function pibAdTurn(orient, page) {
+  return orient === 'r' ? pibOutwardRot(page) : orient === 'rr' ? 90 : orient === 'rl' ? 270 : 0;
 }
 
 /* החלפת משתנים בטקסט שדה */
@@ -452,12 +468,21 @@ async function fpBuildPrintPdf(proof) {
         const u = (typeof alItemUnits === 'function') ? alItemUnits(a.price_item_id, U, sizeMap, cache.priceList || []).units : cellsPerPage;
         const c = pibCellsFor(u, U, cellsPerPage);
         if (!c.exact) W('note', `עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
-        return { id: a.id, cells: c.cells, aspect: loaded[a.id] ? loaded[a.id].aspect : null };
+        const asp = loaded[a.id] ? loaded[a.id].aspect : null;
+        // מסובבת: המשבצת נבחרת לפי הקובץ כשהוא מסובב (קובץ רחב → משבצת גבוהה)
+        if (pibAdTurn(a.layout_orient, p)) return { id: a.id, cells: c.cells, aspect: asp ? 1 / asp : null, orient: null };
+        return { id: a.id, cells: c.cells, aspect: asp, orient: a.layout_orient || null };
       });
       const pack = pibPackPage(g, items);
       const used = pack.placed.reduce((n, s) => n + s.w * s.h, 0);
       if (onPage.length && used < cellsPerPage) W('note', `עמ' ${p}: מלא ${used}/${cellsPerPage} — ${cellsPerPage - used} משבצות ריקות`);
       pack.unplaced.forEach(id => W('block', `עמ' ${p}: ${_adLabel(ads.find(a => a.id === id))} — אין מקום בעמוד (עמוד עמוס)`));
+      for (const s of pack.placed) { // כיוון שנבחר ידנית ולא התקיים (אין צורה כזו לגודל, או שהעמוד לא אפשר)
+        const o = (ads.find(a => a.id === s.id) || {}).layout_orient;
+        const sar = (s.w * g.mw + (s.w - 1) * g.gx) / (s.h * g.mh + (s.h - 1) * g.gy);
+        if ((o === 'v' && sar >= 0.97) || (o === 'h' && sar <= 1.03))
+          W('note', `עמ' ${p}: ${_adLabel(ads.find(a => a.id === s.id))} — סומנה ${o === 'v' ? 'מאונכת' : 'מאוזנת'} אבל לגודל שלה אין משבצת בכיוון הזה בעמוד`);
+      }
 
       for (const s of pack.placed) {
         const a = ads.find(x => x.id === s.id), L = loaded[s.id];
@@ -469,7 +494,8 @@ async function fpBuildPrintPdf(proof) {
           continue;
         }
         // מודעת עמוד מלא בגודל החיתוך → נכנסת לכל הדף כולל הגלישה
-        const isTrimSized = L.srcTrim && !L.rot && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
+        const R = pibNormRot(L.rot + pibAdTurn(a.layout_orient, p)); // סיבוב הקובץ + הסיבוב שנבחר
+        const isTrimSized = L.srcTrim && !R && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
         if (full && isTrimSized) {
           const b = L.srcBleed;
           const ep = await out.embedPage(L.emb.sp, { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height });
@@ -482,12 +508,12 @@ async function fpBuildPrintPdf(proof) {
           const ep = await out.embedPage(L.emb.sp, { left: t.x, bottom: t.y, right: t.x + t.width, top: t.y + t.height });
           ew = t.width; eh = t.height; draw = (o) => page.drawPage(ep, o);
         } else { ew = L.emb.width; eh = L.emb.height; draw = (o) => page.drawImage(L.emb, o); }
-        if (L.rot % 180) [ew, eh] = [eh, ew]; // מידות כפי שהקובץ נראה
+        if (R % 180) [ew, eh] = [eh, ew]; // מידות כפי שהקובץ ייראה בעמוד
         // התאמה למשבצת בלי עיוות, ממורכז
         const sw = r.w * _PIB_MM, sh = r.h * _PIB_MM, k = Math.min(sw / ew, sh / eh);
         const dw = ew * k, dh = eh * k;
         if (Math.abs(Math.log((ew / eh) / (sw / sh))) > 0.06) W('note', `עמ' ${p}: ${_adLabel(a)} — יחס הקובץ לא תואם למשבצת (${Math.round(r.w)}×${Math.round(r.h)} מ"מ) — יישאר שוליים לבנים`);
-        const pl = pibRotPlace(L.rot, X(r.x) + (sw - dw) / 2, Y(r.y + r.h) + (sh - dh) / 2, dw, dh);
+        const pl = pibRotPlace(R, X(r.x) + (sw - dw) / 2, Y(r.y + r.h) + (sh - dh) / 2, dw, dh);
         draw({ x: pl.x, y: pl.y, width: pl.width, height: pl.height, rotate: PDFLib.degrees(pl.deg) });
       }
 
@@ -710,5 +736,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn };
 }
