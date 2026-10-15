@@ -12,6 +12,7 @@ issues.js — גיליונות, פלטפלן, צ'קליסט סגירה וארכ�
 let _issues = [];
 let _fpIssue = null; // הגיליון הפתוח בפלטפלן
 let _fpAds = [], _fpArticles = [];
+let _fpFileKinds = {}; // ad_id → 'design' | 'source' — מודעה בלי קובץ לא במפה
 let _fpWarnings = [], _fpChecklistIncomplete = 0;
 let _fpChecklist = [], _fpSelChip = null;
 const _AD_FULL_PRICE = 500; // בסיס לאומדן שווי שטח (מחיר עמוד שלם)
@@ -195,6 +196,7 @@ el.innerHTML = '<div class="empty">טוען פלטפלן...</div>';
 run(db.from('ads').select('*').eq('issue_id', issueId).not('status', 'in', '("cancelled","rejected")')),
 run(db.from('articles').select('*').eq('issue_id', issueId).not('status', 'in', '("idea")')),
 ]);
+_fpFileKinds = typeof adFileKindsFor === 'function' ? await adFileKindsFor(_fpAds.map(a => a.id)) : {};
 _fpChecklist = await run(db.from('issue_checklist').select('*, checklist_template(label)').eq('issue_id', issueId).order('template_id'));
 _fpSelChip = null;
 _alPreview = null; // הצעת שיבוץ שלא אושרה לא שורדת טעינה מחדש (לא נכתב דבר)
@@ -225,6 +227,8 @@ const noGraphics = _fpAds.filter(a => a.status === 'in_graphics').length;
 if (noGraphics) warnings.push(`${noGraphics} מודעות עדיין בגרפיקה`);
 const inCommittee = _fpAds.filter(a => a.status === 'committee').length;
 if (inCommittee) warnings.push(`${inCommittee} מודעות ממתינות לוועדה`);
+const noFile = _fpAds.filter(a => !_fpFileKinds[a.id]).length;
+if (noFile) warnings.push(`${noFile} מודעות בלי קובץ (מסומנות ⚠)`);
 const usedPages = new Set([..._fpAds, ..._fpArticles].filter(x => x.page_number).map(x => x.page_number));
 const emptyPages = [];
 for (let p = 1; p <= _fpIssue.pages_count; p++) if (!usedPages.has(p)) emptyPages.push(p);
@@ -256,6 +260,7 @@ ${_fpToolbarMenu('fpMenuEntry', 'מודעות ושיבוץ', [
   canEdit && _fpDealsN ? `<button class="btn" onclick="ccMenuClose();dealReviewOpen(${_fpIssue.id})">🟡 עסקאות באמצע (${_fpDealsN})</button>` : '',
   canEdit ? `<button class="btn" onclick="ccMenuClose();fpPrevAdsList()">📋 מגיליון קודם</button>` : '',
   canEdit ? `<button class="btn" onclick="ccMenuClose();fpPlaceLikePrev()">↩ כמו קודם</button>` : '',
+  canEdit && noFile ? `<button class="btn" onclick="ccMenuClose();fpCopyMissingFiles()">📎 קבצים מהפרסום האחרון (${noFile} חסרים)</button>` : '',
   canEdit ? (autoLayoutOn()
     ? `<button class="btn" onclick="ccMenuClose();fpAutoLayout()">🧩 שיבוץ אוטומטי (הצעה)</button>`
     : `<button class="btn" onclick="ccMenuClose();fpAutoArrange()">🧩 סידור אוטומטי</button>`) : ''
@@ -334,11 +339,29 @@ onchange="checklistToggle(${c.id}, this.checked)">
 </div>`;
 }
 
+/* סימון קובץ על פריט מודעה: 🎨/📎 יש קובץ · ⚠ אין — הקשה על ⚠ מציעה קובץ מפרסום קודם */
+function _fpFileMark(a) {
+const k = _fpFileKinds[a.id];
+const badge = typeof adFileBadge === 'function' ? adFileBadge(k, true) : (k ? '📎' : '⚠');
+if (k || !['admin', 'editor', 'sales'].includes(profile.role)) return badge + ' ';
+const act = a.customer_id && !a.is_system ? `fpCopyFileFor(${a.id})` : `openAdCard(${a.id})`;
+return `<span onclick="event.stopPropagation();${act}" style="cursor:pointer" title="אין קובץ — הקש להוספה">${badge}</span> `;
+}
+
+function fpCopyFileFor(adId) {
+adFileCopyOpen(adId, (ok, kind) => { if (ok) { _fpFileKinds[adId] = kind; _fpPaint(); } });
+}
+
+async function fpCopyMissingFiles() {
+const n = await adFileCopyLatestBulk(_fpAds.filter(a => !_fpFileKinds[a.id]));
+if (n) { _fpFileKinds = await adFileKindsFor(_fpAds.map(a => a.id)); _fpPaint(); }
+}
+
 /* פריט "בתהליך" — מודעה שטרם אושרה לשיבוץ (ועדה/גרפיקה/פרוף) — תצוגה בלבד, הקשה פותחת כרטיס */
 function fpPendingChip(a) {
 const base = _adLabel(a);
 return `<div class="fp-item ad" style="margin-bottom:6px;opacity:.55;cursor:pointer" onclick="openAdCard(${a.id})"
-title="${esc(base)} — ${esc((STATUS.ad[a.status] || [a.status])[0])}">${esc(base.length > 22 ? base.slice(0, 22) + '…' : base)} ${pill('ad', a.status)}</div>`;
+title="${esc(base)} — ${esc((STATUS.ad[a.status] || [a.status])[0])}">${_fpFileMark(a)}${esc(base.length > 22 ? base.slice(0, 22) + '…' : base)} ${pill('ad', a.status)}</div>`;
 }
 
 /* פריט בעמודת ההמתנה — גרירה או הקשה לבחירה */
@@ -353,7 +376,7 @@ const invBtn = (kind === 'ad' && _chipEdit) ? `<span onclick="event.stopPropagat
 return `<div class="fp-item ${kind}" draggable="true" style="margin-bottom:6px${sel ? ';outline:2px solid var(--brand);outline-offset:1px' : ''}"
 ondragstart="event.dataTransfer.setData('text/plain','${kind}:${item.id}')"
 onclick="fpSelectChip('${kind}',${item.id})"
-title="${esc(base)}${frac}${pos}${stg ? ' · ' + stg : ''}">${invBtn}${esc(base.length > 26 ? base.slice(0, 26) + '…' : base)}${frac}${stg ? ' <span style=\"font-size:.62rem\">' + stg.slice(0,2) + '</span>' : ''}</div>`;
+title="${esc(base)}${frac}${pos}${stg ? ' · ' + stg : ''}">${invBtn}${kind === 'ad' ? _fpFileMark(item) : ''}${esc(base.length > 26 ? base.slice(0, 26) + '…' : base)}${frac}${stg ? ' <span style=\"font-size:.62rem\">' + stg.slice(0,2) + '</span>' : ''}</div>`;
 }
 
 /* רשת העמודים — מד מילוי, עמודים מיוחדים, גרירה בין עמודים, הקשה לשיבוץ */
@@ -377,7 +400,7 @@ ondrop="fpDrop(event, ${p})" onclick="fpTapPage(${p})"` : ''}>
 <div class="fp-num" style="display:flex;justify-content:space-between;align-items:center;gap:4px"><span>עמוד ${p}${special ? ` <span style="color:#b45309;font-size:.6rem">${special}</span>` : ''}${_alPreview ? ` <span style="color:#7c3aed;font-size:.6rem" title="קיבולת פרסום לשיבוץ האוטומטי (יחידות)">${_alPreview.used[p] || 0}/${_alPreview.caps[p] || 0}</span>` : ''}</span>${ads.length ? `<span style="font-size:.68rem;font-weight:700;color:${barCol}">${pct}%${over ? ' ⚠' : ''}</span>` : ''}</div>
 ${ads.length ? `<div style="height:3px;background:#eef2f7;border-radius:2px;overflow:hidden"><div style="height:3px;width:${Math.min(100, pct)}%;background:${barCol}"></div></div>` : ''}
 <div class="fp-items">
-${ads.map(a => `<div class="fp-item ad" style="${a._alProposed ? 'outline:2px dashed #7c3aed;outline-offset:1px' : ''}" draggable="${canEdit}" ondragstart="event.stopPropagation();event.dataTransfer.setData('text/plain','ad:${a.id}')" title="${esc(_adLabel(a))} — ${Math.round(_adFraction(a) * 100)}% מעמוד">${canEdit ? `<span onclick="event.stopPropagation();fpMarkInvoiced(${a.id})" style="cursor:pointer;font-weight:700;${['invoiced', 'paid'].includes(a.deal_stage) ? 'color:#9333ea' : 'opacity:.4'}" title="${['invoiced', 'paid'].includes(a.deal_stage) ? 'חשבונית הופקה — בטל סימון' : 'סמן: חשבונית הופקה'}">🧾</span> <span onclick="event.stopPropagation();fpEditAd(${a.id})" style="cursor:pointer;color:#2563eb;font-weight:700" title="עריכה">✎</span> <span onclick="event.stopPropagation();fpUnplace('ad',${a.id})" style="cursor:pointer;color:#b91c1c;font-weight:700" title="הסרה">✕</span> ` : ''}${a._alProposed ? '<span style="color:#7c3aed;font-size:.62rem;font-weight:700">מוצע</span> ' : ''}${esc(_adLabel(a).slice(0, 24))}</div>`).join('')}
+${ads.map(a => `<div class="fp-item ad" style="${a._alProposed ? 'outline:2px dashed #7c3aed;outline-offset:1px' : ''}" draggable="${canEdit}" ondragstart="event.stopPropagation();event.dataTransfer.setData('text/plain','ad:${a.id}')" title="${esc(_adLabel(a))} — ${Math.round(_adFraction(a) * 100)}% מעמוד">${canEdit ? `<span onclick="event.stopPropagation();fpMarkInvoiced(${a.id})" style="cursor:pointer;font-weight:700;${['invoiced', 'paid'].includes(a.deal_stage) ? 'color:#9333ea' : 'opacity:.4'}" title="${['invoiced', 'paid'].includes(a.deal_stage) ? 'חשבונית הופקה — בטל סימון' : 'סמן: חשבונית הופקה'}">🧾</span> <span onclick="event.stopPropagation();fpEditAd(${a.id})" style="cursor:pointer;color:#2563eb;font-weight:700" title="עריכה">✎</span> <span onclick="event.stopPropagation();fpUnplace('ad',${a.id})" style="cursor:pointer;color:#b91c1c;font-weight:700" title="הסרה">✕</span> ` : ''}${a._alProposed ? '<span style="color:#7c3aed;font-size:.62rem;font-weight:700">מוצע</span> ' : ''}${_fpFileMark(a)}${esc(_adLabel(a).slice(0, 24))}</div>`).join('')}
 ${arts.map(a => `<div class="fp-item article" draggable="${canEdit}" ondragstart="event.stopPropagation();event.dataTransfer.setData('text/plain','article:${a.id}')" title="${esc(a.title)}">${canEdit ? `<span onclick="event.stopPropagation();fpUnplace('article',${a.id})" style="cursor:pointer;color:#b91c1c;font-weight:700">✕</span> ` : ''}✍ ${esc(a.title.slice(0, 22))}</div>`).join('')}
 </div></div>`;
 }

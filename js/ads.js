@@ -24,6 +24,7 @@ return await run(q);
 Pages.ads = {
 render: async (el) => {
 _ads = await loadAds();
+_adFileKinds = await adFileKindsFor(_ads.map(a => a.id));
 const canRoute = ['admin', 'sales'].includes(profile.role);
 el.innerHTML = `
 <div class="page-head">
@@ -52,6 +53,7 @@ adsDraw();
 };
 
 let _adsFilter = 'inbox';
+let _adFileKinds = {};
 function adsTab(btn) {
 _adsFilter = btn.dataset.f;
 document.querySelectorAll('#adTabs button').forEach(b => b.classList.toggle('active', b === btn));
@@ -78,6 +80,7 @@ renderTable(document.getElementById('adsTable'), rows, [
 { h: 'גודל', f: r => esc(nameOf('priceList', r.price_item_id)) },
 { h: 'גיליון', f: r => esc(nameOf('issues', r.issue_id, 'issue')) || '<span class="muted">טרם</span>' },
 { h: 'מחיר', f: r => money(r.price - r.discount) },
+{ h: 'קובץ', f: r => adFileBadge(_adFileKinds[r.id]) },
 { h: 'סטטוס', f: r => pill('ad', r.status) + (r.debt_hold && r.status === 'received' ? ' <span class="pill red" title="נעצרה לאישור — ללקוח יתרה פתוחה">🔒 חוב</span>' : '') },
 { h: 'התקבלה', f: r => heDateTime(r.created_at) },
 ], { onRow: r => openAdCard(r.id), empty: _adsFilter === 'inbox' ? 'אין מודעות חדשות לניתוב 👍' : 'אין מודעות' });
@@ -152,6 +155,14 @@ const [files, notes] = await Promise.all([
 run(db.from('ad_files').select('*').eq('ad_id', id).order('created_at', { ascending: false })),
 loadTimeline('ad', id),
 ]);
+// הכרטיס רואה את הקבצים העדכניים — מעדכנים גם את הסימון ברשימת המודעות
+const _fk = (files.find(f => f.kind === 'design') || files.find(f => f.kind === 'source') || {}).kind;
+if (_fk) _adFileKinds[id] = _fk; else delete _adFileKinds[id];
+if (document.getElementById('adsTable')) adsDraw();
+if (typeof _fpFileKinds !== 'undefined' && document.getElementById('fpGrid') && (_fpAds || []).some(x => x.id === id)) {
+if (_fk) _fpFileKinds[id] = _fk; else delete _fpFileKinds[id];
+_fpPaint();
+}
 const canRoute = ['admin', 'sales'].includes(profile.role);
 
 /* כפתורי הניתוב הרלוונטיים לסטטוס הנוכחי */
@@ -214,7 +225,8 @@ ${typeof proofCardBlock === 'function' ? proofCardBlock(a) : ''}
 ${['admin', 'sales', 'graphics'].includes(profile.role) ? `
 <input type="file" id="adFileInput" class="hidden" onchange="adFileUpload(${id})">
 <input type="file" id="adFileReplaceInput" class="hidden" onchange="adFileReplace(${id})">
-<button class="btn btn-sm btn-ghost" onclick="document.getElementById('adFileInput').click()">⬆ העלאת קובץ</button>` : ''}
+<button class="btn btn-sm btn-ghost" onclick="document.getElementById('adFileInput').click()">⬆ העלאת קובץ</button>
+${a.customer_id ? `<button class="btn btn-sm btn-ghost" onclick="adFileCopyOpen(${id})">📋 קובץ מפרסום קודם</button>` : ''}` : ''}
 
 <div class="m-actions" style="flex-wrap:wrap">
 ${routeButtons}
@@ -431,6 +443,130 @@ async function adFileOpen(path) {
 const { data, error } = await db.storage.from('ad-files').createSignedUrl(path, 300);
 if (error) { toast('שגיאה בפתיחה: ' + error.message, true); return; }
 window.open(data.signedUrl, '_blank');
+}
+
+/* --- סימון "יש קובץ / אין קובץ" ברשימות --- */
+// מפה ad_id → 'design' | 'source' (עיצוב גובר על מקור); מודעה בלי קובץ לא מופיעה במפה
+async function adFileKindsFor(ids) {
+const map = {};
+for (let i = 0; i < ids.length; i += 200) {
+const { data } = await db.from('ad_files').select('ad_id,kind').in('ad_id', ids.slice(i, i + 200)).in('kind', ['design', 'source']);
+(data || []).forEach(f => { if (map[f.ad_id] !== 'design') map[f.ad_id] = f.kind; });
+}
+return map;
+}
+
+function adFileBadge(kind, short) {
+if (kind === 'design') return '<span title="יש קובץ עיצוב">🎨</span>';
+if (kind === 'source') return '<span title="יש קובץ מהלקוח">📎</span>';
+return `<span title="אין קובץ" style="color:var(--danger);font-weight:700">⚠${short ? '' : ' אין קובץ'}</span>`;
+}
+
+/* --- העתקת קובץ מפרסום קודם של אותו לקוח ---
+   ההעתקה יוצרת שורת ad_files חדשה שמצביעה על אותו אובייקט ב-Storage (בלי
+   שכפול הקובץ). הסרה מאחת המודעות לא מוחקת את הקובץ כל עוד מודעה אחרת משתמשת בו. */
+
+// כל הקבצים של מודעות קודמות של הלקוחות, מהפרסום האחרון לראשון: [{ad, issue, file}]
+async function _adPrevFiles(customerIds, excludeAdIds) {
+const ads = [];
+for (let i = 0; i < customerIds.length; i += 100) {
+const { data } = await db.from('ads').select('id,customer_id,issue_id,title,created_at')
+.in('customer_id', customerIds.slice(i, i + 100)).not('status', 'in', '("cancelled","rejected")')
+.order('created_at', { ascending: false }).limit(1000);
+ads.push(...(data || []).filter(a => !excludeAdIds.includes(a.id)));
+}
+if (!ads.length) return [];
+const files = [];
+const adIds = ads.map(a => a.id);
+for (let i = 0; i < adIds.length; i += 200) {
+const { data } = await db.from('ad_files').select('ad_id,storage_path,file_name,kind,created_at')
+.in('ad_id', adIds.slice(i, i + 200)).in('kind', ['design', 'source']).order('created_at', { ascending: false });
+files.push(...(data || []));
+}
+const issueIds = [...new Set(ads.map(a => a.issue_id).filter(Boolean))];
+const issues = {};
+(cache.issues || []).forEach(i => { issues[i.id] = i; });
+const missing = issueIds.filter(id => !issues[id]);
+for (let i = 0; i < missing.length; i += 200) {
+const { data } = await db.from('issues').select('id,issue_number,publish_date').in('id', missing.slice(i, i + 200));
+(data || []).forEach(x => { issues[x.id] = x; });
+}
+const out = [];
+ads.forEach(a => {
+const mine = files.filter(f => f.ad_id === a.id);
+const f = mine.find(x => x.kind === 'design') || mine[0]; // הקבצים כבר ממוינים מהחדש לישן
+if (f) out.push({ ad: a, issue: issues[a.issue_id] || null, file: f });
+});
+const when = c => String((c.issue && c.issue.publish_date) || c.ad.created_at || '');
+return out.sort((x, y) => when(y).localeCompare(when(x)));
+}
+
+function _adPrevLabel(c) {
+const iss = c.issue ? `גיליון ${c.issue.issue_number}${c.issue.publish_date ? ' (' + heDate(c.issue.publish_date) + ')' : ''}` : 'ללא גיליון';
+return `${iss} · ${c.ad.title || 'מודעה'} · ${c.file.kind === 'design' ? '🎨' : '📎'} ${c.file.file_name || 'קובץ'}`;
+}
+
+async function _adCopyFile(adId, c) {
+await run(db.from('ad_files').insert({ ad_id: adId, storage_path: c.file.storage_path, file_name: c.file.file_name, kind: c.file.kind, uploaded_by: profile.id }));
+await addInteraction('ad', adId, `הועתק קובץ מ${c.issue ? 'גיליון ' + c.issue.issue_number : 'מודעה קודמת'}: ${c.file.file_name || 'קובץ'}`);
+}
+
+let _adCopyState = null;
+// onDone — מה לעשות אחרי העתקה/ביטול (ברירת מחדל: חזרה לכרטיס המודעה)
+async function adFileCopyOpen(adId, onDone) {
+const a = await run(db.from('ads').select('id,customer_id,title').eq('id', adId).single());
+if (!a || !a.customer_id) { toast('למודעה אין לקוח — אין ממה להעתיק', true); return; }
+const list = await _adPrevFiles([a.customer_id], [adId]);
+_adCopyState = { adId, list, onDone: onDone || (() => openAdCard(adId)) };
+const close = `<button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="adFileCopyClose()">ביטול</button>`;
+document.getElementById('viewModal').innerHTML = list.length ? `
+<h3>📋 קובץ מפרסום קודם</h3>
+<p class="muted" style="font-size:.85rem">${esc(nameOf('customers', a.customer_id))} — ${list.length} פרסומים קודמים עם קובץ. הקובץ יועתק למודעה הזו.</p>
+<div class="field"><label>מאיזה גיליון?</label>
+<select id="adCopyPick" style="width:100%">
+${list.map((c, i) => `<option value="${i}">${i === 0 ? '⭐ הפרסום האחרון — ' : ''}${esc(_adPrevLabel(c))}</option>`).join('')}
+</select></div>
+<div class="m-actions" style="flex-wrap:wrap">
+<button class="btn btn-sm" onclick="adFileCopyGo(0)">⭐ מהפרסום האחרון</button>
+<button class="btn btn-sm btn-ghost" onclick="adFileCopyGo(Number(document.getElementById('adCopyPick').value))">העתקה מהגיליון שנבחר</button>
+<button class="btn btn-sm btn-ghost" onclick="adFileOpen(_adCopyState.list[Number(document.getElementById('adCopyPick').value)].file.storage_path)">צפייה</button>
+${close}
+</div>` : `
+<h3>📋 קובץ מפרסום קודם</h3>
+<p>ללקוח ${esc(nameOf('customers', a.customer_id))} אין מודעות קודמות עם קובץ.</p>
+<div class="m-actions">${close}</div>`;
+document.getElementById('viewBack').classList.add('open');
+}
+
+function adFileCopyClose() {
+const s = _adCopyState; _adCopyState = null;
+document.getElementById('viewBack').classList.remove('open');
+if (s) s.onDone(false);
+}
+
+async function adFileCopyGo(i) {
+const s = _adCopyState;
+if (!s || !s.list[i]) return;
+await _adCopyFile(s.adId, s.list[i]);
+toast('הקובץ הועתק');
+_adCopyState = null;
+document.getElementById('viewBack').classList.remove('open');
+s.onDone(true, s.list[i].file.kind);
+}
+
+// העתקה מרוכזת: לכל מודעה בלי קובץ — הקובץ מהפרסום האחרון של אותו לקוח. מחזיר כמה הועתקו
+async function adFileCopyLatestBulk(ads) {
+const todo = ads.filter(a => a.customer_id && !a.is_system);
+if (!todo.length) { toast('אין מודעות לקוח בלי קובץ'); return 0; }
+const prev = await _adPrevFiles([...new Set(todo.map(a => a.customer_id))], todo.map(a => a.id));
+const plan = todo.map(a => ({ a, c: prev.find(p => p.ad.customer_id === a.customer_id && p.ad.issue_id !== a.issue_id) })).filter(x => x.c);
+if (!plan.length) { toast('לא נמצאו קבצים בפרסומים קודמים של הלקוחות האלה', true); return 0; }
+const miss = todo.length - plan.length;
+if (!confirm(`נמצא קובץ מהפרסום האחרון ל-${plan.length} מתוך ${todo.length} מודעות בלי קובץ.${miss ? `\n(ל-${miss} לא נמצא קובץ קודם.)` : ''}\n\nלהעתיק?`)) return 0;
+let n = 0;
+for (const x of plan) { try { await _adCopyFile(x.a.id, x.c); n++; } catch (e) { } }
+toast(`הועתקו ${n} קבצים`);
+return n;
 }
 
 /* ==================== 2. תור הגרפיקה ==================== */
