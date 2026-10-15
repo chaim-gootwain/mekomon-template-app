@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -83,6 +83,16 @@ t('masterLeftovers: מזהה תאריך/גיליון/מספר עמוד, לא א�
 t('pageSet + fieldText', () => {
   assert.deepStrictEqual([...pibPageSet('1, אחרון', 32)].sort((a, b) => a - b), [1, 32]);
   assert.strictEqual(pibFieldText('גיליון {issue} עמ\' {page} {x}', { issue: 306, page: 2 }), "גיליון 306 עמ' 2 {x}");
+});
+
+
+/* ---------- עמודי כתבות לפי העימוד ---------- */
+t('editorial: עמודי הקובץ נכנסים לפי הסדר לעמודים בלי מודעות', () => {
+  assert.deepStrictEqual(pibEditorialMap(8, new Set([1, 4, 8]), 5), { map: { 2: 0, 3: 1, 5: 2, 6: 3, 7: 4 }, empty: [], extra: 0 });
+});
+t('editorial: קובץ קצר — עמודים פנויים נשארים; קובץ ארוך — עודף', () => {
+  assert.deepStrictEqual(pibEditorialMap(6, new Set([1, 2]), 2), { map: { 3: 0, 4: 1 }, empty: [5, 6], extra: 0 });
+  assert.deepStrictEqual(pibEditorialMap(4, new Set([1, 2, 3]), 3), { map: { 4: 0 }, empty: [], extra: 2 });
 });
 
 console.log(`\n${passed} בדיקות עברו`);
