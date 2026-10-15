@@ -266,6 +266,11 @@ function pibRotPlace(rot, X0, Y0, DW, DH) {
    הוא הימני בכפולה (חוץ = ימין) → סיבוב 270° (נגד השעון, הראש שמאלה);
    עמוד אי-זוגי שמאלי (חוץ = שמאל) → 90° (עם השעון, הראש ימינה) */
 function pibOutwardRot(page) { return page % 2 === 0 ? 270 : 90; }
+/* סיבוב נוסף למודעה לפי הבחירה: 'r' = רגליים החוצה (לפי העמוד),
+   'rr' = ראש המודעה ימינה (90° עם השעון), 'rl' = ראש המודעה שמאלה (270°) */
+function pibAdTurn(orient, page) {
+  return orient === 'r' ? pibOutwardRot(page) : orient === 'rr' ? 90 : orient === 'rl' ? 270 : 0;
+}
 
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
@@ -465,7 +470,7 @@ async function fpBuildPrintPdf(proof) {
         if (!c.exact) W('note', `עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
         const asp = loaded[a.id] ? loaded[a.id].aspect : null;
         // מסובבת: המשבצת נבחרת לפי הקובץ כשהוא מסובב (קובץ רחב → משבצת גבוהה)
-        if (a.layout_orient === 'r') return { id: a.id, cells: c.cells, aspect: asp ? 1 / asp : null, orient: null };
+        if (pibAdTurn(a.layout_orient, p)) return { id: a.id, cells: c.cells, aspect: asp ? 1 / asp : null, orient: null };
         return { id: a.id, cells: c.cells, aspect: asp, orient: a.layout_orient || null };
       });
       const pack = pibPackPage(g, items);
@@ -489,7 +494,7 @@ async function fpBuildPrintPdf(proof) {
           continue;
         }
         // מודעת עמוד מלא בגודל החיתוך → נכנסת לכל הדף כולל הגלישה
-        const R = pibNormRot(L.rot + (a.layout_orient === 'r' ? pibOutwardRot(p) : 0)); // סיבוב הקובץ + סיבוב החוצה
+        const R = pibNormRot(L.rot + pibAdTurn(a.layout_orient, p)); // סיבוב הקובץ + הסיבוב שנבחר
         const isTrimSized = L.srcTrim && !R && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
         if (full && isTrimSized) {
           const b = L.srcBleed;
@@ -731,5 +736,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn };
 }

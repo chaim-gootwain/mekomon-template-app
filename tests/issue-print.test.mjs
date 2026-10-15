@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -137,6 +137,13 @@ t('rotated ad: רגלי המודעה פונות החוצה — זוגי (ימי�
     const x = pl.x + (pl.width / 2) * Math.round(Math.cos(r)); return x > 50 ? 'right' : 'left'; };
   assert.strictEqual(footSide(pibOutwardRot(2)), 'right');
   assert.strictEqual(footSide(pibOutwardRot(3)), 'left');
+});
+
+t('rotated ad: בחירת כיוון ידנית — ראש ימינה/שמאלה בכל עמוד', () => {
+  assert.deepStrictEqual([2, 3].map(p => pibAdTurn('rr', p)), [90, 90]);
+  assert.deepStrictEqual([2, 3].map(p => pibAdTurn('rl', p)), [270, 270]);
+  assert.deepStrictEqual([2, 3].map(p => pibAdTurn('r', p)), [270, 90]);
+  assert.deepStrictEqual([null, 'v', 'h'].map(o => pibAdTurn(o, 2)), [0, 0, 0]);
 });
 
 console.log(`\n${passed} בדיקות עברו`);
