@@ -60,7 +60,7 @@ async function pfLoad(months, opts = {}) {
   ]);
     // מודעות: כולן (עסקאות צריכות את כל ההיסטוריה שלהן) בלי מבוטלות/נדחות.
   // design_fee_net — עלות העיצוב שסומנה בכפתור בכרטיס המודעה (מאותה מיגרציה).
-  const ads = await runAll((f, t) => db.from('ads').select('id,agent_id,customer_id,contract_id,issue_id,price,discount,status,design_fee_net')
+  const ads = await runAll((f, t) => db.from('ads').select('id,agent_id,customer_id,contract_id,issue_id,title,price,discount,status,design_fee_net')
     .not('status', 'in', '("cancelled","rejected")').order('id').range(f, t), 'מודעות');
   const data = {
     issues, contracts, ads, recognition, comps: comps || [], managerCuts: cuts || [], bonuses: bonuses || [],
@@ -407,6 +407,8 @@ async function pfPayrollSync() {
    לא מוצגים: נתח מנהלת, שכר בסיס, נתוני עובדים אחרים או סיכומי העסק.
    ====================================================================== */
 let _pfEmpAgent = null;
+let _pfEmpMonth = null;   // החודש שהפירוט שלו מוצג (ברירת מחדל: החודש הנוכחי)
+let _pfEmpView = 'ad';    // פירוט לפי מודעה / לפי לקוח
 
 function pfOpenEmployee(agentId) { _pfEmpAgent = agentId; openPage('mypay'); }
 
@@ -422,7 +424,7 @@ Pages.mypay = {
     const months = pfMonthsBack(cur, 6);
     el.innerHTML = `
 <div class="page-head"><h2>💼 ${admin ? 'ביצועי עובד/ת' : 'הביצועים שלי'}</h2>
-${admin ? `<select onchange="_pfEmpAgent=Number(this.value); openPage('mypay')">${(cache.agents || []).map(a => `<option value="${a.id}" ${a.id === agentId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
+${admin ? `<select onchange="_pfEmpAgent=Number(this.value); _pfEmpMonth=null; openPage('mypay')">${(cache.agents || []).map(a => `<option value="${a.id}" ${a.id === agentId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
 </div>
 <div id="pfEmpBody"><div class="empty">מחשב...</div></div>`;
     let data;
@@ -450,14 +452,69 @@ ${stat(pfMoney(r.profitability), r.profitability >= 0 ? 'רווחיות ✓' : '
 ${prog != null ? `<div class="card card-pad"><div style="display:flex;justify-content:space-between;font-size:.85rem"><span>התקדמות ליעד ${pfMoney(r.target)}</span><b>${prog}%</b></div>
 <div style="height:10px;background:var(--line,#e5e7eb);border-radius:6px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${prog}%;background:${prog >= 100 ? 'var(--ok)' : '@@COLOR_BRAND@@'}"></div></div>
 ${r.commission_parts && r.commission_parts.length > 1 ? `<p class="muted" style="font-size:.78rem;margin-top:6px">${r.commission_parts.map(p => `${p.pct}% על ${pfMoney(p.base)}`).join(' · ')}</p>` : ''}</div>` : ''}
-<div class="card"><div class="table-wrap"><table class="data"><thead><tr><th>חודש</th><th>הכנסה (נטו)</th><th>עיצוב</th><th>עמלה</th><th>רווחיות</th><th></th></tr></thead><tbody>
+<div class="card"><div class="table-wrap"><table class="data"><thead><tr><th>חודש</th><th>הכנסה (נטו)</th><th>עיצוב</th><th>עמלה</th><th>רווחיות</th><th></th><th></th></tr></thead><tbody>
 ${rows.map(x => `<tr><td><b>${x.m}</b></td><td>${pfMoney(x.r.revenue)}</td><td>${pfMoney(x.r.graphics)}</td><td>${pfMoney(x.r.commission)}</td>
 <td><b style="color:${x.r.profitability >= 0 ? 'var(--ok)' : 'var(--danger)'}">${pfMoney(x.r.profitability)}</b></td>
-<td class="muted" style="font-size:.74rem">${x.closed ? 'נסגר' : 'פתוח'}</td></tr>`).join('')}
+<td class="muted" style="font-size:.74rem">${x.closed ? 'נסגר' : 'פתוח'}</td>
+<td><button class="btn btn-sm btn-ghost" onclick="_pfEmpMonth='${x.m}'; _pfRenderEmpLines()">פירוט</button></td></tr>`).join('')}
 </tbody></table></div></div>
+<div id="pfEmpLines"></div>
 <p class="muted" style="font-size:.78rem">רווחיות = הכנסה + חיובי עיצוב − עלות העיצוב של המודעות שלי − העמלה שלי. העמלה מחושבת על הכנסת המודעות בלבד. ${r.has_comp ? '' : 'לא הוגדרו עדיין אחוזי עמלה — פנה למנהל.'}</p>`;
+    _pfEmpCtx = { data, agentId, rows };
+    if (!_pfEmpMonth || !rows.some(x => x.m === _pfEmpMonth)) _pfEmpMonth = cur;
+    _pfRenderEmpLines();
   }
 };
+
+/* פירוט החודש: אילו מודעות/לקוחות מרכיבים את ההכנסה — כדי שהעובד/ת יבינו בדיוק מה נספר ומה ממתין */
+let _pfEmpCtx = null;
+function _pfRenderEmpLines() {
+  const box = document.getElementById('pfEmpLines');
+  if (!box || !_pfEmpCtx) return;
+  const { data, agentId, rows } = _pfEmpCtx;
+  const m = _pfEmpMonth;
+  const closed = (rows.find(x => x.m === m) || {}).closed;
+  const { ads, deals } = pfAgentMonthLines(m, data, agentId);
+  const issNum = {}; (data.issues || []).forEach(i => { issNum[i.id] = i.issue_number; });
+  const cust = id => esc(nameOf('customers', id) || (id ? 'לקוח #' + id : '—'));
+  const single = ads.filter(a => a.kind === 'single');
+  const dealAds = ads.filter(a => a.kind === 'deal');
+  const sum = list => list.reduce((s, a) => s + a.net, 0);
+  const dealsSum = deals.reduce((s, d) => s + d.amount, 0);
+  const pendingNote = closed ? 'נכלל בהכנסה דרך סגירת החודש (לפי הסכום שאושר לחוזה)' : 'ממתין לסגירת החודש';
+  let body;
+  if (_pfEmpView === 'customer') {
+    const by = {};
+    const add = (cid, k, v) => { const r = by[cid] = by[cid] || { cid, ads: 0, single: 0, deal: 0 }; r[k] += v; };
+    single.forEach(a => { add(a.customer_id, 'single', a.net); by[a.customer_id].ads++; });
+    dealAds.forEach(a => { add(a.customer_id, 'ads', 1); });
+    deals.forEach(d => add(d.customer_id, 'deal', d.amount));
+    const list = Object.values(by).sort((a, b) => (b.single + b.deal) - (a.single + a.deal));
+    body = `<thead><tr><th>לקוח</th><th>מודעות</th><th>מודעות בודדות</th><th>עסקאות (סגירת חודש)</th><th>סה"כ נספר</th></tr></thead><tbody>
+${list.map(r => `<tr><td><b>${cust(r.cid)}</b></td><td>${r.ads}</td><td>${pfMoney(r.single)}</td><td>${r.deal ? pfMoney(r.deal) : (dealAds.some(a => a.customer_id === r.cid) ? `<span class="muted" style="font-size:.78rem">${closed ? '—' : 'ממתין'}</span>` : '—')}</td><td><b>${pfMoney(r.single + r.deal)}</b></td></tr>`).join('') || '<tr><td colspan="5" class="empty">אין מודעות בחודש הזה</td></tr>'}
+</tbody>`;
+  } else {
+    const line = a => `<tr><td>${esc(String(issNum[a.issue_id] || ''))}</td><td>${cust(a.customer_id)}</td><td>${esc(a.title)}</td><td>${pfMoney(a.net)}</td>
+<td style="font-size:.78rem">${a.kind === 'single' ? '✓ נספרת' : `<span class="muted">חוזה #${a.contract_id} — ${pendingNote}</span>`}</td></tr>`;
+    body = `<thead><tr><th>גיליון</th><th>לקוח</th><th>מודעה</th><th>נטו</th><th>בהכנסה</th></tr></thead><tbody>
+${[...single, ...dealAds].sort((a, b) => (issNum[a.issue_id] || 0) - (issNum[b.issue_id] || 0) || a.id - b.id).map(line).join('') || '<tr><td colspan="5" class="empty">אין מודעות בחודש הזה</td></tr>'}
+${deals.map(d => `<tr><td>—</td><td>${cust(d.customer_id)}</td><td>עסקה רב-גיליונית · חוזה #${d.contract_id}</td><td>${pfMoney(d.amount)}</td><td style="font-size:.78rem">✓ אושר בסגירת החודש</td></tr>`).join('')}
+</tbody>`;
+  }
+  box.innerHTML = `
+<div class="card card-pad" style="margin-top:10px">
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+<b>📋 פירוט ${esc(m)}</b>
+<span style="display:flex;gap:6px">
+<button class="btn btn-sm ${_pfEmpView === 'ad' ? '' : 'btn-ghost'}" onclick="_pfEmpView='ad'; _pfRenderEmpLines()">לפי מודעה</button>
+<button class="btn btn-sm ${_pfEmpView === 'customer' ? '' : 'btn-ghost'}" onclick="_pfEmpView='customer'; _pfRenderEmpLines()">לפי לקוח</button>
+</span></div>
+<p class="muted" style="font-size:.8rem;margin:6px 0 0">מודעות בודדות: ${pfMoney(sum(single))} (${single.length})
+${deals.length ? ` · עסקאות שאושרו: ${pfMoney(dealsSum)}` : ''}
+${dealAds.length && !closed ? ` · ${dealAds.length} מודעות חוזה בשווי ${pfMoney(sum(dealAds))} ממתינות לסגירת החודש` : ''}</p>
+</div>
+<div class="card"><div class="table-wrap"><table class="data">${body}</table></div></div>`;
+}
 
 /* ======================================================================
    דו"ח: רווח והפסד מדורג (נקרא מ-reports.js כ-report_pnlx) — מנהל בלבד

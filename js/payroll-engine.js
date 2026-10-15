@@ -304,6 +304,32 @@ function pfComputeMonth(month, data) {
   };
 }
 
+/* פירוט חודש לעובד: אילו מודעות ועסקאות מרכיבות את ההכנסה שלו.
+   מחזיר { ads: [{id, issue_id, customer_id, title, net, contract_id, kind}], deals: [{contract_id, customer_id, amount}] }
+   kind: 'single' = נספרת בהכנסה עכשיו · 'deal' = חלק מעסקה רב-גיליונית (נספרת רק דרך סגירת החודש) */
+function pfAgentMonthLines(month, data, agentId) {
+  const ix = pfIndex(data);
+  const id = Number(agentId);
+  const ads = [];
+  (data.ads || []).forEach(a => {
+    if (!pfAlive(a) || ix.issueMonth[a.issue_id] !== month) return;
+    if (pfAdAgent(a, ix) !== id) return;
+    const ct = a.contract_id != null ? ix.contractById[a.contract_id] : null;
+    const multi = ct && pfIsMultiDeal(ct, ix.adsByContract[ct.id]);
+    ads.push({ id: a.id, issue_id: a.issue_id, customer_id: a.customer_id, title: a.title || '',
+      net: pfRound(pfAdNet(a)), contract_id: a.contract_id, kind: multi ? 'deal' : 'single' });
+  });
+  const deals = [];
+  (data.recognition || []).forEach(rc => {
+    if (rc.month !== month || !rc.included) return;
+    const ct = ix.contractById[rc.contract_id];
+    const ag = rc.agent_id != null ? Number(rc.agent_id) : (ct ? pfContractAgent(ct, ix) : 0);
+    if (ag !== id) return;
+    deals.push({ contract_id: rc.contract_id, customer_id: ct ? ct.customer_id : null, amount: pfRound(pfNum(rc.amount_recognized)) });
+  });
+  return { ads, deals };
+}
+
 /* ---------- סיווג הוצאות לדוח רווח והפסד ----------
    expenses: [{amount, notes, expense_date, category_id}] של החודש.
    תיוג #issue: → עלות גיליון; #cat:גרפיקה → שורת הגרפיקה (מעל הרווח הגולמי);
@@ -379,6 +405,6 @@ function pfPayrollSyncRows(calc) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     pfRound, pfAdNet, pfIssueMonth, pfTiers, pfTieredCommission, pfIsMultiDeal,
-    pfMonthCloseRows, pfComputeMonth, pfClassifyExpenses, pfPnl, pfPayrollTag, pfPayrollSyncRows,
+    pfMonthCloseRows, pfComputeMonth, pfAgentMonthLines, pfClassifyExpenses, pfPnl, pfPayrollTag, pfPayrollSyncRows,
   };
 }
