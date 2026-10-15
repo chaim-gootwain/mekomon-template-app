@@ -19,6 +19,10 @@ PDF אחד של כל הגיליון. לא כותב שום דבר למסד.
 - גרסה לאישור ראשוני ("📝 PDF לאישור"): אותה הרכבה בדיוק, ואחריה כל עמוד
   מצויר מחדש כתמונת JPG ברזולוציה נמוכה (pdf.js) עם הכיתוב "טיוטה לאישור".
   קובץ קל לשליחה במייל/וואטסאפ — לא לדפוס.
+- עמודי כתבות ("📰 עמודי כתבות"): PDF אחד עם כמה עמודים סגורים מהגרפיקאית.
+  נשמר לגיליון (issues-archive: editorial/issue_<id>.pdf) ובהרכבה נכנס לפי
+  העימוד: עמוד 1 בקובץ → העמוד הראשון בגיליון שאין בו מודעות, עמוד 2 → הבא,
+  וכן הלאה. עמוד כזה נכנס כמו שהוא — בלי עמוד אב ובלי טקסט משתנה.
 ============================================================ */
 
 'use strict';
@@ -190,6 +194,18 @@ function pibMasterLeftovers(strings) {
     /^\d{1,3}$/.test(t));                                   // מספר עמוד בודד
 }
 
+/* עמודי כתבות לפי העימוד: עמודי הגיליון בלי מודעות (adPages) מקבלים לפי הסדר
+   את עמודי קובץ הכתבות (n עמודים). מחזיר { map: {עמוד גיליון: אינדקס בקובץ},
+   empty: [עמודים פנויים שלא קיבלו עמוד], extra: עמודים בקובץ שלא נכנסו } */
+function pibEditorialMap(pages, adPages, n) {
+  const free = [];
+  for (let p = 1; p <= pages; p++) if (!adPages.has(p)) free.push(p);
+  const map = {};
+  free.slice(0, n).forEach((p, i) => { map[p] = i; });
+  return { map, empty: free.slice(n), extra: Math.max(0, n - free.length) };
+}
+function _pibEditorialPath(issueId) { return `editorial/issue_${issueId}.pdf`; }
+
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : m);
@@ -337,6 +353,18 @@ async function fpBuildPrintPdf(proof) {
         loaded[a.id] = { kind, emb, srcTrim, srcBleed, aspect };
       } catch (e) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — הקובץ לא נטען (${e.message || e})`); }
     }
+    // עמודי כתבות (אם הועלו לגיליון) — לפי העימוד, לעמודים בלי מודעות
+    let edDoc = null, edMap = { map: {}, empty: [], extra: 0 };
+    step('בודק עמודי כתבות...');
+    const er = await db.storage.from('issues-archive').download(_pibEditorialPath(issue.id));
+    if (!er.error && er.data) {
+      try {
+        edDoc = await PDFLib.PDFDocument.load(new Uint8Array(await er.data.arrayBuffer()), { ignoreEncryption: true });
+        edMap = pibEditorialMap(pages, new Set(ads.map(a => a.page_number)), edDoc.getPageCount());
+        if (edMap.extra) W('block', `קובץ הכתבות: ${edMap.extra} עמודים אחרונים לא נכנסו — אין מספיק עמודים בלי מודעות בעימוד`);
+        if (edMap.empty.length) W('note', `קובץ הכתבות קצר מהעימוד — עמודים בלי מודעות שנשארו ריקים: ${edMap.empty.join(', ')}`);
+      } catch (e) { W('block', `קובץ הכתבות לא נטען (${e.message || e})`); }
+    }
     // אותו קובץ ביותר ממודעה אחת (לפי תוכן הקובץ, לא לפי שם)
     Object.values(byHash).filter(l => l.length > 1).forEach(l =>
       W('note', `אותו קובץ מופיע ${l.length} פעמים: ${l.map(a => `עמ' ${a.page_number} (${_adLabel(a)})`).join(', ')}`));
@@ -347,6 +375,19 @@ async function fpBuildPrintPdf(proof) {
       page.setMediaBox(media.x, media.y, media.width, media.height);
       page.setTrimBox(trim.x, trim.y, trim.width, trim.height);
       page.setBleedBox(bleed.x, bleed.y, bleed.width, bleed.height);
+      if (edDoc && edMap.map[p] != null) { // עמוד כתבות סגור — נכנס כמו שהוא
+        const sp = edDoc.getPage(edMap.map[p]), st = sp.getTrimBox(), sb = sp.getBleedBox();
+        if (Math.abs(st.width / _PIB_MM - trimW) < 3 && Math.abs(st.height / _PIB_MM - trimH) < 3) {
+          const ep = await out.embedPage(sp, { left: sb.x, bottom: sb.y, right: sb.x + sb.width, top: sb.y + sb.height });
+          page.drawPage(ep, { x: trim.x - (st.x - sb.x), y: trim.y - (st.y - sb.y), width: sb.width, height: sb.height });
+        } else {
+          const ep = await out.embedPage(sp, { left: st.x, bottom: st.y, right: st.x + st.width, top: st.y + st.height });
+          const k = Math.min(trim.width / st.width, trim.height / st.height);
+          page.drawPage(ep, { x: trim.x + (trim.width - st.width * k) / 2, y: trim.y + (trim.height - st.height * k) / 2, width: st.width * k, height: st.height * k });
+          W('note', `עמ' ${p}: עמוד ${edMap.map[p] + 1} בקובץ הכתבות לא בגודל העמוד (${Math.round(st.width / _PIB_MM)}×${Math.round(st.height / _PIB_MM)} מ"מ) — הותאם`);
+        }
+        continue;
+      }
       const onPage = ads.filter(a => a.page_number === p);
       if (!onPage.length) W('block', `עמ' ${p}: ריק`);
       const items = onPage.map(a => {
@@ -476,6 +517,64 @@ async function _pibHash(bytes) {
   } catch (e) { return bytes.length + ':' + bytes[0] + bytes[bytes.length - 1]; }
 }
 
+/* ==================== עמודי כתבות — העלאה ותצוגת שיבוץ ==================== */
+function fpEditorialUpload() {
+  if (!['admin', 'editor'].includes(profile.role)) return;
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'application/pdf';
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0]; if (!file) return;
+    if (!/\.pdf$/i.test(file.name)) { toast('נדרש קובץ PDF', true); return; }
+    const { error } = await db.storage.from('issues-archive').upload(_pibEditorialPath(_fpIssue.id), file, { upsert: true, contentType: 'application/pdf' });
+    if (error) { toast('העלאה נכשלה: ' + error.message, true); return; }
+    toast('✓ עמודי הכתבות נשמרו לגיליון');
+    fpEditorialShow();
+  };
+  inp.click();
+}
+
+/* מה נכנס לאן — לפי העימוד הנוכחי */
+async function fpEditorialShow() {
+  const issue = _fpIssue, pages = Number(issue.pages_count) || 0;
+  const modal = document.getElementById('viewModal'), back = document.getElementById('viewBack');
+  const close = `<button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>`;
+  modal.innerHTML = `<h3>📰 עמודי כתבות — גיליון ${esc(issue.issue_number)}</h3><p>טוען...</p>`;
+  back.classList.add('open');
+  try {
+    const r = await db.storage.from('issues-archive').download(_pibEditorialPath(issue.id));
+    if (r.error || !r.data) {
+      modal.innerHTML = `<h3>📰 עמודי כתבות — גיליון ${esc(issue.issue_number)}</h3>
+<p>עוד לא הועלה קובץ כתבות לגיליון. מעלים PDF אחד עם כל עמודי הכתבות הסגורים, לפי הסדר — המערכת מכניסה אותם לעמודים שאין בהם מודעות.</p>
+<div class="m-actions"><button class="btn" onclick="fpEditorialUpload()">⬆ העלאת PDF</button>${close}</div>`;
+      return;
+    }
+    const PDFLib = await _apEnsureLib();
+    const doc = await PDFLib.PDFDocument.load(new Uint8Array(await r.data.arrayBuffer()), { ignoreEncryption: true });
+    const n = doc.getPageCount();
+    const adPages = new Set(_fpAds.filter(a => a.page_number >= 1 && a.page_number <= pages).map(a => a.page_number));
+    const m = pibEditorialMap(pages, adPages, n);
+    const rows = Object.keys(m.map).map(Number).sort((a, b) => a - b).map(p => `<li>עמוד ${m.map[p] + 1} בקובץ ← עמוד ${p} בגיליון</li>`).join('');
+    modal.innerHTML = `<h3>📰 עמודי כתבות — גיליון ${esc(issue.issue_number)}</h3>
+<p>בקובץ ${n} עמודים · בעימוד ${pages - adPages.size} עמודים בלי מודעות.</p>
+<ul style="margin:4px 18px;max-height:35vh;overflow:auto;font-size:.86rem">${rows || '<li>אין עמודים פנויים</li>'}</ul>
+${m.extra ? `<p style="color:#b91c1c;font-size:.84rem">🔴 ${m.extra} עמודים אחרונים בקובץ לא ייכנסו — אין מספיק עמודים בלי מודעות</p>` : ''}
+${m.empty.length ? `<p style="color:#92400e;font-size:.84rem">🟡 עמודים בלי מודעות שיישארו ריקים: ${m.empty.join(', ')}</p>` : ''}
+<p class="muted" style="font-size:.8rem">השיבוץ מחושב מחדש בכל הרכבה — הזזת מודעה בעימוד מזיזה גם את עמודי הכתבות.</p>
+<div class="m-actions"><button class="btn btn-ghost" onclick="fpEditorialUpload()">⬆ החלפת הקובץ</button>
+${profile.role === 'admin' ? `<button class="btn btn-ghost" onclick="fpEditorialRemove()">🗑 הסרה</button>` : ''}${close}</div>`;
+  } catch (e) {
+    modal.innerHTML = `<h3>📰 עמודי כתבות</h3><p style="color:#b91c1c">שגיאה: ${esc(e.message || String(e))}</p><div class="m-actions">${close}</div>`;
+  }
+}
+
+async function fpEditorialRemove() {
+  if (profile.role !== 'admin' || !confirm('להסיר את קובץ הכתבות מהגיליון?')) return;
+  const { error } = await db.storage.from('issues-archive').remove([_pibEditorialPath(_fpIssue.id)]);
+  if (error) { toast('ההסרה נכשלה: ' + error.message, true); return; }
+  toast('קובץ הכתבות הוסר');
+  fpEditorialShow();
+}
+
 /* ==================== כרטיס הגדרות (מנהל) ==================== */
 function printLayoutCard() {
   if (profile.role !== 'admin') return '';
@@ -546,5 +645,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap };
 }
