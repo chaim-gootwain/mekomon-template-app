@@ -220,6 +220,42 @@ async function _pibEditorialFetch(issueId) {
   return new Uint8Array(await r.arrayBuffer());
 }
 
+/* סיבוב תצוגה של קובץ (מעלות, עם כיוון השעון): PDF עם /Rotate או צילום
+   JPG עם תג EXIF. בלי זה מודעה שנראית מאונכת בקובץ נכנסת שוכבת. */
+function pibNormRot(a) { a = Math.round((Number(a) || 0) / 90) * 90; return ((a % 360) + 360) % 360; }
+function pibJpegRotation(bytes) {
+  try {
+    if (bytes[0] !== 0xFF || bytes[1] !== 0xD8) return 0;
+    let i = 2;
+    while (i + 4 < bytes.length && bytes[i] === 0xFF) {
+      const mk = bytes[i + 1], len = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (mk === 0xE1 && bytes[i + 4] === 0x45 && bytes[i + 5] === 0x78 && bytes[i + 6] === 0x69 && bytes[i + 7] === 0x66) { // "Exif"
+        const t = i + 10, le = bytes[t] === 0x49;
+        const u16 = o => le ? bytes[o] | (bytes[o + 1] << 8) : (bytes[o] << 8) | bytes[o + 1];
+        const u32 = o => le ? (bytes[o] | (bytes[o + 1] << 8) | (bytes[o + 2] << 16) | (bytes[o + 3] << 24)) >>> 0 : ((bytes[o] << 24) | (bytes[o + 1] << 16) | (bytes[o + 2] << 8) | bytes[o + 3]) >>> 0;
+        const ifd = t + u32(t + 4), n = u16(ifd);
+        for (let k = 0; k < n; k++) {
+          const e = ifd + 2 + k * 12;
+          if (u16(e) === 0x0112) return { 3: 180, 4: 180, 5: 90, 6: 90, 7: 270, 8: 270 }[u16(e + 8)] || 0;
+        }
+        return 0;
+      }
+      if (mk === 0xDA) break; // תחילת נתוני התמונה — אין EXIF
+      i += 2 + len;
+    }
+  } catch (e) { }
+  return 0;
+}
+/* ציור אובייקט בגודל טבעי w×h עם סיבוב תצוגה rot, כך שיתפוס בדיוק את המלבן
+   (X0,Y0,DW,DH). pdf-lib מסובב סביב (x,y), נגד כיוון השעון */
+function pibRotPlace(rot, X0, Y0, DW, DH) {
+  const sw = rot % 180 ? DH : DW, sh = rot % 180 ? DW : DH; // רוחב/גובה לפני הסיבוב
+  if (rot === 90) return { x: X0, y: Y0 + DH, width: sw, height: sh, deg: -90 };
+  if (rot === 180) return { x: X0 + DW, y: Y0 + DH, width: sw, height: sh, deg: 180 };
+  if (rot === 270) return { x: X0 + DW, y: Y0, width: sw, height: sh, deg: 90 };
+  return { x: X0, y: Y0, width: sw, height: sh, deg: 0 };
+}
+
 /* החלפת משתנים בטקסט שדה */
 function pibFieldText(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : m);
@@ -352,19 +388,22 @@ async function fpBuildPrintPdf(proof) {
         const hash = await _pibHash(bytes);
         (byHash[hash] = byHash[hash] || []).push(a);
         if (!kind) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — סוג קובץ לא נתמך (${f.file_name || ''}) — נדרש PDF/JPG/PNG`); continue; }
-        let emb, srcTrim = null, srcBleed = null, aspect;
+        let emb, srcTrim = null, srcBleed = null, aspect, rot = 0;
         if (kind === 'pdf') {
           const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
           if (src.getPageCount() > 1) W('note', `עמ' ${a.page_number}: ${_adLabel(a)} — לקובץ ${src.getPageCount()} עמודים, נלקח הראשון`);
           const sp = src.getPage(0);
           srcTrim = sp.getTrimBox(); srcBleed = sp.getBleedBox();
+          try { rot = pibNormRot(sp.getRotation().angle); } catch (e) { }
           aspect = srcTrim.width / srcTrim.height;
           emb = { src, sp };
         } else {
           emb = kind === 'jpg' ? await out.embedJpg(bytes) : await out.embedPng(bytes);
+          if (kind === 'jpg') rot = pibJpegRotation(bytes);
           aspect = emb.width / emb.height;
         }
-        loaded[a.id] = { kind, emb, srcTrim, srcBleed, aspect };
+        if (rot % 180) aspect = 1 / aspect; // היחס כפי שהקובץ נראה בפועל
+        loaded[a.id] = { kind, emb, srcTrim, srcBleed, aspect, rot };
       } catch (e) { W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — הקובץ לא נטען (${e.message || e})`); }
     }
     // עמודי כתבות (אם הועלו לגיליון) — לפי העימוד, לעמודים בלי מודעות
@@ -392,14 +431,18 @@ async function fpBuildPrintPdf(proof) {
       page.setBleedBox(bleed.x, bleed.y, bleed.width, bleed.height);
       if (edDoc && edMap.map[p] != null) { // עמוד כתבות סגור — נכנס כמו שהוא
         const sp = edDoc.getPage(edMap.map[p]), st = sp.getTrimBox(), sb = sp.getBleedBox();
-        if (Math.abs(st.width / _PIB_MM - trimW) < 3 && Math.abs(st.height / _PIB_MM - trimH) < 3) {
+        let er = 0; try { er = pibNormRot(sp.getRotation().angle); } catch (e) { }
+        if (!er && Math.abs(st.width / _PIB_MM - trimW) < 3 && Math.abs(st.height / _PIB_MM - trimH) < 3) {
           const ep = await out.embedPage(sp, { left: sb.x, bottom: sb.y, right: sb.x + sb.width, top: sb.y + sb.height });
           page.drawPage(ep, { x: trim.x - (st.x - sb.x), y: trim.y - (st.y - sb.y), width: sb.width, height: sb.height });
         } else {
           const ep = await out.embedPage(sp, { left: st.x, bottom: st.y, right: st.x + st.width, top: st.y + st.height });
-          const k = Math.min(trim.width / st.width, trim.height / st.height);
-          page.drawPage(ep, { x: trim.x + (trim.width - st.width * k) / 2, y: trim.y + (trim.height - st.height * k) / 2, width: st.width * k, height: st.height * k });
-          W('note', `עמ' ${p}: עמוד ${edMap.map[p] + 1} בקובץ הכתבות לא בגודל העמוד (${Math.round(st.width / _PIB_MM)}×${Math.round(st.height / _PIB_MM)} מ"מ) — הותאם`);
+          const vw = er % 180 ? st.height : st.width, vh = er % 180 ? st.width : st.height; // כפי שהעמוד נראה
+          const k = Math.min(trim.width / vw, trim.height / vh);
+          const pl = pibRotPlace(er, trim.x + (trim.width - vw * k) / 2, trim.y + (trim.height - vh * k) / 2, vw * k, vh * k);
+          page.drawPage(ep, { x: pl.x, y: pl.y, width: pl.width, height: pl.height, rotate: PDFLib.degrees(pl.deg) });
+          if (Math.abs(vw / _PIB_MM - trimW) >= 3 || Math.abs(vh / _PIB_MM - trimH) >= 3)
+            W('note', `עמ' ${p}: עמוד ${edMap.map[p] + 1} בקובץ הכתבות לא בגודל העמוד (${Math.round(vw / _PIB_MM)}×${Math.round(vh / _PIB_MM)} מ"מ) — הותאם`);
         }
         continue;
       }
@@ -426,7 +469,7 @@ async function fpBuildPrintPdf(proof) {
           continue;
         }
         // מודעת עמוד מלא בגודל החיתוך → נכנסת לכל הדף כולל הגלישה
-        const isTrimSized = L.srcTrim && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
+        const isTrimSized = L.srcTrim && !L.rot && Math.abs(L.srcTrim.width / _PIB_MM - trimW) < 3 && Math.abs(L.srcTrim.height / _PIB_MM - trimH) < 3;
         if (full && isTrimSized) {
           const b = L.srcBleed;
           const ep = await out.embedPage(L.emb.sp, { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height });
@@ -439,11 +482,13 @@ async function fpBuildPrintPdf(proof) {
           const ep = await out.embedPage(L.emb.sp, { left: t.x, bottom: t.y, right: t.x + t.width, top: t.y + t.height });
           ew = t.width; eh = t.height; draw = (o) => page.drawPage(ep, o);
         } else { ew = L.emb.width; eh = L.emb.height; draw = (o) => page.drawImage(L.emb, o); }
+        if (L.rot % 180) [ew, eh] = [eh, ew]; // מידות כפי שהקובץ נראה
         // התאמה למשבצת בלי עיוות, ממורכז
         const sw = r.w * _PIB_MM, sh = r.h * _PIB_MM, k = Math.min(sw / ew, sh / eh);
         const dw = ew * k, dh = eh * k;
         if (Math.abs(Math.log((ew / eh) / (sw / sh))) > 0.06) W('note', `עמ' ${p}: ${_adLabel(a)} — יחס הקובץ לא תואם למשבצת (${Math.round(r.w)}×${Math.round(r.h)} מ"מ) — יישאר שוליים לבנים`);
-        draw({ x: X(r.x) + (sw - dw) / 2, y: Y(r.y + r.h) + (sh - dh) / 2, width: dw, height: dh });
+        const pl = pibRotPlace(L.rot, X(r.x) + (sw - dw) / 2, Y(r.y + r.h) + (sh - dh) / 2, dw, dh);
+        draw({ x: pl.x, y: pl.y, width: pl.width, height: pl.height, rotate: PDFLib.degrees(pl.deg) });
       }
 
       if (!noFrame.has(p)) {
@@ -665,5 +710,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace };
 }

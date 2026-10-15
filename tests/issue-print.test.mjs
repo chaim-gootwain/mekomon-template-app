@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -93,6 +93,25 @@ t('editorial: עמודי הקובץ נכנסים לפי הסדר לעמודים 
 t('editorial: קובץ קצר — עמודים פנויים נשארים; קובץ ארוך — עודף', () => {
   assert.deepStrictEqual(pibEditorialMap(6, new Set([1, 2]), 2), { map: { 3: 0, 4: 1 }, empty: [5, 6], extra: 0 });
   assert.deepStrictEqual(pibEditorialMap(4, new Set([1, 2, 3]), 3), { map: { 4: 0 }, empty: [], extra: 2 });
+});
+
+/* ---------- סיבוב קבצים ---------- */
+t('rotation: נרמול זווית', () => {
+  assert.deepStrictEqual([0, 90, -90, 270, 450, 180].map(pibNormRot), [0, 90, 270, 270, 90, 180]);
+});
+t('rotation: תג EXIF בצילום JPG', () => {
+  // JPEG מינימלי: SOI + APP1(Exif, II, IFD עם תג 0x0112) + SOS
+  const jpg = o => Uint8Array.from([0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0, 0,
+    0x49, 0x49, 0x2A, 0x00, 0x08, 0, 0, 0, 0x01, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01, 0, 0, 0, o, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xDA]);
+  assert.deepStrictEqual([1, 3, 6, 8].map(o => pibJpegRotation(jpg(o))), [0, 180, 90, 270]);
+  assert.strictEqual(pibJpegRotation(Uint8Array.from([0xFF, 0xD8, 0xFF, 0xDA, 0, 2])), 0);
+});
+t('rotation: ציור מסובב תופס בדיוק את המלבן', () => {
+  // פינות התוצאה אחרי סיבוב סביב (x,y) נגד כיוון השעון
+  const box = (pl) => { const r = pl.deg * Math.PI / 180, c = Math.round(Math.cos(r)), s = Math.round(Math.sin(r));
+    const pts = [[0, 0], [pl.width, 0], [0, pl.height], [pl.width, pl.height]].map(([u, v]) => [pl.x + u * c - v * s, pl.y + u * s + v * c]);
+    return [Math.min(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1])), Math.max(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1]))]; };
+  for (const rot of [0, 90, 180, 270]) assert.deepStrictEqual(box(pibRotPlace(rot, 10, 20, 100, 300)), [10, 20, 110, 320], 'rot ' + rot);
 });
 
 console.log(`\n${passed} בדיקות עברו`);
