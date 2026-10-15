@@ -339,12 +339,12 @@ onchange="checklistToggle(${c.id}, this.checked)">
 </div>`;
 }
 
-/* סימון קובץ על פריט מודעה: 🎨/📎 יש קובץ · ⚠ אין — הקשה על ⚠ מציעה קובץ מפרסום קודם */
+/* סימון קובץ על פריט מודעה: 🎨/📎 יש קובץ · ⚠ אין — הקשה פותחת הוספה/החלפה של הקובץ */
 function _fpFileMark(a) {
 const k = _fpFileKinds[a.id];
 const badge = typeof adFileBadge === 'function' ? adFileBadge(k, true) : (k ? '📎' : '⚠');
-if (k || !['admin', 'editor', 'sales'].includes(profile.role)) return badge + ' ';
-return `<span onclick="event.stopPropagation();fpCopyFileFor(${a.id})" style="cursor:pointer" title="אין קובץ — הקש להוספה">${badge}</span> `;
+if (!['admin', 'editor', 'sales'].includes(profile.role)) return badge + ' ';
+return `<span onclick="event.stopPropagation();fpCopyFileFor(${a.id})" style="cursor:pointer" title="${k ? 'הקש להחלפת הקובץ' : 'אין קובץ — הקש להוספה'}">${badge}</span> `;
 }
 
 function fpCopyFileFor(adId) {

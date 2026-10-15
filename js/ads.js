@@ -516,15 +516,28 @@ let _adCopyState = null;
 async function adFileCopyOpen(adId, onDone) {
 const a = await run(db.from('ads').select('id,customer_id,title').eq('id', adId).single());
 if (!a) return;
-const list = a.customer_id ? await _adPrevFiles([a.customer_id], [adId]) : [];
-_adCopyState = { adId, list, onDone: onDone || (() => openAdCard(adId)) };
+const [list, cur] = await Promise.all([
+a.customer_id ? _adPrevFiles([a.customer_id], [adId]) : [],
+run(db.from('ad_files').select('*').eq('ad_id', adId).in('kind', ['design', 'source']).order('created_at', { ascending: false })),
+]);
+_adCopyState = { adId, list, cur: cur || [], onDone: onDone || (() => openAdCard(adId)) };
+const has = _adCopyState.cur.length > 0;
 const close = `<button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="adFileCopyClose()">ביטול</button>`;
 const upload = `<input type="file" id="adCopyUpload" class="hidden" onchange="adFileCopyUpload()">
-<button class="btn btn-sm${list.length ? ' btn-ghost' : ''}" onclick="document.getElementById('adCopyUpload').click()">⬆ העלאת קובץ חדש</button>`;
+<button class="btn btn-sm${list.length ? ' btn-ghost' : ''}" onclick="document.getElementById('adCopyUpload').click()">⬆ ${has ? 'החלפה בקובץ חדש' : 'העלאת קובץ חדש'}</button>`;
 const who = a.customer_id ? esc(nameOf('customers', a.customer_id)) : 'למודעה';
+// קיים קובץ — מציגים אותו, וכברירת מחדל הקובץ החדש מחליף אותו
+const curHtml = has ? `<div class="field"><label>הקובץ הנוכחי</label>
+${_adCopyState.cur.map(f => `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
+<span>${f.kind === 'source' ? '📎 מקור מהלקוח' : '🎨 עיצוב'} — ${esc(f.file_name) || 'קובץ'}</span>
+<button class="btn btn-sm btn-ghost" onclick="adFileOpen('${esc(f.storage_path)}')">צפייה</button></div>`).join('')}
+<label style="display:flex;gap:6px;align-items:center;font-weight:normal;margin-top:4px">
+<input type="checkbox" id="adCopyReplace" checked> להסיר את הקובץ הנוכחי אחרי ההוספה (החלפה)</label></div>` : '';
+const title = has ? '🔄 החלפת קובץ המודעה' : '📎 הוספת קובץ למודעה';
 document.getElementById('viewModal').innerHTML = list.length ? `
-<h3>📎 הוספת קובץ למודעה</h3>
+<h3>${title}</h3>
 <p class="muted" style="font-size:.85rem">${who} — ${list.length} פרסומים קודמים עם קובץ. אפשר להעתיק מאחד מהם או להעלות קובץ חדש.</p>
+${curHtml}
 <div class="field"><label>מאיזה גיליון?</label>
 <select id="adCopyPick" style="width:100%">
 ${list.map((c, i) => `<option value="${i}">${i === 0 ? '⭐ הפרסום האחרון — ' : ''}${esc(_adPrevLabel(c))}</option>`).join('')}
@@ -536,13 +549,24 @@ ${list.map((c, i) => `<option value="${i}">${i === 0 ? '⭐ הפרסום האח�
 ${upload}
 ${close}
 </div>` : `
-<h3>📎 הוספת קובץ למודעה</h3>
+<h3>${title}</h3>
 <p>${a.customer_id ? `ללקוח ${who} אין מודעות קודמות עם קובץ.` : 'למודעה אין לקוח, ולכן אין פרסומים קודמים להעתקה.'} אפשר להעלות קובץ חדש.</p>
+${curHtml}
 <div class="m-actions">${upload}${close}</div>`;
 document.getElementById('viewBack').classList.add('open');
 }
 
-/* העלאת קובץ חדש מתוך חלון ההוספה — כמו "⬆ העלאת קובץ" בכרטיס */
+/* אחרי הוספה: אם סומן "להסיר את הקובץ הנוכחי" — מסירים את הקבצים הקודמים. מחזיר הודעת אזהרה או '' */
+async function _adCopyDropOld(s) {
+const box = document.getElementById('adCopyReplace');
+if (!s.cur.length || !box || !box.checked) return '';
+let failed = 0;
+for (const f of s.cur) { try { await _adFileDelete(f); } catch (e) { failed++; } }
+if (failed < s.cur.length) await addInteraction('ad', s.adId, `הוחלף קובץ: ${s.cur.map(f => f.file_name || 'קובץ').join(', ')}`);
+return failed ? ' — הקובץ הקודם לא הוסר (אין הרשאה), הקובץ החדש ישמש לדפוס' : '';
+}
+
+/* העלאת קובץ חדש מתוך החלון — כמו "⬆ העלאת קובץ" בכרטיס; בהחלפה נשמר הסוג של הקובץ הקודם */
 async function adFileCopyUpload() {
 const s = _adCopyState;
 const file = document.getElementById('adCopyUpload').files[0];
@@ -550,13 +574,16 @@ if (!s || !file) return;
 const path = `staff/${s.adId}/${Date.now()}_${safeKey(file.name)}`;
 const { error } = await db.storage.from('ad-files').upload(path, file);
 if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
-const kind = profile.role === 'graphics' ? 'design' : 'source';
+const replacing = s.cur.length && document.getElementById('adCopyReplace')?.checked;
+const kind = replacing ? s.cur[0].kind : (profile.role === 'graphics' ? 'design' : 'source');
 await run(db.from('ad_files').insert({ ad_id: s.adId, storage_path: path, file_name: file.name, kind, uploaded_by: profile.id }));
 await addInteraction('ad', s.adId, `הועלה קובץ: ${file.name}`);
-toast('הקובץ הועלה');
+const warn = await _adCopyDropOld(s);
+toast((replacing ? 'הקובץ הוחלף' : 'הקובץ הועלה') + warn, !!warn);
 _adCopyState = null;
 document.getElementById('viewBack').classList.remove('open');
-s.onDone(true, kind);
+const left = replacing && !warn ? [] : s.cur;
+s.onDone(true, left.some(f => f.kind === 'design') ? 'design' : kind);
 }
 
 function adFileCopyClose() {
@@ -568,11 +595,15 @@ if (s) s.onDone(false);
 async function adFileCopyGo(i) {
 const s = _adCopyState;
 if (!s || !s.list[i]) return;
+const replacing = s.cur.length && document.getElementById('adCopyReplace')?.checked;
 await _adCopyFile(s.adId, s.list[i]);
-toast('הקובץ הועתק');
+const warn = await _adCopyDropOld(s);
+toast((replacing ? 'הקובץ הוחלף' : 'הקובץ הועתק') + warn, !!warn);
 _adCopyState = null;
 document.getElementById('viewBack').classList.remove('open');
-s.onDone(true, s.list[i].file.kind);
+// אם לא הוחלף ונשאר עיצוב — הסימון נשאר עיצוב
+const left = replacing && !warn ? [] : s.cur;
+s.onDone(true, left.some(f => f.kind === 'design') ? 'design' : s.list[i].file.kind);
 }
 
 // העתקה מרוכזת: לכל מודעה בלי קובץ — הקובץ מהפרסום האחרון של אותו לקוח. מחזיר כמה הועתקו
