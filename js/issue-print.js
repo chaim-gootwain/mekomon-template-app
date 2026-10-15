@@ -639,7 +639,9 @@ async function _pibHash(bytes) {
 /* ==================== הורדת כל קבצי המודעות של הגיליון ==================== */
 /* כל קובץ כמו שהועלה (בלי הקטנה/המרה), ב-ZIP אחד. שם הקובץ מתחיל במספר העמוד
    כדי שיסתדר לפי העימוד; מודעה שלא שובצה — "לא_משובצת". קובץ עיצוב קודם,
-   ואם אין — קובץ המקור. */
+   ואם אין — קובץ המקור. ה-ZIP נשמר ב-issues-archive (shares/) ומתקבל קישור
+   שיתוף חתום ל-7 ימים — לשליחה בוואטסאפ/מייל, בלי חשבון במערכת. */
+const _PIB_SHARE_DAYS = 7;
 function pibZipName(a, fileName, used) {
   const ext = (String(fileName || '').match(/\.[A-Za-z0-9]{1,6}$/) || [''])[0];
   const pg = a.page_number ? 'עמ_' + String(a.page_number).padStart(2, '0') : 'לא_משובצת';
@@ -660,7 +662,7 @@ async function fpDownloadAllAds() {
   const withFile = ads.filter(a => fileFor(a.id));
   if (!withFile.length) { toast('לאף מודעה בגיליון אין קובץ', true); return; }
   const modal = document.getElementById('viewModal'), back = document.getElementById('viewBack');
-  const head = `<h3>⬇ הורדת כל המודעות — גיליון ${esc(issue.issue_number)}</h3>`;
+  const head = `<h3>🔗 קישור לכל המודעות — גיליון ${esc(issue.issue_number)}</h3>`;
   back.classList.add('open');
   const entries = [], used = {}, errs = [];
   for (let i = 0; i < withFile.length; i++) {
@@ -673,14 +675,32 @@ async function fpDownloadAllAds() {
   const missing = ads.filter(a => !fileFor(a.id));
   const close = `<button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>`;
   if (!entries.length) { modal.innerHTML = `${head}<p style="color:#b91c1c">לא הצלחתי להוריד אף קובץ.</p><div class="m-actions">${close}</div>`; return; }
-  const url = URL.createObjectURL(_zipStore(entries));
+  const zip = _zipStore(entries);
+  const url = URL.createObjectURL(zip);
   const name = `מודעות-גיליון-${issue.issue_number}.zip`;
+  // קישור שיתוף: העלאה לאחסון + קישור חתום. אם נכשל — נשארת הורדה ישירה
+  modal.innerHTML = `${head}<p>יוצר קישור שיתוף...</p>`;
+  let link = '', linkErr = '';
+  try {
+    const path = `shares/ads_issue_${issue.id}.zip`;
+    const up = await db.storage.from('issues-archive').upload(path, zip, { upsert: true, contentType: 'application/zip', cacheControl: '0' });
+    if (up.error) throw up.error;
+    const sg = await db.storage.from('issues-archive').createSignedUrl(path, _PIB_SHARE_DAYS * 86400, { download: name });
+    if (sg.error) throw sg.error;
+    link = sg.data.signedUrl;
+  } catch (e) { linkErr = e.message || String(e); }
+  const until = new Date(Date.now() + _PIB_SHARE_DAYS * 86400000).toLocaleDateString('he-IL');
+  const wa = 'https://wa.me/?text=' + encodeURIComponent(`כל המודעות של גיליון ${issue.issue_number}:\n${link}`);
   modal.innerHTML = `${head}
 <p>${entries.length} קבצים בגודל המקורי, כמו שהועלו. שם כל קובץ מתחיל במספר העמוד.</p>
+${link ? `<div class="field"><label>🔗 קישור לכל המודעות (בתוקף עד ${esc(until)})</label>
+<input id="pibShareLink" readonly dir="ltr" value="${esc(link)}" onclick="this.select()" style="width:100%;font-size:.78rem"></div>
+<div class="m-actions"><button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('pibShareLink').value).then(()=>toast('✓ הקישור הועתק'))">📋 העתקת הקישור</button>
+<a class="btn btn-ghost" href="${esc(wa)}" target="_blank" rel="noopener">שליחה בוואטסאפ</a></div>`
+  : `<p style="color:#b91c1c;font-size:.84rem">לא נוצר קישור שיתוף (${esc(linkErr)}) — אפשר להוריד ישירות.</p>`}
 ${errs.length ? `<p style="color:#b91c1c;font-size:.84rem">🔴 לא ירדו (${errs.length}): ${esc(errs.join(', '))}</p>` : ''}
 ${missing.length ? `<p style="color:#92400e;font-size:.84rem">🟡 בלי קובץ במערכת (${missing.length}): ${esc(missing.map(a => (a.page_number ? "עמ' " + a.page_number + ' ' : '') + _adLabel(a)).join(', '))}</p>` : ''}
-<div class="m-actions" style="margin-top:12px"><a class="btn" href="${url}" download="${esc(name)}">⬇ הורדת ה-ZIP</a>${close}</div>`;
-  const dl = document.createElement('a'); dl.href = url; dl.download = name; dl.click();
+<div class="m-actions" style="margin-top:12px"><a class="btn btn-ghost" href="${url}" download="${esc(name)}">⬇ הורדה למחשב</a>${close}</div>`;
 }
 
 /* ==================== עמודי כתבות — העלאה ותצוגת שיבוץ ==================== */
