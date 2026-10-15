@@ -16,6 +16,9 @@ PDF אחד של כל הגיליון. לא כותב שום דבר למסד.
 - צבע: הקבצים נכנסים כמו שהם (וקטור/CMYK נשמרים); הטקסט המשתנה נכתב
   בווקטור CMYK. אין המרת RGB→CMYK בדפדפן.
 - pdf-lib / fontkit / גופן Heebo נטענים לפי דרישה מ-js/vendor.
+- גרסה לאישור ראשוני ("📝 PDF לאישור"): אותה הרכבה בדיוק, ואחריה כל עמוד
+  מצויר מחדש כתמונת JPG ברזולוציה נמוכה (pdf.js) עם הכיתוב "טיוטה לאישור".
+  קובץ קל לשליחה במייל/וואטסאפ — לא לדפוס.
 ============================================================ */
 
 'use strict';
@@ -29,6 +32,7 @@ const _PIB_DEFAULTS = {
   fields: [],
 };
 const _PIB_MM = 72 / 25.4;
+const _PIB_PROOF_DPI = 90, _PIB_PROOF_JPG = 0.6; // גרסה לאישור: קריא במסך, קל במשקל
 
 function pibConfig() {
   let c = {};
@@ -238,7 +242,10 @@ function _pibVars(issue, page) {
   return v;
 }
 
-async function fpBuildPrintPdf() {
+/* proof = גרסה קלה לאישור ראשוני (תמונות ברזולוציה נמוכה, לא לדפוס) */
+async function fpBuildPrintPdf(proof) {
+  proof = proof === true;
+  const title = proof ? '📝 PDF לאישור' : '📄 הרכבת PDF לדפוס';
   if (!['admin', 'editor'].includes(profile.role)) return;
   if (typeof _alBusyGuard === 'function' && _alBusyGuard()) return;
   const cfg = pibConfig();
@@ -247,7 +254,7 @@ async function fpBuildPrintPdf() {
   if (!pages) { toast('לגיליון לא הוגדר מספר עמודים', true); return; }
 
   const modal = document.getElementById('viewModal'), back = document.getElementById('viewBack');
-  const step = t => { modal.innerHTML = `<h3>📄 הרכבת PDF לדפוס — גיליון ${esc(issue.issue_number)}</h3><p>${esc(t)}</p>`; };
+  const step = t => { modal.innerHTML = `<h3>${title} — גיליון ${esc(issue.issue_number)}</h3><p>${esc(t)}</p>`; };
   back.classList.add('open'); step('טוען ספריות...');
   const warn = [];
   // block = חובה לתקן לפני דפוס · note = לבדיקה
@@ -398,11 +405,12 @@ async function fpBuildPrintPdf() {
     }
 
     step('שומר...');
-    const bytes = await out.save();
+    let bytes = await out.save();
+    if (proof) bytes = await _pibProofPdf(PDFLib, fontkit, bytes, trim, media, step);
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-    const name = `גיליון-${issue.issue_number}.pdf`;
-    modal.innerHTML = `<h3>📄 PDF לדפוס — גיליון ${esc(issue.issue_number)}</h3>
-<p>${pages} עמודים · ${(bytes.length / 1048576).toFixed(1)}MB. כדאי לעבור על הקובץ לפני השליחה לדפוס.</p>
+    const name = proof ? `גיליון-${issue.issue_number}-לאישור.pdf` : `גיליון-${issue.issue_number}.pdf`;
+    modal.innerHTML = `<h3>${proof ? '📝 PDF לאישור' : '📄 PDF לדפוס'} — גיליון ${esc(issue.issue_number)}</h3>
+<p>${pages} עמודים · ${(bytes.length / 1048576).toFixed(1)}MB. ${proof ? 'גרסה קלה לאישור ראשוני — <b>לא לדפוס</b>.' : 'כדאי לעבור על הקובץ לפני השליחה לדפוס.'}</p>
 ${_pibWarnHtml(warn)}
 <div class="m-actions" style="margin-top:12px">
 <a class="btn" href="${url}" download="${esc(name)}">⬇ הורדת ה-PDF</a>
@@ -411,9 +419,42 @@ ${_pibWarnHtml(warn)}
 </div>`;
   } catch (e) {
     console.error('print pdf', e);
-    modal.innerHTML = `<h3>📄 הרכבת PDF לדפוס</h3><p style="color:#b91c1c">שגיאה: ${esc(e.message || String(e))}</p>
+    modal.innerHTML = `<h3>${title}</h3><p style="color:#b91c1c">שגיאה: ${esc(e.message || String(e))}</p>
 <div class="m-actions"><button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button></div>`;
   }
+}
+
+/* גרסה לאישור: כל עמוד (בגבולות החיתוך) → JPG ברזולוציה נמוכה + כיתוב "טיוטה לאישור".
+   הקבצים המקוריים (וקטור, תמונות ברזולוציית דפוס) לא נכנסים — לכן הקובץ קל. */
+async function _pibProofPdf(PDFLib, fontkit, printBytes, trim, media, step) {
+  await _pvEnsurePdfJs();
+  const src = await window.pdfjsLib.getDocument({ data: printBytes, isEvalSupported: false }).promise;
+  const out = await PDFLib.PDFDocument.create();
+  out.registerFontkit(fontkit);
+  const font = await out.embedFont(_pibB64ToBytes(window.HEEBO_TTF_B64), { subset: true });
+  const sc = _PIB_PROOF_DPI / 72;
+  // היסט החיתוך בתוך עמוד המדיה (pdf.js: ראשית בפינה השמאלית-עליונה)
+  const offX = (trim.x - media.x) * sc, offY = (media.y + media.height - trim.y - trim.height) * sc;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(trim.width * sc); canvas.height = Math.round(trim.height * sc);
+  const ctx = canvas.getContext('2d');
+  const label = 'טיוטה לאישור — לא לדפוס', lsize = 7;
+  for (let k = 1; k <= src.numPages; k++) {
+    step(`מקטין לאישור — עמוד ${k}/${src.numPages}...`);
+    const pg = await src.getPage(k);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await pg.render({ canvasContext: ctx, viewport: pg.getViewport({ scale: sc, offsetX: -offX, offsetY: -offY }) }).promise;
+    pg.cleanup();
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', _PIB_PROOF_JPG));
+    const jpg = await out.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+    const page = out.addPage([trim.width, trim.height]);
+    page.drawImage(jpg, { x: 0, y: 0, width: trim.width, height: trim.height });
+    const w = _pibTextWidth(label, lsize, font);
+    page.drawRectangle({ x: trim.width - w - 10, y: trim.height - lsize - 8, width: w + 6, height: lsize + 5, color: PDFLib.rgb(1, 1, 1), opacity: 0.85 });
+    _pibDrawText(page, label, trim.width - w - 7, trim.height - lsize - 5, lsize, font, PDFLib.rgb(0.73, 0.11, 0.11));
+  }
+  src.destroy();
+  return out.save();
 }
 
 /* רשימת הבדיקה: קודם מה שחוסם דפוס, אחר כך הערות */
