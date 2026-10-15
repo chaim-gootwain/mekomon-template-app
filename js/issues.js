@@ -344,8 +344,7 @@ function _fpFileMark(a) {
 const k = _fpFileKinds[a.id];
 const badge = typeof adFileBadge === 'function' ? adFileBadge(k, true) : (k ? '📎' : '⚠');
 if (k || !['admin', 'editor', 'sales'].includes(profile.role)) return badge + ' ';
-const act = a.customer_id && !a.is_system ? `fpCopyFileFor(${a.id})` : `openAdCard(${a.id})`;
-return `<span onclick="event.stopPropagation();${act}" style="cursor:pointer" title="אין קובץ — הקש להוספה">${badge}</span> `;
+return `<span onclick="event.stopPropagation();fpCopyFileFor(${a.id})" style="cursor:pointer" title="אין קובץ — הקש להוספה">${badge}</span> `;
 }
 
 function fpCopyFileFor(adId) {

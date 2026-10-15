@@ -515,13 +515,16 @@ let _adCopyState = null;
 // onDone — מה לעשות אחרי העתקה/ביטול (ברירת מחדל: חזרה לכרטיס המודעה)
 async function adFileCopyOpen(adId, onDone) {
 const a = await run(db.from('ads').select('id,customer_id,title').eq('id', adId).single());
-if (!a || !a.customer_id) { toast('למודעה אין לקוח — אין ממה להעתיק', true); return; }
-const list = await _adPrevFiles([a.customer_id], [adId]);
+if (!a) return;
+const list = a.customer_id ? await _adPrevFiles([a.customer_id], [adId]) : [];
 _adCopyState = { adId, list, onDone: onDone || (() => openAdCard(adId)) };
 const close = `<button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="adFileCopyClose()">ביטול</button>`;
+const upload = `<input type="file" id="adCopyUpload" class="hidden" onchange="adFileCopyUpload()">
+<button class="btn btn-sm${list.length ? ' btn-ghost' : ''}" onclick="document.getElementById('adCopyUpload').click()">⬆ העלאת קובץ חדש</button>`;
+const who = a.customer_id ? esc(nameOf('customers', a.customer_id)) : 'למודעה';
 document.getElementById('viewModal').innerHTML = list.length ? `
-<h3>📋 קובץ מפרסום קודם</h3>
-<p class="muted" style="font-size:.85rem">${esc(nameOf('customers', a.customer_id))} — ${list.length} פרסומים קודמים עם קובץ. הקובץ יועתק למודעה הזו.</p>
+<h3>📎 הוספת קובץ למודעה</h3>
+<p class="muted" style="font-size:.85rem">${who} — ${list.length} פרסומים קודמים עם קובץ. אפשר להעתיק מאחד מהם או להעלות קובץ חדש.</p>
 <div class="field"><label>מאיזה גיליון?</label>
 <select id="adCopyPick" style="width:100%">
 ${list.map((c, i) => `<option value="${i}">${i === 0 ? '⭐ הפרסום האחרון — ' : ''}${esc(_adPrevLabel(c))}</option>`).join('')}
@@ -530,12 +533,30 @@ ${list.map((c, i) => `<option value="${i}">${i === 0 ? '⭐ הפרסום האח�
 <button class="btn btn-sm" onclick="adFileCopyGo(0)">⭐ מהפרסום האחרון</button>
 <button class="btn btn-sm btn-ghost" onclick="adFileCopyGo(Number(document.getElementById('adCopyPick').value))">העתקה מהגיליון שנבחר</button>
 <button class="btn btn-sm btn-ghost" onclick="adFileOpen(_adCopyState.list[Number(document.getElementById('adCopyPick').value)].file.storage_path)">צפייה</button>
+${upload}
 ${close}
 </div>` : `
-<h3>📋 קובץ מפרסום קודם</h3>
-<p>ללקוח ${esc(nameOf('customers', a.customer_id))} אין מודעות קודמות עם קובץ.</p>
-<div class="m-actions">${close}</div>`;
+<h3>📎 הוספת קובץ למודעה</h3>
+<p>${a.customer_id ? `ללקוח ${who} אין מודעות קודמות עם קובץ.` : 'למודעה אין לקוח, ולכן אין פרסומים קודמים להעתקה.'} אפשר להעלות קובץ חדש.</p>
+<div class="m-actions">${upload}${close}</div>`;
 document.getElementById('viewBack').classList.add('open');
+}
+
+/* העלאת קובץ חדש מתוך חלון ההוספה — כמו "⬆ העלאת קובץ" בכרטיס */
+async function adFileCopyUpload() {
+const s = _adCopyState;
+const file = document.getElementById('adCopyUpload').files[0];
+if (!s || !file) return;
+const path = `staff/${s.adId}/${Date.now()}_${safeKey(file.name)}`;
+const { error } = await db.storage.from('ad-files').upload(path, file);
+if (error) { toast('שגיאה בהעלאה: ' + error.message, true); return; }
+const kind = profile.role === 'graphics' ? 'design' : 'source';
+await run(db.from('ad_files').insert({ ad_id: s.adId, storage_path: path, file_name: file.name, kind, uploaded_by: profile.id }));
+await addInteraction('ad', s.adId, `הועלה קובץ: ${file.name}`);
+toast('הקובץ הועלה');
+_adCopyState = null;
+document.getElementById('viewBack').classList.remove('open');
+s.onDone(true, kind);
 }
 
 function adFileCopyClose() {
