@@ -47,6 +47,8 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - לקוח חדש: כש-search_customers לא מוצא והמנהל רוצה להוסיף (או ביקש בפירוש "תפתח לקוח") → propose_add_customer. שם חובה; טלפון/מייל/ח.פ רק אם ננקבו — אל תמציא. אחרי האישור תקבל את מזהה הלקוח החדש ותוכל להמשיך איתו (עסקה, מסמך, משימה) באותה שיחה.
 - עדכון פרטים בכרטיס לקוח קיים ("תכניס את המייל X ללקוח Y", טלפון/וואטסאפ/ח.פ, או תנאי תשלום — "תגדיר אותו כשוטף 60" → payment_terms='net60') → search_customers ואז propose_update_customer עם השדות שהמנהל נתן בלבד. הכרטיס מציג ישן→חדש והמנהל מאשר.
 - ביטול חיוב כפול/שגוי ("תבטל את החיובים שנכללו כבר בחוזה/בחשבון העסקה") → get_customer_status לזיהוי החיובים (charge_id), הצג למנהל אילו אתה מתכוון לבטל ולמה, ואז propose_cancel_charges עם המזהים והסיבה. זה מבטל רק בספר החוב — מסמך EZcount אם קיים מטופל בזיכוי (propose_issue_document עם credit_invoice). חיוב עם has_payments=true אי אפשר לבטל — הצע זיכוי.
+- עדכון פרסום קיים ("תעדכן את המחיר של הפרסום בגיליון 308 ל-350") → get_customer_publications למצוא את ad_id, ואז propose_update_ad עם השדות שהשתנו בלבד. מחירי מודעות במערכת הם לפני מע"מ: נקב המנהל "כולל מע"מ" — חשב את הנטו לפי vat_rate, הצג את החישוב, והמנהל יוכל לתקן בכרטיס. מודעה שכבר חויבה (deal_stage=invoiced/paid) — העדכון לא משנה את החיוב/המסמך שכבר נוצרו; אמור זאת.
+- ביטול/מחיקת פרסום ("תמחוק את הפרסום שבגרפיקה") → get_customer_publications למצוא את ad_id (פרסום בלי גיליון: issue=null), ואז propose_cancel_ad עם סיבה. המודעה מסומנת כמבוטלת ולא נמחקת פיזית. חיוב שכבר נוצר ממנה לא מבוטל — הצע propose_cancel_charges או זיכוי בהתאם.
 
 מוסכמות הניסוח של המנהל:
 - סוגי מסמכים: "ח. מס" / "חשבונית מס" → tax_invoice · "מס קבלה" → tax_invoice_receipt · "קבלה" → receipt · "זיכוי" → credit_invoice · "עסקה" / "חשבון עסקה" → proforma.
@@ -194,6 +196,37 @@ const TOOLS = [
         reason: { type: 'string', description: 'סיבת הביטול בקצרה (למשל "נכלל בחשבון עסקה 90107")' }
       },
       required: ['customer_id', 'customer_name', 'charge_ids']
+    }
+  },
+  {
+    name: 'propose_update_ad',
+    description: 'הצעת עדכון פרסום (מודעה) קיים: מחיר (לפני מע"מ), הנחה או תיאור — אותה עריכה כמו כפתור "עריכה" בדף המודעות. פותח כרטיס אישור שמציג ישן→חדש והמחיר ניתן לעריכה בו. קח את ad_id מ-get_customer_publications. העבר רק שדות שהמנהל ביקש לשנות.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ad_id: { type: 'number', description: 'מזהה הפרסום (ad_id מ-get_customer_publications)' },
+        customer_id: { type: 'number', description: 'מזהה הלקוח — לבדיקת שיוך' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        price: { type: 'number', description: 'מחיר חדש בש"ח לפני מע"מ. נקב המנהל מחיר כולל מע"מ — חלק ב-(1+מע"מ/100) לפי vat_rate וציין זאת בתשובה' },
+        discount: { type: 'number', description: 'הנחה חדשה בש"ח (אופציונלי)' },
+        title: { type: 'string', description: 'תיאור חדש (אופציונלי)' },
+        reason: { type: 'string', description: 'סיבת העדכון בקצרה — נרשמת בציר הזמן' }
+      },
+      required: ['ad_id', 'customer_id', 'customer_name']
+    }
+  },
+  {
+    name: 'propose_cancel_ad',
+    description: 'הצעת ביטול פרסום (מודעה) — מסמן כמבוטל דרך מנגנון הניתוב של המערכת (לא מחיקה פיזית; נשמר תיעוד). פותח כרטיס אישור עם פרטי הפרסום והסיבה. ביטול המודעה לא מבטל חיוב שכבר נוצר ממנה — אם deal_stage=invoiced/paid, אמור זאת למנהל והצע לטפל בחיוב (propose_cancel_charges או זיכוי). קח את ad_id מ-get_customer_publications.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ad_id: { type: 'number', description: 'מזהה הפרסום (ad_id מ-get_customer_publications)' },
+        customer_id: { type: 'number', description: 'מזהה הלקוח — לבדיקת שיוך' },
+        customer_name: { type: 'string', description: 'שם הלקוח להצגה' },
+        reason: { type: 'string', description: 'סיבת הביטול — חובה, נרשמת על המודעה' }
+      },
+      required: ['ad_id', 'customer_id', 'customer_name', 'reason']
     }
   },
   {
@@ -541,7 +574,7 @@ async function runReadTool(caller, name, input) {
     const cid = Number(input && input.customer_id);
     if (!cid) return { error: 'חסר customer_id' };
     const { data: ads, error } = await caller.from('ads')
-      .select('issue_id,price,discount,status,deal_stage,price_item_id,page_number')
+      .select('id,title,issue_id,price,discount,status,deal_stage,price_item_id,page_number')
       .eq('customer_id', cid).not('status', 'in', '("cancelled","rejected")').limit(300);
     if (error) return { error: error.message };
     const issueIds = [...new Set((ads || []).map(a => a.issue_id).filter(Boolean))];
@@ -557,6 +590,7 @@ async function runReadTool(caller, name, input) {
     const to = Number(input && input.issue_to) || Infinity;
     const rows = (ads || [])
       .map(a => ({
+        ad_id: a.id, title: a.title || null,
         issue: issueNum[a.issue_id] ? issueNum[a.issue_id].n : null,
         date: issueNum[a.issue_id] ? issueNum[a.issue_id].d : null,
         size: priceName[a.price_item_id] || null,
@@ -566,7 +600,7 @@ async function runReadTool(caller, name, input) {
       .filter(r => r.issue == null || (r.issue >= from && r.issue <= to))
       .sort((a, b) => (b.issue || 0) - (a.issue || 0))
       .slice(0, 60);
-    return { publications: rows, note: 'deal_stage: invoiced=חויב, paid=שולם, אחר/ריק=טרם חויב' };
+    return { publications: rows, note: 'deal_stage: invoiced=חויב, paid=שולם, אחר/ריק=טרם חויב. מחירים לפני מע"מ. ad_id משמש ל-propose_update_ad / propose_cancel_ad. issue=null: פרסום שעוד לא שובץ לגיליון.' };
   }
 
   if (name === 'list_issues') {

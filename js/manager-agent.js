@@ -272,6 +272,12 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_cancel_charges') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'cancel_charges' };
       await mgrProposeCancelCharges(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_update_ad') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'update_ad' };
+      await mgrProposeUpdateAd(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_cancel_ad') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'cancel_ad' };
+      await mgrProposeCancelAd(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_update_customer') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'update_customer' };
       await mgrProposeUpdateCustomer(r.data.proposal);
@@ -848,6 +854,171 @@ async function mgrCancelChargesCancel() {
   const id = s.toolUseId;
   _mgrCancel = null;
   await mgrResolveProposal(id, 'המשתמש ביטל — שום חיוב לא שונה.');
+}
+
+/* ---------- עדכון פרסום (מודעה) קיים — כרטיס אישור ----------
+   אותה כתיבה כמו טופס "עריכה" בדף המודעות (update ישיר על ads, RLS
+   אוכף הרשאות). המחיר/הנחה/תיאור ניתנים לעריכה בכרטיס עצמו, כך
+   שחישוב "כולל מע"מ"→נטו של הסוכן תמיד עובר את העין של המנהל. */
+let _mgrAdUpd = null;
+async function mgrProposeUpdateAd(p) {
+  const inp = p.input || {};
+  const adId = Number(inp.ad_id) || 0;
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!adId) { await fail('חסר מזהה פרסום (ad_id).'); return; }
+  mgrSetBusy(true);
+  const { data: ads } = await db.from('ads').select('*').eq('id', adId).limit(1);
+  mgrSetBusy(false);
+  const ad = ads && ads[0];
+  if (!ad) { await fail('פרסום #' + adId + ' לא נמצא.'); return; }
+  if (inp.customer_id && ad.customer_id && Number(inp.customer_id) !== Number(ad.customer_id)) { await fail('פרסום #' + adId + ' שייך ללקוח אחר — בדוק שוב ב-get_customer_publications.'); return; }
+  if (['cancelled', 'rejected'].includes(ad.status)) { await fail('פרסום #' + adId + ' כבר מבוטל/נדחה — אין מה לעדכן.'); return; }
+  const has = (k) => inp[k] !== undefined && inp[k] !== null && String(inp[k]) !== '';
+  _mgrAdUpd = { toolUseId: p.tool_use_id, ad, name: String(inp.customer_name || nameOf('customers', ad.customer_id) || ''), reason: String(inp.reason || '').trim() };
+  const billed = ['invoiced', 'paid'].includes(ad.deal_stage || '');
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrAdUpdCard';
+  card.innerHTML = `
+    <div class="hd">✏️ עדכון פרסום — לאישור</div>
+    ${billed ? '<div class="ic-warn">הפרסום כבר חויב — העדכון משנה את המודעה בלבד, לא את החיוב או המסמך שכבר נוצרו.</div>' : ''}
+    <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrAdUpd.name)}" disabled></div>
+    <div class="field"><label>פרסום</label><input type="text" value="${esc(ad.title || '#' + ad.id)} · ${esc(nameOf('issues', ad.issue_id, 'issue') || 'ללא גיליון')}" disabled></div>
+    ${_mgrAdUpd.reason ? `<div class="field"><label>סיבה</label><input type="text" value="${esc(_mgrAdUpd.reason)}" disabled></div>` : ''}
+    <div class="field"><label>מחיר בש"ח לפני מע"מ (נוכחי: ${money(ad.price || 0)})</label><input type="number" id="mgrAdUpdPrice" step="any" value="${has('price') ? Number(inp.price) : (ad.price == null ? '' : ad.price)}"></div>
+    <div class="field"><label>הנחה בש"ח (נוכחית: ${money(ad.discount || 0)})</label><input type="number" id="mgrAdUpdDiscount" step="any" value="${has('discount') ? Number(inp.discount) : (ad.discount == null ? '' : ad.discount)}"></div>
+    <div class="field"><label>תיאור</label><input type="text" id="mgrAdUpdTitle" value="${esc(has('title') ? String(inp.title) : (ad.title || ''))}"></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrAdUpdBtn" onclick="mgrUpdateAdApprove()">✓ עדכן את הפרסום</button>
+      <button class="btn btn-ghost" onclick="mgrUpdateAdCancel()">ביטול</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrUpdateAdApprove() {
+  const s = _mgrAdUpd;
+  if (!s) return;
+  const num = (id) => { const v = document.getElementById(id)?.value; return v === '' || v == null || !isFinite(Number(v)) ? null : Number(v); };
+  const price = num('mgrAdUpdPrice');
+  const discount = num('mgrAdUpdDiscount');
+  const title = (document.getElementById('mgrAdUpdTitle')?.value || '').trim();
+  const rec = {}, changes = [];
+  if (price != null && price !== Number(s.ad.price || 0)) { rec.price = price; changes.push('מחיר ' + money(s.ad.price || 0) + ' → ' + money(price)); }
+  if (discount != null && discount !== Number(s.ad.discount || 0)) { rec.discount = discount; changes.push('הנחה ' + money(s.ad.discount || 0) + ' → ' + money(discount)); }
+  if (title && title !== String(s.ad.title || '')) { rec.title = title; changes.push('תיאור "' + (s.ad.title || '—') + '" → "' + title + '"'); }
+  if (!changes.length) {
+    document.getElementById('mgrAdUpdCard')?.remove();
+    icSay('אין שינוי — הערכים זהים לקיימים.');
+    const id = s.toolUseId; _mgrAdUpd = null;
+    await mgrResolveProposal(id, 'לא עודכן דבר — הערכים בכרטיס זהים לקיימים.');
+    return;
+  }
+  const btn = document.getElementById('mgrAdUpdBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'מעדכן...'; }
+  mgrSetBusy(true);
+  const { error } = await db.from('ads').update(rec).eq('id', s.ad.id);
+  mgrSetBusy(false);
+  document.getElementById('mgrAdUpdCard')?.remove();
+  const id = s.toolUseId;
+  if (error) {
+    icSayErr('העדכון נכשל: ' + esc(error.message || ''));
+    _mgrAdUpd = null;
+    await mgrResolveProposal(id, 'העדכון נכשל: ' + String(error.message || error).slice(0, 150));
+    return;
+  }
+  try { await addInteraction('ad', s.ad.id, '✏️ עודכן מסוכן המקומון: ' + changes.join(' · ') + (s.reason ? ' (' + s.reason + ')' : '')); } catch (e) { }
+  try { await refreshCache(); } catch (e) { }
+  icSayOk('✅ הפרסום של <b>' + esc(s.name) + '</b> עודכן: ' + esc(changes.join(' · ')));
+  _mgrAdUpd = null;
+  await mgrResolveProposal(id, 'אושר ועודכן בפועל: ' + changes.join(', ') + '.');
+}
+async function mgrUpdateAdCancel() {
+  const s = _mgrAdUpd;
+  if (!s) return;
+  document.getElementById('mgrAdUpdCard')?.remove();
+  icSay('בוטל — הפרסום נשאר כמו שהוא.');
+  const id = s.toolUseId;
+  _mgrAdUpd = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — הפרסום לא שונה.');
+}
+
+/* ---------- ביטול פרסום (מודעה) — כרטיס אישור ----------
+   דרך route_ad('cancel') — אותו מנגנון של כפתור "ביטול" בדף המודעות:
+   סטטוס cancelled + רישום הסיבה בציר הזמן, בלי מחיקה פיזית. ביטול
+   המודעה לא נוגע בחיוב שכבר נוצר ממנה — הסוכן מתריע ומציע בנפרד. */
+let _mgrAdCancel = null;
+async function mgrProposeCancelAd(p) {
+  const inp = p.input || {};
+  const adId = Number(inp.ad_id) || 0;
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!adId) { await fail('חסר מזהה פרסום (ad_id).'); return; }
+  mgrSetBusy(true);
+  const { data: ads } = await db.from('ads').select('*').eq('id', adId).limit(1);
+  mgrSetBusy(false);
+  const ad = ads && ads[0];
+  if (!ad) { await fail('פרסום #' + adId + ' לא נמצא.'); return; }
+  if (inp.customer_id && ad.customer_id && Number(inp.customer_id) !== Number(ad.customer_id)) { await fail('פרסום #' + adId + ' שייך ללקוח אחר — בדוק שוב ב-get_customer_publications.'); return; }
+  if (['cancelled', 'rejected'].includes(ad.status)) { await fail('פרסום #' + adId + ' כבר מבוטל/נדחה.'); return; }
+  _mgrAdCancel = { toolUseId: p.tool_use_id, ad, name: String(inp.customer_name || nameOf('customers', ad.customer_id) || '') };
+  const billed = ['invoiced', 'paid'].includes(ad.deal_stage || '');
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrAdCancelCard';
+  card.innerHTML = `
+    <div class="hd">✕ ביטול פרסום — לאישור</div>
+    ${billed ? '<div class="ic-warn">הפרסום כבר חויב — הביטול לא מבטל את החיוב/המסמך; לטיפול בחיוב יש ביטול חיובים או זיכוי.</div>' : ''}
+    <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrAdCancel.name)}" disabled></div>
+    <div class="field"><label>פרסום</label><input type="text" value="${esc(ad.title || '#' + ad.id)} · ${esc(nameOf('issues', ad.issue_id, 'issue') || 'ללא גיליון')} · ${money(ad.price || 0)}" disabled></div>
+    <div class="field"><label>סיבת הביטול (חובה)</label><input type="text" id="mgrAdCancelReason" value="${esc(String(inp.reason || '').trim())}"></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrAdCancelBtn" onclick="mgrCancelAdApprove()">✕ בטל את הפרסום</button>
+      <button class="btn btn-ghost" onclick="mgrCancelAdCancel()">השאר כמו שזה</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrCancelAdApprove() {
+  const s = _mgrAdCancel;
+  if (!s) return;
+  const reason = (document.getElementById('mgrAdCancelReason')?.value || '').trim();
+  if (!reason) { toast('ביטול מחייב סיבה', true); return; }
+  const btn = document.getElementById('mgrAdCancelBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'מבטל...'; }
+  mgrSetBusy(true);
+  let err = null;
+  try {
+    const { error } = await db.rpc('route_ad', { p_ad_id: s.ad.id, p_action: 'cancel', p_note: reason + ' · בוטל מסוכן המקומון' });
+    if (error) err = error;
+  } catch (e) { err = e; }
+  mgrSetBusy(false);
+  document.getElementById('mgrAdCancelCard')?.remove();
+  const id = s.toolUseId;
+  if (err) {
+    icSayErr('הביטול נכשל: ' + esc(err.message || String(err)));
+    _mgrAdCancel = null;
+    await mgrResolveProposal(id, 'הביטול נכשל: ' + String(err.message || err).slice(0, 150));
+    return;
+  }
+  try { await refreshCache(); } catch (e) { }
+  icSayOk('✅ הפרסום של <b>' + esc(s.name) + '</b> בוטל (' + esc(reason) + ') — ירד מהשיבוץ ומהגרפיקה.');
+  const billed = ['invoiced', 'paid'].includes(s.ad.deal_stage || '');
+  _mgrAdCancel = null;
+  await mgrResolveProposal(id, 'אושר ובוטל בפועל (סיבה: ' + reason + ').' + (billed ? ' שים לב: המודעה הייתה מחויבת — החיוב/המסמך לא בוטלו.' : ''));
+}
+async function mgrCancelAdCancel() {
+  const s = _mgrAdCancel;
+  if (!s) return;
+  document.getElementById('mgrAdCancelCard')?.remove();
+  icSay('בוטל — הפרסום נשאר כמו שהוא.');
+  const id = s.toolUseId;
+  _mgrAdCancel = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — הפרסום לא שונה.');
 }
 
 /* ---------- עדכון פרטים בכרטיס לקוח קיים (כרטיס אישור) ---------- */
