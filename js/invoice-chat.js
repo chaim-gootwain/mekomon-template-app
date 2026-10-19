@@ -359,7 +359,7 @@ function invChatRenderCard() {
   if (f.line_items.some(l => !l.price_includes_vat)) warns.push('המחירים מסומנים <b>לפני מע"מ</b> — מע"מ ' + invChatVatPct() + '% יתווסף (אפשר לשנות בכל שורה).');
   if (noPrice) warns.push('⚠ חסר מחיר — השלם אותו בשורות למטה.');
   if ((f.doc_type === 'receipt' || f.doc_type === 'tax_invoice_receipt') && (f.target_charge_ids || []).length)
-    warns.push('🎯 התשלום ישויך בכרטסת ל: <b>' + esc(f.target_label || ('חיוב #' + f.target_charge_ids.join(', #'))) + '</b> — ולא ייפרס מהחוב הישן לחדש.');
+    warns.push('🎯 התשלום ישויך בכרטסת ל: <b>' + esc(f.target_label || ('חיוב #' + f.target_charge_ids.join(', #'))) + '</b> — ולא ייפרס מהחוב הישן לחדש. מודעות בגיליונות פתוחים לא יסומנו "חויבו" (אלא אם צוינו גיליונות במלל).');
   const srcBadge = f.customer_source === 'existing'
     ? '<span class="ic-src exist">✓ מכרטיס קיים</span>'
     : (f.customer_source === 'new' ? '<span class="ic-src new">כרטיס חדש</span>' : '<span class="ic-src new">שם חופשי</span>');
@@ -645,7 +645,9 @@ async function _icLinkInfo(f) {
             .in('issue_id', issues.map(i => i.id)).not('status', 'in', '("cancelled","rejected")'));
           if (ads && ads.length) info = { source: 'text', ads, issues };
         }
-      } else if (_icState && _icState.mode === 'issue') {
+      } else if (_icState && _icState.mode === 'issue' && !((f.target_charge_ids || []).length)) {
+        // תשלום משויך לחיוב ישן (target_charge_ids) — לא נוגעים במודעות הפתוחות:
+        // הנפילה ל"כל הגיליונות הפתוחים" הייתה מסמנת "חויבו" גיליונות שלא קשורים לחוב
         const all = await run(db.from('ads').select('id,issue_id,price,discount,deal_stage').eq('customer_id', f.customer_id)
           .not('issue_id', 'is', null).not('status', 'in', '("cancelled","rejected")'));
         const ads = (all || [])
