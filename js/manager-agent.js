@@ -281,6 +281,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_update_customer') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'update_customer' };
       await mgrProposeUpdateCustomer(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_send_pay_link') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_pay_link' };
+      await mgrProposeSendPayLink(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_debt_reminders') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'debt_reminders' };
       await mgrProposeReminders(r.data.proposal);
@@ -469,6 +472,129 @@ async function mgrResolveProposal(toolUseId, outcome) {
   _mgrState.pending = null;
   _mgrState.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: outcome }] });
   await mgrCallAgent();
+}
+
+/* ---------- קישור תשלום באשראי (כרטיס אישור ושליחה) ----------
+   הקישור מגיע מנקודת הקצה pay-link של המופע (Netlify, באותו אתר):
+   קישור קבוע פר לקוח שבלחיצה נפתח דף סליקה על היתרה הפתוחה באותו
+   רגע; אחרי תשלום הקבלה והרישום בכרטסת אוטומטיים (ה-webhook של
+   המופע). מופע בלי הפונקציה (404) — הכרטיס מסביר שאין סליקה מחוברת. */
+let _mgrPayLink = null;
+async function mgrProposeSendPayLink(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!cid) { await fail('חסר מזהה לקוח.'); return; }
+  mgrSetBusy(true);
+  const wait = icSay('מכין קישור תשלום... ⏳');
+  let link = null, cust = null, err = '';
+  try {
+    const { data: custs } = await db.from('customers').select('id,name,email,phone,whatsapp').eq('id', cid).limit(1);
+    cust = custs && custs[0];
+    const { data: sess } = await db.auth.getSession();
+    const tok = sess && sess.session && sess.session.access_token;
+    const res = await fetch('/.netlify/functions/pay-link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + (tok || '') },
+      body: JSON.stringify({ customer_id: cid })
+    });
+    if (res.status === 404) err = 'במופע הזה אין חיבור סליקה באשראי — אין דרך ליצור קישור תשלום.';
+    else {
+      const d = await res.json().catch(() => null);
+      if (!d || !d.ok) err = 'יצירת הקישור נכשלה: ' + ((d && (d.detail || d.error)) || ('HTTP ' + res.status));
+      else link = d;
+    }
+  } catch (e) { err = 'יצירת הקישור נכשלה: ' + String(e && e.message || e).slice(0, 120); }
+  wait && wait.remove();
+  mgrSetBusy(false);
+  if (!cust) { await fail('הלקוח לא נמצא.'); return; }
+  if (err || !link) { await fail(err || 'יצירת הקישור נכשלה.'); return; }
+  const hasEmail = !!String(cust.email || '').trim();
+  const hasPhone = !!String(cust.whatsapp || cust.phone || '').trim();
+  if (!hasEmail && !hasPhone) {
+    icSay('נוצר קישור תשלום ל<b>' + esc(cust.name || '') + '</b>, אבל אין בכרטיס מייל או טלפון לשליחה. אפשר להעתיק ידנית:<br><input type="text" dir="ltr" value="' + esc(link.url) + '" readonly onclick="this.select()" style="width:100%">');
+    await mgrResolveProposal(p.tool_use_id, 'הקישור נוצר אבל אין מייל/טלפון בכרטיס הלקוח — הוא הוצג למנהל להעתקה ידנית: ' + link.url);
+    return;
+  }
+  let channel = inp.channel === 'whatsapp' ? 'whatsapp' : 'email';
+  if (channel === 'email' && !hasEmail) channel = 'whatsapp';
+  if (channel === 'whatsapp' && !hasPhone) channel = 'email';
+  const msg = 'שלום ' + (cust.name || '') + ',\n' +
+    'לנוחיותך קישור לתשלום היתרה באשראי:\n' + link.url + '\n' +
+    'הדף נפתח על היתרה הפתוחה נכון לרגע התשלום, והקבלה נשלחת אוטומטית.\n' +
+    'תודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@';
+  _mgrPayLink = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', cust, url: link.url, balance: Number(link.balance) || 0 };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrPayLinkCard';
+  card.innerHTML = `
+    <div class="hd">💳 שליחת קישור תשלום באשראי — לאישור</div>
+    <div class="ic-warn">הקישור קבוע ללקוח ונפתח על <b>כל היתרה הפתוחה</b> בזמן הלחיצה (עכשיו: <b>${money(_mgrPayLink.balance)}</b>). אחרי תשלום — קבלה ורישום בכרטסת אוטומטיים.</div>
+    <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrPayLink.name)}" disabled></div>
+    <div class="grid2">
+      <div class="field"><label>ערוץ</label><select id="mgrPayLinkCh">
+        <option value="email" ${channel === 'email' ? 'selected' : ''} ${hasEmail ? '' : 'disabled'}>מייל${hasEmail ? ' (' + esc(cust.email) + ')' : ' — אין בכרטיס'}</option>
+        <option value="whatsapp" ${channel === 'whatsapp' ? 'selected' : ''} ${hasPhone ? '' : 'disabled'}>וואטסאפ${hasPhone ? '' : ' — אין טלפון בכרטיס'}</option>
+      </select></div>
+      <div class="field"><label>הקישור</label><input type="text" dir="ltr" value="${esc(link.url)}" readonly onclick="this.select()"></div>
+    </div>
+    <div class="field"><label>נוסח ההודעה</label><textarea id="mgrPayLinkMsg" rows="5">${esc(msg)}</textarea></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrPayLinkBtn" onclick="mgrPayLinkApprove()">💳 שלח את הקישור</button>
+      <button class="btn btn-ghost" onclick="mgrPayLinkCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrPayLinkApprove() {
+  const s = _mgrPayLink;
+  if (!s) return;
+  const ch = (document.getElementById('mgrPayLinkCh') || {}).value || 'email';
+  const msg = String((document.getElementById('mgrPayLinkMsg') || {}).value || '').trim();
+  if (!msg.includes(s.url)) { toast('נוסח ההודעה חייב לכלול את הקישור', true); return; }
+  const btn = document.getElementById('mgrPayLinkBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  let outcome = '';
+  try {
+    if (ch === 'email') {
+      const { data, error } = await db.functions.invoke('send-email', {
+        body: { to: s.cust.email, subject: 'קישור לתשלום — @@PAPER_NAME@@', body: msg, customer_id: s.cid }
+      });
+      if (error || !data || !data.ok) {
+        let m = '';
+        try { if (error && error.context && typeof error.context.json === 'function') { const j = await error.context.json(); m = j.detail || j.error || ''; } } catch (e) { }
+        throw new Error(m || (data && (data.detail || data.error)) || 'שליחת המייל נכשלה');
+      }
+      outcome = 'נשלח קישור התשלום במייל ל-' + (s.cust.email || '');
+    } else {
+      const raw = String(s.cust.whatsapp || s.cust.phone || '').replace(/\D/g, '');
+      const intl = raw.startsWith('0') ? '972' + raw.slice(1) : raw;
+      window.open('https://wa.me/' + intl + '?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+      outcome = 'נפתח וואטסאפ עם ההודעה והקישור — השליחה הסופית בלחיצת המנהל';
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '💳 שלח את הקישור'; }
+    toast('נכשל: ' + String(e && e.message || e), true);
+    return;
+  }
+  document.getElementById('mgrPayLinkCard')?.remove();
+  try { await addInteraction('customer', s.cid, '💳 נשלח קישור תשלום באשראי (' + (ch === 'email' ? 'מייל' : 'וואטסאפ') + ') — יתרה ' + money(s.balance)); } catch (e) { }
+  icSayOk('✅ קישור התשלום של <b>' + esc(s.name) + '</b> ' + (ch === 'email' ? 'נשלח במייל' : 'נפתח בוואטסאפ') + ' (יתרה כרגע: <b>' + money(s.balance) + '</b>). אחרי התשלום הקבלה והרישום בכרטסת אוטומטיים.');
+  const id = s.toolUseId;
+  _mgrPayLink = null;
+  await mgrResolveProposal(id, 'אושר. ' + outcome + '. היתרה הפתוחה בזמן השליחה: ' + money(s.balance) + '. אחרי תשלום הקבלה והרישום בכרטסת אוטומטיים — אל תציע רישום ידני.');
+}
+async function mgrPayLinkCancel() {
+  const s = _mgrPayLink;
+  if (!s) return;
+  document.getElementById('mgrPayLinkCard')?.remove();
+  icSay('בוטל — לא נשלח קישור.');
+  const id = s.toolUseId;
+  _mgrPayLink = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — לא נשלח קישור תשלום.');
 }
 
 /* ---------- תזכורות חוב (כרטיס אישור ושליחה) ----------
