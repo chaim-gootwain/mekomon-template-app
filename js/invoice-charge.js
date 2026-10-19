@@ -168,6 +168,11 @@ async function applyInvoiceToLedger(body, doc) {
       const bal = Number(ch.amount) - pays.reduce((s, p) => s + Number(p.amount), 0);
       if (bal > 0.001) withBal.push({ id: ch.id, balance: bal });
     }
+    // שיוך מכוון (target_charge_ids, מסוכן המקומון): החיובים שסומנו נסגרים
+    // ראשונים; יתרה שנותרה נפרסת כרגיל מהישן לחדש. המיון יציב — הסדר
+    // הפנימי (לפי issued_date) נשמר בתוך כל קבוצה.
+    const targetIds = Array.isArray(body.target_charge_ids) ? body.target_charge_ids.map(Number).filter(n => n > 0) : [];
+    if (targetIds.length) withBal.sort((a, b) => (targetIds.includes(a.id) ? 0 : 1) - (targetIds.includes(b.id) ? 0 : 1));
     const plan = _icPlanSettlement(withBal, total);
     for (const a of plan.allocs) {
       await db.from('payments').insert({ charge_id: a.id, customer_id: cid, amount: a.applied, method: _icPayMethod(), paid_date: _pDate, notes: 'תשלום מחשבונית' + tag, created_by: (typeof profile !== 'undefined' ? profile.id : null) });

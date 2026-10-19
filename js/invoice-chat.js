@@ -358,6 +358,8 @@ function invChatRenderCard() {
   if (_icState.confidence === 'low') warns.push('⚠ רמת ודאות נמוכה בפענוח — בדוק את כל השדות לפני הפקה.');
   if (f.line_items.some(l => !l.price_includes_vat)) warns.push('המחירים מסומנים <b>לפני מע"מ</b> — מע"מ ' + invChatVatPct() + '% יתווסף (אפשר לשנות בכל שורה).');
   if (noPrice) warns.push('⚠ חסר מחיר — השלם אותו בשורות למטה.');
+  if ((f.doc_type === 'receipt' || f.doc_type === 'tax_invoice_receipt') && (f.target_charge_ids || []).length)
+    warns.push('🎯 התשלום ישויך בכרטסת ל: <b>' + esc(f.target_label || ('חיוב #' + f.target_charge_ids.join(', #'))) + '</b> — ולא ייפרס מהחוב הישן לחדש.');
   const srcBadge = f.customer_source === 'existing'
     ? '<span class="ic-src exist">✓ מכרטיס קיים</span>'
     : (f.customer_source === 'new' ? '<span class="ic-src new">כרטיס חדש</span>' : '<span class="ic-src new">שם חופשי</span>');
@@ -544,6 +546,9 @@ function invChatEzcountBody(f) {
     body.pay_date = dstr;
     body.payment = { method: f.payment_method || 'cash', sum: Math.round(gross * 100) / 100, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) };
     if (f.doc_type === 'receipt') delete body.items; // קבלה בלבד — מסמך תשלום ללא פירוט חשבונית
+    // שיוך מכוון בספר החוב בלבד — ezcount-doc מתעלם מהשדה (destructuring של שדות מוכרים)
+    const _tgt = Array.isArray(f.target_charge_ids) ? f.target_charge_ids.map(Number).filter(n => n > 0) : [];
+    if (_tgt.length) body.target_charge_ids = _tgt;
   }
   return body;
 }
