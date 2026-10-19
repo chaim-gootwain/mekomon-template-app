@@ -56,6 +56,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - אמצעי תשלום: אשראי → credit · מזומן → cash · העברה → transfer · צ'ק/שיק → check. קבלה ומס-קבלה מחייבות אמצעי תשלום.
 - כמויות ומחירים גם במילים ("פעמיים"=2, "חמש מאות"=500).
 - "לקוח שילם" בלי סכום חדש → propose_pay_existing (הסכום יילקח מחשבון העסקה הפתוח שלו במערכת). אם ננקב סכום מפורש להפקה — זו הפקה רגילה (propose_issue_document).
+- תשלום על חיוב מסוים ("שילם את החוב הישן", "קבלה על ח.ע. 10217"): כש-propose_pay_existing לא מוצא את העסקה (ישנה/הופקה מחוץ למסלול) — get_customer_status למצוא את charge_id, ואז propose_issue_document (receipt או tax_invoice_receipt) עם target_charge_ids=[charge_id] ו-target_label. התשלום יירד בכרטסת בדיוק מהחיובים האלה; בלי target_charge_ids הוא נפרס מהחוב הישן לחדש. בתיאור השורה כתוב על מה התשלום.
 - "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
 - שליחת גזירים במייל ללקוח → propose_send_clips עם מספרי הגיליונות. אם המנהל לא ציין גיליונות — בדוק ב-get_customer_publications אילו גיליונות רלוונטיים (למשל האחרון שפורסם) והצע. המייל נשלח לכתובת שבכרטיס הלקוח, והמנהל מאשר בכרטיס לפני שליחה.
 - "צרף לי את החשבונית" / "תראה לי את המסמך" → get_customer_documents, ותן את הקישור בפורמט markdown: [חשבונית מס 10009 — PDF](pdf_url). הקישור נפתח בלחיצה אצל המנהל. מסמך בלי pdf_url — אמור שהקובץ לא זמין במערכת (הופק מחוץ למסלול הרגיל).
@@ -332,7 +333,9 @@ const TOOLS = [
             required: ['description', 'quantity', 'unit_price', 'price_includes_vat']
           }
         },
-        payment_method: { type: 'string', enum: ['credit', 'cash', 'transfer', 'check'], description: 'חובה לקבלה/מס-קבלה אם ידוע; אחרת השמט' }
+        payment_method: { type: 'string', enum: ['credit', 'cash', 'transfer', 'check'], description: 'חובה לקבלה/מס-קבלה אם ידוע; אחרת השמט' },
+        target_charge_ids: { type: 'array', items: { type: 'number' }, maxItems: 20, description: 'לקבלה/מס-קבלה בלבד: שיוך התשלום בספר החוב לחיובים מסוימים (charge_id מ-get_customer_status) במקום פריסה מהחוב הישן לחדש. השתמש כשהמנהל נוקב חיוב/חשבון עסקה מסוים' },
+        target_label: { type: 'string', description: 'תיאור קצר של היעד לתצוגה בכרטיס (למשל "חיוב 1482 — ח.ע. 10217")' }
       },
       required: ['customer_name', 'doc_type', 'line_items']
     }
