@@ -85,7 +85,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);b
         <div class="field"><label>שם</label><input id="fName" placeholder="שם מלא / שם העסק"></div>
         <div class="field"><label>טלפון *</label><input id="fPhone" type="tel" inputmode="tel" placeholder="05X-XXXXXXX"></div>
       </div>
-      <div class="field" id="fEmailWrap" style="display:none"><label>מייל <span style="font-weight:400;color:var(--muted)">(לאישור המודעה ולחשבונית)</span></label><input id="fEmail" type="email" inputmode="email" dir="ltr" placeholder="name@example.com"></div>
     </div>
 
     <div class="card">
@@ -237,7 +236,6 @@ async function init(){
     document.getElementById('payLinkBtn').style.display='none';
     document.getElementById('fPaidWrap').style.display='none';
     document.getElementById('sendBtn').textContent='שליחה ומעבר לתשלום 💳';
-    document.getElementById('fEmailWrap').style.display='';
   } else {
     // קישורי תשלום של המופע (אם הוגדרו); כשל/היעדר — פשוט בלי כפתור תשלום
     try{
@@ -252,7 +250,7 @@ async function init(){
     const m = document.getElementById('msg');
     m.className = 'msg ' + (paid==='1' ? 'ok' : 'err');
     m.innerHTML = paid==='1'
-      ? '✓ התשלום התקבל — תודה!<br>המודעה תתפרסם בגיליון שבחרתם. חשבונית מס-קבלה תישלח אליכם במייל (אם השארתם).'
+      ? '✓ התשלום התקבל — תודה!<br>המודעה ממתינה לאישור ותפורסם בגיליון שבחרתם. חשבונית מס-קבלה תישלח אליכם.'
       : 'התשלום לא הושלם ולא חויבתם.<br>המודעה נשמרה אצלנו — לסיום התשלום צרו קשר: @@PAPER_PHONE@@';
     history.replaceState(null, '', location.pathname);
   }
@@ -329,20 +327,11 @@ async function submitAd(){
       if(upErr) throw new Error('העלאת התמונה נכשלה — נסו שוב או בחרו ללא תמונה');
     }
     if(CARD_PAY){
-      const email=document.getElementById('fEmail').value.trim();
-      if(email && !/^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email)){msg.textContent='כתובת המייל לא תקינה';msg.classList.add('err');btn.disabled=false;btn.textContent='שליחה ומעבר לתשלום 💳';return;}
-      btn.textContent='בודק את המודעה...';
       // ההגשה והפתיחה של דף התשלום בצד השרת — הסכום נלקח מהמסד, לא מהדפדפן
       const pr = await fetch('/.netlify/functions/luach-pay', {method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({name, phone, email, category:cat, ad_type:TYPE, body, issue_id:issue?Number(issue):null, package:pkg, image_path:imgPath||null})});
+        body: JSON.stringify({name, phone, category:cat, ad_type:TYPE, body, issue_id:issue?Number(issue):null, package:pkg, image_path:imgPath||null})});
       const pd = await pr.json().catch(()=>null);
       if(pd && pd.ok && pd.url){ btn.textContent='עובר לתשלום...'; location.href = pd.url; return; }
-      if(pd && pd.ok && pd.review){
-        // בני עצר את המודעה לבדיקה של המערכת — לא גובים עכשיו
-        msg.innerHTML = '✓ המודעה התקבלה ותיבדק אצלנו.<br>לא חויבתם. אם המודעה תאושר, נשלח לכם קישור לתשלום'+(email?' למייל':'')+'.<br>לשאלות: @@PAPER_PHONE@@';
-        msg.classList.add('ok'); btn.textContent='התקבל ✓';
-        return;
-      }
       if(pd && (pd.ok || pd.saved)){
         // המודעה נשמרה אבל דף התשלום לא נפתח — לא להגיש שוב
         msg.innerHTML = '✓ המודעה נשמרה, אבל דף התשלום לא נפתח כרגע.<br>להשלמת התשלום צרו קשר: @@PAPER_PHONE@@';
