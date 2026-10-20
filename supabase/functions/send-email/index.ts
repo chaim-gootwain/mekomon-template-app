@@ -108,6 +108,82 @@ Deno.serve(async (req)=>{
         contentType: "application/pdf"
       });
     }
+    /* מייל עם קבצים מצורפים: denomailer שובר כותרות לא-ASCII (שם קובץ עברי
+       מקודד עם שבירות שורה בתוך ה-encoded-word) ולא עוטף base64 ארוך לשורות
+       של 76 תווים — הקובץ מגיע פגום ("הטעינה של מסמך ה-PDF נכשלה").
+       לכן מיילים עם צירופים נשלחים ב-SMTP גולמי עם MIME בנוי ידנית —
+       אותו מנגנון מוכח של send-clip. בלי צירופים — הנתיב הקיים (denomailer).
+       בנתיב הזה html לא נתמך — גוף המייל נשלח כטקסט. */
+    if (atts.length) {
+      const CRLF = String.fromCharCode(13, 10);
+      const _b64s = (str)=>btoa(String.fromCharCode.apply(null, Array.from(new TextEncoder().encode(str))));
+      const _wrap = (s)=>s.replace(/.{1,76}/g, (m)=>m + CRLF);
+      const _E = "=?UTF-8?B?";
+      const subjClean = String(subject || "הודעה מ@@PAPER_NAME@@").replace(/[\x00-\x1f\x7f]+/g, " ").trim();
+      const destClean = dest.replace(/[\r\n<>]/g, "");
+      const _bound = "emu_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const parts = [
+        "From: " + user,
+        "To: " + destClean,
+        "Reply-To: @@PAPER_EMAIL@@",
+        "Subject: " + _E + _b64s(subjClean) + "?=",
+        "Date: " + new Date().toUTCString(),
+        "MIME-Version: 1.0",
+        "Content-Type: multipart/mixed; boundary=\"" + _bound + "\"",
+        "",
+        "--" + _bound,
+        "Content-Type: text/plain; charset=\"UTF-8\"",
+        "Content-Transfer-Encoding: base64",
+        "",
+        _wrap(_b64s(String(body || ""))),
+      ];
+      for (const a of atts) {
+        const safeType = /^[\w.+-]+\/[\w.+-]+$/.test(String(a.contentType || "")) ? String(a.contentType) : "application/octet-stream";
+        parts.push(
+          "--" + _bound,
+          "Content-Type: " + safeType + "; name=\"" + _E + _b64s(String(a.filename)) + "?=\"",
+          "Content-Transfer-Encoding: base64",
+          "Content-Disposition: attachment; filename=\"" + _E + _b64s(String(a.filename)) + "?=\"",
+          "",
+          _wrap(String(a.content).replace(/[\r\n\s]/g, "")),
+        );
+      }
+      parts.push("--" + _bound + "--");
+      const _msg = parts.join(CRLF);
+      const _S = { err: "" };
+      const _conn = await Deno.connectTls({ hostname: "smtp.gmail.com", port: 465 });
+      const _te = new TextEncoder(), _td = new TextDecoder();
+      const _read = async ()=>{
+        const bb = new Uint8Array(8192);
+        const n = await _conn.read(bb);
+        const r = n ? _td.decode(bb.subarray(0, n)) : "";
+        if (/^\s*[45]\d\d/.test(r)) _S.err = r.trim().slice(0, 150);
+        return r;
+      };
+      const _cmd = async (c)=>{ await _conn.write(_te.encode(c + CRLF)); return await _read(); };
+      await _read();
+      await _cmd("EHLO mekomon.local");
+      await _cmd("AUTH LOGIN");
+      await _cmd(_b64s(user));
+      await _cmd(_b64s(pass));
+      await _cmd("MAIL FROM:<" + user + ">");
+      await _cmd("RCPT TO:<" + destClean + ">");
+      await _cmd("DATA");
+      await (async ()=>{
+        const _b = _te.encode(_msg + CRLF + "." + CRLF);
+        let _o = 0;
+        while (_o < _b.length) {
+          const _w = await _conn.write(_b.subarray(_o));
+          if (_w <= 0) break;
+          _o += _w;
+        }
+      })();
+      await _read();
+      try { await _conn.write(_te.encode("QUIT" + CRLF)); } catch (_e) {}
+      try { _conn.close(); } catch (_e) {}
+      if (_S.err) return json({ ok: false, error: "email-failed", detail: _S.err });
+      return json({ ok: true, to: dest });
+    }
     const client = new SMTPClient({
       connection: {
         hostname: "smtp.gmail.com",
