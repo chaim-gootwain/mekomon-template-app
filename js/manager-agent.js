@@ -480,9 +480,24 @@ async function mgrResolveProposal(toolUseId, outcome) {
    רגע; אחרי תשלום הקבלה והרישום בכרטסת אוטומטיים (ה-webhook של
    המופע). מופע בלי הפונקציה (404) — הכרטיס מסביר שאין סליקה מחוברת. */
 let _mgrPayLink = null;
+/* הנפקת קישור מנקודת הקצה של המופע. amount=0 → הקישור הקבוע (כל היתרה). */
+async function mgrPayLinkMint(cid, amount) {
+  const { data: sess } = await db.auth.getSession();
+  const tok = sess && sess.session && sess.session.access_token;
+  const res = await fetch('/.netlify/functions/pay-link', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + (tok || '') },
+    body: JSON.stringify(Object.assign({ customer_id: cid }, amount > 0 ? { amount } : {}))
+  });
+  if (res.status === 404) return { err: 'במופע הזה אין חיבור סליקה באשראי — אין דרך ליצור קישור תשלום.' };
+  const d = await res.json().catch(() => null);
+  if (!d || !d.ok) return { err: 'יצירת הקישור נכשלה: ' + ((d && (d.detail || d.error)) || ('HTTP ' + res.status)) };
+  return { link: d };
+}
 async function mgrProposeSendPayLink(p) {
   const inp = p.input || {};
   const cid = Number(inp.customer_id) || 0;
+  const reqAmount = Number(inp.amount) > 0 ? Math.round(Number(inp.amount) * 100) / 100 : 0;
   const fail = async (why) => {
     icSayErr(esc(why));
     await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
@@ -494,19 +509,8 @@ async function mgrProposeSendPayLink(p) {
   try {
     const { data: custs } = await db.from('customers').select('id,name,email,phone,whatsapp').eq('id', cid).limit(1);
     cust = custs && custs[0];
-    const { data: sess } = await db.auth.getSession();
-    const tok = sess && sess.session && sess.session.access_token;
-    const res = await fetch('/.netlify/functions/pay-link', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + (tok || '') },
-      body: JSON.stringify({ customer_id: cid })
-    });
-    if (res.status === 404) err = 'במופע הזה אין חיבור סליקה באשראי — אין דרך ליצור קישור תשלום.';
-    else {
-      const d = await res.json().catch(() => null);
-      if (!d || !d.ok) err = 'יצירת הקישור נכשלה: ' + ((d && (d.detail || d.error)) || ('HTTP ' + res.status));
-      else link = d;
-    }
+    const r = await mgrPayLinkMint(cid, reqAmount);
+    if (r.err) err = r.err; else link = r.link;
   } catch (e) { err = 'יצירת הקישור נכשלה: ' + String(e && e.message || e).slice(0, 120); }
   wait && wait.remove();
   mgrSetBusy(false);
@@ -522,18 +526,22 @@ async function mgrProposeSendPayLink(p) {
   let channel = inp.channel === 'whatsapp' ? 'whatsapp' : 'email';
   if (channel === 'email' && !hasEmail) channel = 'whatsapp';
   if (channel === 'whatsapp' && !hasPhone) channel = 'email';
+  const fixed = Number(link.fixed_amount) > 0 ? Number(link.fixed_amount) : 0;
   const msg = 'שלום ' + (cust.name || '') + ',\n' +
-    'לנוחיותך קישור לתשלום היתרה באשראי:\n' + link.url + '\n' +
-    'הדף נפתח על היתרה הפתוחה נכון לרגע התשלום, והקבלה נשלחת אוטומטית.\n' +
+    'לנוחיותך קישור לתשלום ' + (fixed ? 'של ' + money(fixed) : 'היתרה') + ' באשראי:\n' + link.url + '\n' +
+    (fixed ? 'הקבלה נשלחת אוטומטית לאחר התשלום.\n' : 'הדף נפתח על היתרה הפתוחה נכון לרגע התשלום, והקבלה נשלחת אוטומטית.\n') +
     'תודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@';
-  _mgrPayLink = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', cust, url: link.url, balance: Number(link.balance) || 0 };
+  _mgrPayLink = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', cust, url: link.url, balance: Number(link.balance) || 0, fixed };
   const card = document.createElement('div');
   card.className = 'ic-card';
   card.id = 'mgrPayLinkCard';
   card.innerHTML = `
     <div class="hd">💳 שליחת קישור תשלום באשראי — לאישור</div>
-    <div class="ic-warn">הקישור קבוע ללקוח ונפתח על <b>כל היתרה הפתוחה</b> בזמן הלחיצה (עכשיו: <b>${money(_mgrPayLink.balance)}</b>). אחרי תשלום — קבלה ורישום בכרטסת אוטומטיים.</div>
-    <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrPayLink.name)}" disabled></div>
+    <div class="ic-warn">דף התשלום נפתח בזמן הלחיצה — על הסכום שנקבע, ולא יותר מהיתרה הפתוחה אז (עכשיו: <b>${money(_mgrPayLink.balance)}</b>). אחרי תשלום — קבלה ורישום בכרטסת אוטומטיים.</div>
+    <div class="grid2">
+      <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrPayLink.name)}" disabled></div>
+      <div class="field"><label>סכום בש"ח כולל מע"מ (ריק = כל היתרה)</label><input type="number" id="mgrPayLinkAmt" step="any" min="0" value="${fixed || ''}"></div>
+    </div>
     <div class="grid2">
       <div class="field"><label>ערוץ</label><select id="mgrPayLinkCh">
         <option value="email" ${channel === 'email' ? 'selected' : ''} ${hasEmail ? '' : 'disabled'}>מייל${hasEmail ? ' (' + esc(cust.email) + ')' : ' — אין בכרטיס'}</option>
@@ -553,10 +561,29 @@ async function mgrPayLinkApprove() {
   const s = _mgrPayLink;
   if (!s) return;
   const ch = (document.getElementById('mgrPayLinkCh') || {}).value || 'email';
-  const msg = String((document.getElementById('mgrPayLinkMsg') || {}).value || '').trim();
+  let msg = String((document.getElementById('mgrPayLinkMsg') || {}).value || '').trim();
   if (!msg.includes(s.url)) { toast('נוסח ההודעה חייב לכלול את הקישור', true); return; }
   const btn = document.getElementById('mgrPayLinkBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  // הסכום שונה בכרטיס → מנפיקים קישור חדש לסכום המעודכן ומחליפים בהודעה
+  const amtRaw = (document.getElementById('mgrPayLinkAmt') || {}).value;
+  const amt = amtRaw === '' || amtRaw == null || !isFinite(Number(amtRaw)) || Number(amtRaw) <= 0 ? 0 : Math.round(Number(amtRaw) * 100) / 100;
+  if (amt !== (s.fixed || 0)) {
+    mgrSetBusy(true);
+    const r = await mgrPayLinkMint(s.cid, amt).catch(e => ({ err: String(e && e.message || e).slice(0, 120) }));
+    mgrSetBusy(false);
+    if (r.err || !r.link) {
+      if (btn) { btn.disabled = false; btn.textContent = '💳 שלח את הקישור'; }
+      toast('עדכון הקישור לסכום החדש נכשל: ' + (r.err || ''), true);
+      return;
+    }
+    msg = msg.split(s.url).join(r.link.url);
+    s.url = r.link.url;
+    s.fixed = amt;
+    s.balance = Number(r.link.balance) || s.balance;
+    const urlBox = document.querySelector('#mgrPayLinkCard input[dir="ltr"]');
+    if (urlBox) urlBox.value = s.url;
+  }
   let outcome = '';
   try {
     if (ch === 'email') {
@@ -581,11 +608,12 @@ async function mgrPayLinkApprove() {
     return;
   }
   document.getElementById('mgrPayLinkCard')?.remove();
-  try { await addInteraction('customer', s.cid, '💳 נשלח קישור תשלום באשראי (' + (ch === 'email' ? 'מייל' : 'וואטסאפ') + ') — יתרה ' + money(s.balance)); } catch (e) { }
-  icSayOk('✅ קישור התשלום של <b>' + esc(s.name) + '</b> ' + (ch === 'email' ? 'נשלח במייל' : 'נפתח בוואטסאפ') + ' (יתרה כרגע: <b>' + money(s.balance) + '</b>). אחרי התשלום הקבלה והרישום בכרטסת אוטומטיים.');
+  const amtTxt = s.fixed ? 'על סכום ' + money(s.fixed) : 'על כל היתרה';
+  try { await addInteraction('customer', s.cid, '💳 נשלח קישור תשלום באשראי ' + amtTxt + ' (' + (ch === 'email' ? 'מייל' : 'וואטסאפ') + ') — יתרה ' + money(s.balance)); } catch (e) { }
+  icSayOk('✅ קישור התשלום של <b>' + esc(s.name) + '</b> ' + (ch === 'email' ? 'נשלח במייל' : 'נפתח בוואטסאפ') + ' — ' + amtTxt + ' (יתרה כרגע: <b>' + money(s.balance) + '</b>). אחרי התשלום הקבלה והרישום בכרטסת אוטומטיים.');
   const id = s.toolUseId;
   _mgrPayLink = null;
-  await mgrResolveProposal(id, 'אושר. ' + outcome + '. היתרה הפתוחה בזמן השליחה: ' + money(s.balance) + '. אחרי תשלום הקבלה והרישום בכרטסת אוטומטיים — אל תציע רישום ידני.');
+  await mgrResolveProposal(id, 'אושר. ' + outcome + '. הקישור ' + amtTxt + '; היתרה הפתוחה בזמן השליחה: ' + money(s.balance) + '. אחרי תשלום הקבלה והרישום בכרטסת אוטומטיים — אל תציע רישום ידני.');
 }
 async function mgrPayLinkCancel() {
   const s = _mgrPayLink;
