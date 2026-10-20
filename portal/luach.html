@@ -167,10 +167,6 @@ const CATS = [
 // לא מקודדים בתבנית. מבנה: {סוג:{מדרגת מילים:{single,pkg}}}.
 // מופע בלי קישורים — כפתור התשלום מוסתר.
 let PAY_LINKS = {};
-// סליקה באשראי של המופע (פונקציית Netlify ‏luach-pay): כשקיימת — ההגשה עצמה
-// פותחת דף תשלום על המחיר שנשמר במסד, והתשלום מסומן אוטומטית אחרי אישור
-// הסליקה. מופע בלי הפונקציה (404) — הקישורים הקבועים + הצהרת "התשלום הוסדר".
-let CARD_PAY = false;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function wc(t){return String(t||'').trim().split(/\s+/).filter(Boolean).length;}
@@ -227,33 +223,12 @@ async function init(){
   const {data, error} = await db.rpc('portal_classified_meta');
   if(error||!data){document.getElementById('loading').textContent='שגיאה בטעינה — נסו לרענן';return;}
   META = data;
+  // קישורי תשלום של המופע (אם הוגדרו); כשל/היעדר — פשוט בלי כפתור תשלום
   try{
-    const cr = await fetch('/.netlify/functions/luach-pay', {cache:'no-store'});
-    const cd = cr.ok ? await cr.json() : null;
-    CARD_PAY = !!(cd && cd.ok && cd.enabled);
+    const pl = await db.rpc('portal_pay_links');
+    if(pl && pl.data && typeof pl.data === 'object') PAY_LINKS = pl.data;
   }catch(e){}
-  if(CARD_PAY){
-    document.getElementById('payLinkBtn').style.display='none';
-    document.getElementById('fPaidWrap').style.display='none';
-    document.getElementById('sendBtn').textContent='שליחה ומעבר לתשלום 💳';
-  } else {
-    // קישורי תשלום של המופע (אם הוגדרו); כשל/היעדר — פשוט בלי כפתור תשלום
-    try{
-      const pl = await db.rpc('portal_pay_links');
-      if(pl && pl.data && typeof pl.data === 'object') PAY_LINKS = pl.data;
-    }catch(e){}
-    if(!Object.keys(PAY_LINKS).length) document.getElementById('payLinkBtn').style.display='none';
-  }
-  // חזרה מדף הסליקה
-  const paid = new URLSearchParams(location.search).get('paid');
-  if(paid){
-    const m = document.getElementById('msg');
-    m.className = 'msg ' + (paid==='1' ? 'ok' : 'err');
-    m.innerHTML = paid==='1'
-      ? '✓ התשלום התקבל — תודה!<br>המודעה ממתינה לאישור ותפורסם בגיליון שבחרתם. חשבונית מס-קבלה תישלח אליכם.'
-      : 'התשלום לא הושלם ולא חויבתם.<br>המודעה נשמרה אצלנו — לסיום התשלום צרו קשר: @@PAPER_PHONE@@';
-    history.replaceState(null, '', location.pathname);
-  }
+  if(!Object.keys(PAY_LINKS).length) document.getElementById('payLinkBtn').style.display='none';
   // קטגוריות
   document.getElementById('fCat').innerHTML = CATS.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join('');
   // מחירי סוג
@@ -297,7 +272,7 @@ function updateSendGate(){
   const c=document.getElementById('fPaidChk'), b=document.getElementById('sendBtn');
   const words = wc(document.getElementById('fBody').value);
   const tier = payTier(TYPE, words);
-  if(b) b.disabled = !(CARD_PAY || (c && c.checked)) || !tier;
+  if(b) b.disabled = !(c && c.checked) || !tier;
 }
 
 async function submitAd(){
@@ -313,7 +288,7 @@ async function submitAd(){
   if(!body){msg.textContent='נא לכתוב את נוסח המודעה';msg.classList.add('err');return;}
   if(TYPE==='image' && !IMG_FILE){msg.textContent='בחרתם "עם תמונה" — נא לצרף קובץ תמונה';msg.classList.add('err');return;}
   if(!payTier(TYPE, wc(body))){msg.textContent='המודעה ארוכה מדי להגשה עצמית — צרו קשר: @@PAPER_PHONE@@';msg.classList.add('err');return;}
-  if(!CARD_PAY && !document.getElementById('fPaidChk').checked){msg.textContent='נא לסמן "התשלום הוסדר" כדי לשלוח';msg.classList.add('err');return;}
+  if(!document.getElementById('fPaidChk').checked){msg.textContent='נא לסמן "התשלום הוסדר" כדי לשלוח';msg.classList.add('err');return;}
 
   btn.disabled=true; btn.textContent='שולח...';
   try{
@@ -325,20 +300,6 @@ async function submitAd(){
       imgPath = 'classified/'+phone.replace(/\D/g,'')+'_'+Date.now()+'_img'+(_ie ? '.'+_ie : '');
       const {error:upErr} = await db.storage.from('ad-files').upload(imgPath, IMG_FILE);
       if(upErr) throw new Error('העלאת התמונה נכשלה — נסו שוב או בחרו ללא תמונה');
-    }
-    if(CARD_PAY){
-      // ההגשה והפתיחה של דף התשלום בצד השרת — הסכום נלקח מהמסד, לא מהדפדפן
-      const pr = await fetch('/.netlify/functions/luach-pay', {method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({name, phone, category:cat, ad_type:TYPE, body, issue_id:issue?Number(issue):null, package:pkg, image_path:imgPath||null})});
-      const pd = await pr.json().catch(()=>null);
-      if(pd && pd.ok && pd.url){ btn.textContent='עובר לתשלום...'; location.href = pd.url; return; }
-      if(pd && (pd.ok || pd.saved)){
-        // המודעה נשמרה אבל דף התשלום לא נפתח — לא להגיש שוב
-        msg.innerHTML = '✓ המודעה נשמרה, אבל דף התשלום לא נפתח כרגע.<br>להשלמת התשלום צרו קשר: @@PAPER_PHONE@@';
-        msg.classList.add('ok'); btn.textContent='נשמר ✓';
-        return;
-      }
-      throw new Error((pd && pd.error) || ('HTTP '+pr.status));
     }
     const {data,error} = await db.rpc('portal_submit_classified',{
       p_name:name, p_phone:phone, p_category:cat, p_ad_type:TYPE,

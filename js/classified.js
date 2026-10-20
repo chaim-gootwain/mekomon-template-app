@@ -56,16 +56,15 @@ function _clQueueHtml(rows) {
     const issues = grp.map(x => (cache.issues.find(i => i.id === x.issue_id) || {}).issue_number).filter(Boolean).join(', ');
     const typeHe = r.ad_type === 'image' ? 'תמונה' : r.ad_type === 'bold' ? 'מודגש' : 'רגיל';
     return `<tr>
-          <td><b>${esc(r.contact_name || nameOf('customers', r.customer_id))}</b><br><small class="muted">${esc(r.contact_phone || '')}</small>${r.payment_status === 'settled' ? '<br><span class="pill green" style="font-size:.66rem" title="התשלום אומת מול חברת הסליקה — הקבלה והרישום בכרטסת אוטומטיים">💳 שולם באשראי ✓</span>' : r.source === 'portal_public' ? '<br><span class="pill amber" style="font-size:.66rem" title="הסימון בטופס הפורטל הוא הצהרה בלבד — הטופס מחייב לסמן אותו כדי לשלוח">🟡 הצהרת לקוח בטופס — לוודא שהתשלום התקבל</span>' : ''}</td>
+          <td><b>${esc(r.contact_name || nameOf('customers', r.customer_id))}</b><br><small class="muted">${esc(r.contact_phone || '')}</small>${r.source === 'portal_public' ? '<br><span class="pill amber" style="font-size:.66rem" title="הסימון בטופס הפורטל הוא הצהרה בלבד — הטופס מחייב לסמן אותו כדי לשלוח">🟡 הצהרת לקוח בטופס — לוודא שהתשלום התקבל</span>' : ''}</td>
           <td>${_clCatHe(r.category)} · ${typeHe}${grp.length > 1 ? ' · <span class="pill amber">4+1</span>' : ''}</td>
           <td>${esc((r.body || '').slice(0, 46))}${(r.body || '').length > 46 ? '…' : ''}${r.image_path ? ' 📷' : ''}</td>
           <td>${esc(issues)}</td>
           <td><b>${money(total)}</b></td>
-          <td style="white-space:nowrap">${r.payment_status === 'settled' ? `
-            <button class="btn btn-sm" style="background:var(--ok);color:#fff" onclick="classifiedApprove(${r.id}, true)" title="אישור התוכן — התשלום כבר התקבל">✓ אשר</button>` : `
+          <td style="white-space:nowrap">
             <button class="btn btn-sm" style="background:var(--ok);color:#fff" onclick="classifiedApprove(${r.id}, true)" title="אישור + סימון שהתשלום הוסדר">✓ אשר + שולם</button>
             <button class="btn btn-sm btn-ghost" onclick="classifiedApprove(${r.id}, false)" title="אישור, החוב נשאר פתוח">אשר (חוב פתוח)</button>
-            <button class="btn btn-sm btn-ghost" style="color:var(--brand)" onclick="classifiedApproveFree(${r.id})" title="אישור בלי לגבות תשלום כלל — מבטל את החוב שנוצר (למשל מודעות גמ״ח)">🆓 אשר ללא תשלום</button>`}
+            <button class="btn btn-sm btn-ghost" style="color:var(--brand)" onclick="classifiedApproveFree(${r.id})" title="אישור בלי לגבות תשלום כלל — מבטל את החוב שנוצר (למשל מודעות גמ״ח)">🆓 אשר ללא תשלום</button>
             <button class="btn btn-sm btn-ghost" style="color:#c0392b" onclick="classifiedReject(${r.id})">דחה</button>
           </td></tr>`;
   }).join('')}</tbody>
@@ -84,9 +83,7 @@ async function classifiedApprove(id, settled) {
     if (r.status !== 'pending') { toast('המודעה כבר טופלה (' + r.status + ')'); openPage('classified'); return; }
     const usePkg = !!r.package_id;
     const grp = usePkg ? await run(db.from('classified_ads').select('*').eq('package_id', r.package_id)) : [r];
-    // שולם כבר באשראי מהטופס — הקבלה והרישום בכרטסת נעשו בשרת; כאן רק אישור התוכן
-    if (r.payment_status === 'settled') settled = false;
-    const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: r.payment_status === 'settled' ? 'settled' : settled ? 'settled' : 'pending' };
+    const upd = { status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString(), payment_status: settled ? 'settled' : 'pending' };
     if (usePkg) await db.from('classified_ads').update(upd).eq('package_id', r.package_id);
     else await db.from('classified_ads').update(upd).eq('id', id);
     if (settled) {
@@ -101,7 +98,7 @@ async function classifiedApprove(id, settled) {
         }
       }
     }
-    try { await addInteraction('customer', r.customer_id, '🗒️ מודעת לוח אושרה' + (r.payment_status === 'settled' ? ' (שולם באשראי)' : settled ? ' + התשלום הוסדר' : ' (חוב פתוח)')); } catch (e) { }
+    try { await addInteraction('customer', r.customer_id, '🗒️ מודעת לוח אושרה' + (settled ? ' + התשלום הוסדר' : ' (חוב פתוח)')); } catch (e) { }
     toast('✓ המודעה אושרה' + (settled ? ' + סומן שולם' : ''));
     openPage('classified');
   } catch (e) { toast('שגיאה: ' + (e.message || e), true); }
@@ -401,7 +398,7 @@ async function classifiedSectionGen() {
   let rows = [];
   try {
     rows = await run(db.from('classified_ads').select('*').eq('issue_id', issueId)
-      .eq('payment_status', 'settled').not('status', 'in', '("rejected","cancelled","pending")').order('category'));
+      .eq('payment_status', 'settled').not('status', 'in', '("rejected","cancelled")').order('category'));
   } catch (e) { toast('הטבלה עדיין לא נוצרה ב-DB', true); return; }
   const text = buildClassifiedSection(rows, issue.issue_number || '');
   const out = document.getElementById('clSecOut');
@@ -427,7 +424,7 @@ async function classifiedSectionDesigned(issueId) {
   let rows = [];
   try {
     rows = await run(db.from('classified_ads').select('*').eq('issue_id', issueId)
-      .eq('payment_status', 'settled').not('status', 'in', '("rejected","cancelled","pending")').order('category'));
+      .eq('payment_status', 'settled').not('status', 'in', '("rejected","cancelled")').order('category'));
   } catch (e) { toast('שגיאה בטעינת המודעות', true); return; }
   if (!rows.length) { toast('אין מודעות ששולמו בגיליון זה (רק מודעה ששולמה נכנסת למדור)', true); return; }
   toast('בונה עמוד מעוצב...');
