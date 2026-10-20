@@ -335,22 +335,7 @@ async function submitAd(){
       // ההגשה והפתיחה של דף התשלום בצד השרת — הסכום נלקח מהמסד, לא מהדפדפן
       const pr = await fetch('/.netlify/functions/luach-pay', {method:'POST', headers:{'content-type':'application/json'},
         body: JSON.stringify({name, phone, email, category:cat, ad_type:TYPE, body, issue_id:issue?Number(issue):null, package:pkg, image_path:imgPath||null})});
-      let pd = await pr.json().catch(()=>null);
-      // הבדיקה עוד רצה ברקע — שואלים עד דקה
-      if(pd && pd.ok && pd.job){
-        const until = Date.now() + 60000;
-        while(Date.now() < until){
-          await new Promise(r=>setTimeout(r,1500));
-          const s = await fetch('/.netlify/functions/luach-pay?job='+encodeURIComponent(pd.job),{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
-          if(!s || s.status==='working') continue;
-          if(s.status==='pay' && s.url){ pd = {ok:true, url:s.url}; break; }
-          if(s.status==='review'){ pd = {ok:true, review:true}; break; }
-          pd = {ok:false, saved:true}; break;
-        }
-        if(pd.job) pd = {ok:false, saved:true};
-      }
-      // תם הזמן בשרת — המודעה כנראה נשמרה; לא להזמין הגשה חוזרת
-      if(!pd && pr.status===504) pd = {ok:false, saved:true};
+      const pd = await pr.json().catch(()=>null);
       if(pd && pd.ok && pd.url){ btn.textContent='עובר לתשלום...'; location.href = pd.url; return; }
       if(pd && pd.ok && pd.review){
         // בני עצר את המודעה לבדיקה של המערכת — לא גובים עכשיו
