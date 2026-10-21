@@ -146,6 +146,13 @@ function today() { const d = new Date(); return d.getFullYear() + '-' + String(d
    את תאריך ה-UTC, וכניסת לילה (00:30) נרשמת ליום/חודש הקודם */
 function localDay(ts) { if (!ts) return ''; const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function thisMonth() { return today().slice(0, 7); }
+// הגיליון הקרוב (תאריך הופעה מהיום והלאה, המוקדם ביותר) — ברירת מחדל לשדות "גיליון יעד"
+function nextIssueId() {
+const t = today();
+const next = (cache.issues || []).filter(i => i.publish_date && i.publish_date >= t)
+.sort((a, b) => a.publish_date.localeCompare(b.publish_date))[0];
+return next ? next.id : '';
+}
 function monthEnd(ym) { const [y, m] = ym.split('-').map(Number); return ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0'); }
 
 function toast(msg, isError = false) {

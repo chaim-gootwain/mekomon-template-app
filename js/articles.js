@@ -70,7 +70,7 @@ const ARTICLE_FIELDS = () => [
 options: cache.profiles.filter(p => p.active).map(p => ({ v: p.id, t: p.full_name })) },
 { name: 'author_name', label: 'או כותב חיצוני (שם חופשי)' },
 { name: 'section_id', label: 'מדור', type: 'select', options: 'sections' },
-{ name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues' },
+{ name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues', default: nextIssueId() },
 { name: 'deadline', label: 'דדליין', type: 'date' },
 { name: 'est_length', label: 'אורך משוער (מילים/עמוד)' },
 { name: 'status', label: 'סטטוס', type: 'select', required: true, default: 'idea',
