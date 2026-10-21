@@ -39,7 +39,7 @@ function leadDealForm(customerId, mode) {
       <select id="ldSize" onchange="_ldealFillPrice()"><option value="">— בחר גודל —</option>${_ldealSizeOptions('')}</select></div>
 
     ${mode === 'single' ? `
-      <div class="field"><label>תיאור המודעה</label><input id="ldTitle" placeholder="למשל: מודעת פתיחה / ברכה"></div>
+      <div class="field"><label>תיאור המודעה</label><input id="ldTitle" value="${esc(c.name || '')}" placeholder="למשל: מודעת פתיחה / ברכה"></div>
       <div class="field"><label>גיליון</label>
         <select id="ldIssue">${issues.map(i => `<option value="${i.id}" ${nextIssue && i.id === nextIssue.id ? 'selected' : ''}>גיליון ${i.issue_number}${i.publish_date ? ' — ' + heDate(i.publish_date) : ''}</option>`).join('')}</select></div>
       <div class="field"><label>מחיר לפרסום (₪, לפני מע"מ)</label><input id="ldPrice" type="number" dir="ltr" placeholder="ריק = לפי המחירון"></div>

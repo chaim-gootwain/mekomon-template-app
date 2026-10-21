@@ -229,7 +229,7 @@ opts.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'select
 else if (f.type === 'customer') {
 // בורר לקוחות משותף (חיפוש + הוסף לקוח חדש). נפילה בטוחה ל-select אם המודול לא נטען.
 if (typeof custPickerHtml === 'function') {
-inp = custPickerHtml({ base: 'f_' + f.name, value: v, allowNew: f.allowNew !== false, placeholder: f.placeholder, form: true });
+inp = custPickerHtml({ base: 'f_' + f.name, value: v, allowNew: f.allowNew !== false, placeholder: f.placeholder, form: true, onpick: f.onpick });
 } else {
 const _co = (cache.customers || []).map(r => ({ v: r.id, t: r.name }));
 inp = `<select id="f_${f.name}">` + (f.required ? '' : `<option value="">— ללא —</option>`) +
