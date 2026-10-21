@@ -44,7 +44,7 @@ ${String(cache.settings.ads_auto_route_enabled || '0') === '1' ? '<p class="mute
 <input id="adSearch" placeholder="חיפוש..." oninput="adsDraw()" style="min-width:200px">
 <select id="adIssueFilter" onchange="adsDraw()">
 <option value="">כל הגיליונות</option>
-${cache.issues.map(i => `<option value="${i.id}">גיליון ${i.issue_number}</option>`).join('')}
+${cache.issues.map(i => `<option value="${i.id}" ${String(i.id) === String(nextIssueId()) ? 'selected' : ''}>גיליון ${i.issue_number}</option>`).join('')}
 </select>
 </div>
 <div class="card" id="adsTable"></div>`;
@@ -87,9 +87,18 @@ renderTable(document.getElementById('adsTable'), rows, [
 }
 
 /* --- הוספה ידנית --- */
+// תיאור המודעה = שם הלקוח כברירת מחדל; מתעדכן בהחלפת לקוח כל עוד לא נערך ידנית
+function _adTitleFromCustomer(id) {
+const t = document.getElementById('f_title'); if (!t) return;
+if (t.value.trim() && t.value !== t.dataset.auto && !(cache.customers || []).some(c => c.name === t.value)) return;
+t.value = nameOf('customers', id) || '';
+t.dataset.auto = t.value;
+}
 function adAdd(prefill) {
+prefill = { ...(prefill || {}) };
+if (prefill.customer_id && !prefill.title) prefill.title = nameOf('customers', prefill.customer_id) || '';
 openForm('מודעה חדשה', [
-{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true },
+{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true, onpick: _adTitleFromCustomer },
 { name: 'title', label: 'תיאור המודעה', required: true },
 { name: 'price_item_id', label: 'גודל (מהמחירון)', type: 'select', options: 'priceList' },
 { name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues', default: nextIssueId() },
