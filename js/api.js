@@ -222,7 +222,7 @@ const opts = (typeof f.options === 'string'
 ? cache[f.options].map(r => ({ v: r.id, t: f.options === 'issues' ? 'גיליון ' + r.issue_number : r.name }))
 : f.options);
 inp = `<select id="f_${f.name}">` +
-(f.required ? '' : `<option value="">— ללא —</option>`) +
+(f.required ? (f.placeholder ? `<option value="">${esc(f.placeholder)}</option>` : '') : `<option value="">— ללא —</option>`) +
 opts.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.t)}</option>`).join('') +
 `</select>`;
 }

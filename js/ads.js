@@ -101,7 +101,7 @@ openForm('מודעה חדשה', [
 { name: 'customer_id', label: 'לקוח', type: 'customer', required: true, onpick: _adTitleFromCustomer },
 { name: 'title', label: 'תיאור המודעה', required: true },
 { name: 'price_item_id', label: 'גודל (מהמחירון)', type: 'select', options: 'priceList' },
-{ name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues', default: nextIssueId() },
+{ name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues', default: nextIssueId(), required: true, placeholder: '— בחר גיליון —' },
 { name: 'requested_placement', label: 'מיקום מבוקש' },
 { name: 'price', label: 'מחיר (₪, ריק = לפי המחירון)', type: 'number' },
 { name: 'discount', label: 'הנחה (₪)', type: 'number', default: 0 },

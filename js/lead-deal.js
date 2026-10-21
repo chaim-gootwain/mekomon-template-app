@@ -86,6 +86,7 @@ async function leadDealSave(customerId) {
     if (typeof checkCustomerStatusGate === 'function') { const okS = await checkCustomerStatusGate(customerId, mode === 'single' ? 'הוספת מודעה' : 'פתיחת חוזה'); if (!okS) return; }
     if (mode === 'single') {
       const issueId = Number((document.getElementById('ldIssue') || {}).value) || null;
+      if (!issueId) { toast('אי אפשר להכניס מודעה בלי גיליון — צור גיליון קודם', true); return; }
       const title = (document.getElementById('ldTitle') || {}).value || (item ? item.name : 'מודעה');
       const price = priceRaw !== '' ? Number(priceRaw) : (item ? Number(item.price) : 0);
       const rec = {
