@@ -202,7 +202,10 @@ Deno.serve(async (req)=>{
       payment_method: payment?.method || null,
       vat_included: !!vat_included,
       total: paymentArr.length ? payload.price_total : null,
-      raw
+      // _sent: השורות וההערה כפי שנשלחו — כדי שאפשר יהיה לקרוא את פירוט המסמך
+      // אחר כך (למשל "חשבונית מס לפי חשבון עסקה X" בסוכן). בלי מיגרציה: raw
+      // היא עמודת jsonb קיימת, התגובה של EZcount נשמרת לצדה כמו קודם.
+      raw: { ...(raw || {}), _sent: { items: itemArr, comment: comment ? String(comment) : null, vat_included: !!vat_included } }
     };
     if (success) {
       docRow.status = "issued";

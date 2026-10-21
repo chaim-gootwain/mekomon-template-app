@@ -66,6 +66,8 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - משימות: "תזכיר לי ל..." / "מה המשימות שלי" → get_customer_tasks לקריאה, propose_add_task להוספה (משימה יושבת על כרטיס לקוח — חובה customer_id). תאריכים יחסיים ("יום חמישי", "עוד שבוע") — חשב לתאריך לפי התאריך של היום.
 - עסקה/חבילה של כמה פרסומים עם גיליון התחלה או רצף גיליונות → propose_new_deal. אם כל הפרסומים באותו גיליון אחד ("8 עמודים בגיליון 305") → propose_new_deal עם same_issue=true ו-start_issue=אותו גיליון. אמר המנהל בפירוש "בלי מסמך" / "בלי חשבון עסקה" → include_proforma=false; "בלי חוזה" → include_contract=false. אחרי אישור הכרטיס דווח רק את מה שכתוב ב-tool_result ("הוקם בפועל: ...") — אל תניח שהכול הוקם.
 - תיאור שורה (description): השירות בלבד, בלי שם הלקוח ובלי הסכום. אין תיאור → "פרסום".
+- מסמך לפי מסמך קיים ("חשבונית מס לפי חשבון עסקה 90043", "אותו פירוט") → get_document_lines עם מספר המסמך, ואז propose_issue_document עם השורות שחזרו (price_includes_vat לכל שורה לפי vat_included שחזר). חזר lines=null — הצג למנהל את החלופות מה-note ושאל איך להמשיך.
+- הערה בגוף המסמך ("תרשום בחשבונית ש...", "תוסיף הערה") → comment ב-propose_issue_document. ההערה מודפסת על המסמך עצמו וניתנת לעריכה בכרטיס.
 
 סגנון: ענה בעברית, קצר ולעניין. סכומים בש"ח עם שני ספרות עשרוניות לכל היותר. כשאתה מציג רשימות — שורות קצרות, לא טבלאות ענק. אחרי שהמנהל אישר כרטיס (tool_result עם "אושר") — אשר בקצרה והמשך אם נשארו שלבים; אחרי ביטול — קבל את זה בלי להתווכח.
 הצעות המשך: כשיש המשך טבעי ומועיל, סיים את התשובה בשורה נפרדת אחרונה בפורמט המדויק: הצעות: אפשרות א | אפשרות ב (עד 3, קצרות, כל אחת ניסוח שאפשר לשלוח כמו-שהוא). בלי המשך מתבקש — אל תוסיף את השורה.
@@ -156,6 +158,18 @@ const TOOLS = [
         limit: { type: 'number', description: 'כמה מסמכים אחרונים (ברירת מחדל 10, עד 30)' }
       },
       required: ['customer_id']
+    }
+  },
+  {
+    name: 'get_document_lines',
+    description: 'שורות הפירוט של מסמך קיים (למשל חשבון עסקה) — להפקת מסמך חדש עם אותו פירוט ("חשבונית מס לפי חשבון עסקה 90043"). מחזיר description/quantity/unit_price לכל שורה + דגל מע"מ + הערה אם נשמרה. למסמכים ישנים ייתכן שאין פירוט שמור — תקבל note עם חלופות.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number', description: 'מזהה הלקוח' },
+        doc_number: { type: 'string', description: 'מספר המסמך (למשל "90043")' }
+      },
+      required: ['customer_id', 'doc_number']
     }
   },
   {
@@ -349,6 +363,7 @@ const TOOLS = [
           }
         },
         payment_method: { type: 'string', enum: ['credit', 'cash', 'transfer', 'check'], description: 'חובה לקבלה/מס-קבלה אם ידוע; אחרת השמט' },
+        comment: { type: 'string', description: 'הערה שתודפס בגוף המסמך (אופציונלי) — רק אם המנהל ביקש. מופיעה בכרטיס וניתנת לעריכה' },
         target_charge_ids: { type: 'array', items: { type: 'number' }, maxItems: 20, description: 'לקבלה/מס-קבלה בלבד: שיוך התשלום בספר החוב לחיובים מסוימים (charge_id מ-get_customer_status) במקום פריסה מהחוב הישן לחדש. השתמש כשהמנהל נוקב חיוב/חשבון עסקה מסוים' },
         target_label: { type: 'string', description: 'תיאור קצר של היעד לתצוגה בכרטיס (למשל "חיוב 1482 — ח.ע. 10217")' }
       },
@@ -586,6 +601,42 @@ async function runReadTool(caller, name, input) {
       pdf_url: d.pdf_url || null
     }));
     return { documents: docs, note: 'doc_kind: tax_invoice=חשבונית מס, invoice_receipt=מס-קבלה, receipt=קבלה, proforma=חשבון עסקה, credit=זיכוי. תן קישורי PDF בפורמט markdown.' };
+  }
+
+  if (name === 'get_document_lines') {
+    const cid = Number(input && input.customer_id);
+    const num = String(input && input.doc_number || '').trim();
+    if (!cid || !num) return { error: 'חסר customer_id או doc_number' };
+    const { data, error } = await caller.from('documents').select('*')
+      .eq('customer_id', cid).eq('doc_number', num).order('id', { ascending: false }).limit(1);
+    if (error) return { error: error.message };
+    const d = data && data[0];
+    if (!d) return { error: 'מסמך ' + num + ' לא נמצא אצל הלקוח הזה' };
+    let lines = null, comment = null, vat = !!d.vat_included;
+    const sent = d.raw && d.raw._sent;
+    if (sent && Array.isArray(sent.items) && sent.items.length) {
+      lines = sent.items.map((it) => ({ description: it.details, quantity: Number(it.amount) || 1, unit_price: Number(it.price) || 0 }));
+      comment = sent.comment || null;
+      if (typeof sent.vat_included === 'boolean') vat = sent.vat_included;
+    } else {
+      // מסמכים שהופקו מהצ'אט לפני שהתחלנו לשמור _sent: הפירוט נשמר בבקשת הצ'אט
+      const { data: reqs } = await caller.from('invoice_requests').select('final_fields')
+        .eq('icount_doc_number', num).order('id', { ascending: false }).limit(1);
+      const ff = reqs && reqs[0] && reqs[0].final_fields;
+      if (ff && Array.isArray(ff.items) && ff.items.length) {
+        lines = ff.items.map((it) => ({ description: it.details, quantity: Number(it.amount) || 1, unit_price: Number(it.price) || 0 }));
+        if (typeof ff.vat_included === 'boolean') vat = ff.vat_included;
+        comment = ff.comment || null;
+      }
+    }
+    if (!lines) return {
+      doc_number: num, doc_kind: d.doc_kind, total: d.total, lines: null,
+      note: 'אין פירוט שורות שמור למסמך הזה (הופק לפני העדכון או מחוץ למסלול). הצע למנהל: שורה כוללת אחת, פירוט מהפרסומים (get_customer_publications), או שידביק את השורות.'
+    };
+    return {
+      doc_number: num, doc_kind: d.doc_kind, total: d.total, vat_included: vat, comment, lines,
+      note: 'המחירים לפי vat_included: true=כולל מע"מ, false=לפני מע"מ. בהפקה חדשה העבר price_includes_vat תואם לכל שורה.'
+    };
   }
 
   if (name === 'get_customer_publications') {
