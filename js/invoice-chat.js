@@ -383,6 +383,8 @@ function invChatRenderCard() {
     <div class="ic-lh"><span>תיאור</span><span>כמות</span><span>מחיר יח׳</span><span>כולל מע"מ</span><span></span></div>
     <div id="icLines">${invChatLinesHtml()}</div>
     <button class="btn btn-sm btn-ghost" onclick="invChatAddLine()">+ הוסף שורה</button>
+    <div class="field" style="margin-top:8px"><label>הערה בגוף המסמך (אופציונלי — מודפסת על המסמך)</label>
+      <input type="text" value="${esc(f.comment || '')}" onchange="_icState.fields.comment=this.value"></div>
     ${isPay ? `<div class="field" style="margin-top:10px;max-width:240px"><label>אמצעי תשלום</label>
       <select onchange="invChatCardSetPay(this.value)">
         ${Object.keys(INVCHAT_PAY_HE).map(k => `<option value="${k}" ${k === f.payment_method ? 'selected' : ''}>${INVCHAT_PAY_HE[k]}</option>`).join('')}
@@ -538,6 +540,7 @@ function invChatEzcountBody(f) {
     doc_date: dstr,
   };
   if (!f.customer_id && f.customer_name) body.client_name = String(f.customer_name).trim();
+  if (f.comment && String(f.comment).trim()) body.comment = String(f.comment).trim().slice(0, 300); // מודפסת בגוף המסמך (ezcount-doc)
   if (isPay) {
     // קבלה בלבד: הסכום כפי שנגבה (השורות המקוריות). מס-קבלה: מגלמים מע"מ אם צריך.
     const rawBase = lines.reduce((s, l) => s + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);

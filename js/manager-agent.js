@@ -1354,6 +1354,7 @@ async function mgrOpenProposal(p) {
           }))
           : [{ description: 'פרסום', quantity: 1, unit_price: 0, price_includes_vat: false }],
         payment_method: inp.payment_method || null,
+        comment: String(inp.comment || '').trim(), // הערה בגוף המסמך — ניתנת לעריכה בכרטיס
         // שיוך תשלום לחיובים מסוימים בספר החוב (קבלה/מס-קבלה בלבד)
         target_charge_ids: Array.isArray(inp.target_charge_ids) ? inp.target_charge_ids.map(Number).filter(n => n > 0).slice(0, 20) : [],
         target_label: String(inp.target_label || '').trim(),
