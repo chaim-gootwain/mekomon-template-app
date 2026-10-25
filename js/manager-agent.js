@@ -503,7 +503,8 @@ async function mgrProposeSendPayLink(p) {
   const inp = p.input || {};
   const cid = Number(inp.customer_id) || 0;
   const reqAmount = Number(inp.amount) > 0 ? Math.round(Number(inp.amount) * 100) / 100 : 0;
-  const reqExtra = { note: String(inp.note || '').trim().slice(0, 120), ad_id: Number(inp.ad_id) > 0 ? Number(inp.ad_id) : 0 };
+  const reqMax = Math.min(12, Math.max(0, parseInt(inp.max_payments, 10) || 0));
+  const reqExtra = { note: String(inp.note || '').trim().slice(0, 120), ad_id: Number(inp.ad_id) > 0 ? Number(inp.ad_id) : 0, max_payments: reqMax };
   const fail = async (why) => {
     icSayErr(esc(why));
     await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
@@ -539,6 +540,7 @@ async function mgrProposeSendPayLink(p) {
     (fixed ? 'הקבלה נשלחת אוטומטית לאחר התשלום.\n' : 'הדף נפתח על היתרה הפתוחה נכון לרגע התשלום, והקבלה נשלחת אוטומטית.\n') +
     'תודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@';
   _mgrPayLink = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', cust, url: link.url, balance: Number(link.balance) || 0, fixed, note: noteTxt, adId: Number(link.ad_id) || reqExtra.ad_id || 0, maxPay: Number(link.max_payments) || 0 };
+  // מופע שלא מכיר max_payments מחזיר קישור בלעדיו — הבחירה תישאר "ברירת מחדל" ולא תוצג כאילו נקלטה
   const payOpts = '<option value="0">ברירת המחדל של המערכת</option>' +
     Array.from({ length: 12 }, (_, i) => i + 1).map(n => `<option value="${n}" ${_mgrPayLink.maxPay === n ? 'selected' : ''}>${n === 1 ? 'תשלום אחד (בלי תשלומים)' : 'עד ' + n + ' תשלומים'}</option>`).join('');
   const card = document.createElement('div');
