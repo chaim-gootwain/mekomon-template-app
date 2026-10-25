@@ -481,7 +481,8 @@ async function mgrResolveProposal(toolUseId, outcome) {
    המופע). מופע בלי הפונקציה (404) — הכרטיס מסביר שאין סליקה מחוברת. */
 let _mgrPayLink = null;
 /* הנפקת קישור מנקודת הקצה של המופע. amount=0 → הקישור הקבוע (כל היתרה).
-   extra: { note, ad_id } — הקשר לקישור סכום (מודפס על המסמך / משייך למודעה). */
+   extra: { note, ad_id } — הקשר לקישור סכום (מודפס על המסמך / משייך למודעה);
+   max_payments — כמה תשלומים הלקוח יוכל לבחור בדף הסליקה (0 = ברירת המחדל של המופע). */
 async function mgrPayLinkMint(cid, amount, extra) {
   const { data: sess } = await db.auth.getSession();
   const tok = sess && sess.session && sess.session.access_token;
@@ -490,7 +491,8 @@ async function mgrPayLinkMint(cid, amount, extra) {
     headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + (tok || '') },
     body: JSON.stringify(Object.assign({ customer_id: cid }, amount > 0 ? { amount } : {},
       amount > 0 && extra && extra.note ? { note: extra.note } : {},
-      amount > 0 && extra && Number(extra.ad_id) > 0 ? { ad_id: Number(extra.ad_id) } : {}))
+      amount > 0 && extra && Number(extra.ad_id) > 0 ? { ad_id: Number(extra.ad_id) } : {},
+      extra && Number(extra.max_payments) > 0 ? { max_payments: Number(extra.max_payments) } : {}))
   });
   if (res.status === 404) return { err: 'במופע הזה אין חיבור סליקה באשראי — אין דרך ליצור קישור תשלום.' };
   const d = await res.json().catch(() => null);
@@ -536,7 +538,9 @@ async function mgrProposeSendPayLink(p) {
     'לנוחיותך קישור לתשלום ' + (fixed ? 'של ' + money(fixed) + (noteTxt ? ' (' + noteTxt + ')' : '') : 'היתרה') + ' באשראי:\n' + link.url + '\n' +
     (fixed ? 'הקבלה נשלחת אוטומטית לאחר התשלום.\n' : 'הדף נפתח על היתרה הפתוחה נכון לרגע התשלום, והקבלה נשלחת אוטומטית.\n') +
     'תודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@';
-  _mgrPayLink = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', cust, url: link.url, balance: Number(link.balance) || 0, fixed, note: noteTxt, adId: Number(link.ad_id) || reqExtra.ad_id || 0 };
+  _mgrPayLink = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', cust, url: link.url, balance: Number(link.balance) || 0, fixed, note: noteTxt, adId: Number(link.ad_id) || reqExtra.ad_id || 0, maxPay: Number(link.max_payments) || 0 };
+  const payOpts = '<option value="0">ברירת המחדל של המערכת</option>' +
+    Array.from({ length: 12 }, (_, i) => i + 1).map(n => `<option value="${n}" ${_mgrPayLink.maxPay === n ? 'selected' : ''}>${n === 1 ? 'תשלום אחד (בלי תשלומים)' : 'עד ' + n + ' תשלומים'}</option>`).join('');
   const card = document.createElement('div');
   card.className = 'ic-card';
   card.id = 'mgrPayLinkCard';
@@ -550,6 +554,7 @@ async function mgrProposeSendPayLink(p) {
       <div class="field"><label>סכום בש"ח כולל מע"מ (ריק = כל היתרה)</label><input type="number" id="mgrPayLinkAmt" step="any" min="0" value="${fixed || ''}"></div>
     </div>
     ${fixed ? `<div class="field"><label>על מה התשלום (יודפס על המסמך)</label><input type="text" id="mgrPayLinkNote" value="${esc(noteTxt)}"></div>` : ''}
+    <div class="field"><label>מקסימום תשלומים שהלקוח יוכל לבחור</label><select id="mgrPayLinkMax">${payOpts}</select></div>
     <div class="grid2">
       <div class="field"><label>ערוץ</label><select id="mgrPayLinkCh">
         <option value="email" ${channel === 'email' ? 'selected' : ''} ${hasEmail ? '' : 'disabled'}>מייל${hasEmail ? ' (' + esc(cust.email) + ')' : ' — אין בכרטיס'}</option>
@@ -577,9 +582,10 @@ async function mgrPayLinkApprove() {
   const amtRaw = (document.getElementById('mgrPayLinkAmt') || {}).value;
   const amt = amtRaw === '' || amtRaw == null || !isFinite(Number(amtRaw)) || Number(amtRaw) <= 0 ? 0 : Math.round(Number(amtRaw) * 100) / 100;
   const noteNow = String(((document.getElementById('mgrPayLinkNote') || {}).value ?? s.note) || '').trim().slice(0, 120);
-  if (amt !== (s.fixed || 0) || (amt > 0 && noteNow !== (s.note || ''))) {
+  const maxNow = Number((document.getElementById('mgrPayLinkMax') || {}).value) || 0;
+  if (amt !== (s.fixed || 0) || (amt > 0 && noteNow !== (s.note || '')) || maxNow !== (s.maxPay || 0)) {
     mgrSetBusy(true);
-    const r = await mgrPayLinkMint(s.cid, amt, { note: noteNow, ad_id: s.adId }).catch(e => ({ err: String(e && e.message || e).slice(0, 120) }));
+    const r = await mgrPayLinkMint(s.cid, amt, { note: noteNow, ad_id: s.adId, max_payments: maxNow }).catch(e => ({ err: String(e && e.message || e).slice(0, 120) }));
     mgrSetBusy(false);
     if (r.err || !r.link) {
       if (btn) { btn.disabled = false; btn.textContent = '💳 שלח את הקישור'; }
@@ -590,6 +596,7 @@ async function mgrPayLinkApprove() {
     s.url = r.link.url;
     s.fixed = amt;
     s.note = amt > 0 ? noteNow : '';
+    s.maxPay = maxNow;
     s.balance = Number(r.link.balance) || s.balance;
     const urlBox = document.querySelector('#mgrPayLinkCard input[dir="ltr"]');
     if (urlBox) urlBox.value = s.url;
