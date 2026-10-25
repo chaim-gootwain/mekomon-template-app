@@ -718,7 +718,6 @@ openCustomerCard(id);
 }
 
 /* ---- כרטיס לקוח נקי: תפריט "עוד", פרטים מלאים, קישור פורטל ---- */
-function custToggleMore() { const m = document.getElementById('ccMoreMenu'); if (m) m.classList.toggle('hidden'); }
 function custToggleDetails(btn) { const g = document.getElementById('ccGrid'); if (!g) return; const open = g.classList.toggle('hidden') === false; if (btn) btn.textContent = open ? 'פחות פרטים ▲' : 'כל הפרטים ▾'; }
 function custPortalShow() { const b = document.getElementById('ccPortalBox'); if (b) { b.classList.toggle('hidden'); const inp = b.querySelector('input'); if (inp && !b.classList.contains('hidden')) inp.select(); } }
 
