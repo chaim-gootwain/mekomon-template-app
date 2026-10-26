@@ -76,6 +76,8 @@ const AI_LABELS = Object.fromEntries(AI_FIELDS);
 /* ערך "ריק" מהניתוח — לא מציגים תא (0, [], {}, "none", "No objections identified"...) */
 function aiIsEmpty(s) {
   const t = String(s == null ? '' : s).trim().replace(/[.\s]+$/, '').toLowerCase();
+  // שורות ישנות שנשמרו כטקסט "[object Object], [object Object]" — המידע אבד בקליטה
+  if (/^(\[object object\][,\s]*)+$/.test(t)) return true;
   return !t || t === '0' || t === '[]' || t === '{}' || t === 'null' || t === 'none' || t === 'n/a'
     || t === '-' || /^no (specific )?(objections?|needs|questions|action items?)( \w+)*$/.test(t);
 }
