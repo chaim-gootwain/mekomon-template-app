@@ -383,8 +383,12 @@ function invChatRenderCard() {
     <div class="ic-lh"><span>תיאור</span><span>כמות</span><span>מחיר יח׳</span><span>כולל מע"מ</span><span></span></div>
     <div id="icLines">${invChatLinesHtml()}</div>
     <button class="btn btn-sm btn-ghost" onclick="invChatAddLine()">+ הוסף שורה</button>
-    <div class="field" style="margin-top:8px"><label>הערה בגוף המסמך (אופציונלי — מודפסת על המסמך)</label>
-      <input type="text" value="${esc(f.comment || '')}" onchange="_icState.fields.comment=this.value"></div>
+    <div class="grid2" style="margin-top:8px">
+      <div class="field"><label>הערה בגוף המסמך (אופציונלי — מודפסת על המסמך)</label>
+        <input type="text" value="${esc(f.comment || '')}" onchange="_icState.fields.comment=this.value"></div>
+      <div class="field"><label>תאריך המסמך</label>
+        <input type="date" value="${esc((f.doc_date || today()).slice(0, 10))}" onchange="_icState.fields.doc_date=this.value"></div>
+    </div>
     ${isPay ? `<div class="field" style="margin-top:10px;max-width:240px"><label>אמצעי תשלום</label>
       <select onchange="invChatCardSetPay(this.value)">
         ${Object.keys(INVCHAT_PAY_HE).map(k => `<option value="${k}" ${k === f.payment_method ? 'selected' : ''}>${INVCHAT_PAY_HE[k]}</option>`).join('')}
