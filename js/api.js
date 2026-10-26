@@ -440,6 +440,14 @@ async function phoneCall(phone, entityType, entityId) {
     const { error: logErr } = await db.from('call_log').insert(rec);
     if (logErr) console.error('call_log', logErr);
   } catch (e) { console.error('call_log', e); }
+  /* חיוג לליד חדש → "נוצר קשר" (גם טריגר במסד, מיגרציית lead_auto_contacted) */
+  if (entityType === 'lead' && entityId != null) {
+    try {
+      await db.from('leads').update({ status: 'contacted' }).eq('id', entityId).eq('status', 'new');
+      const l = (typeof _leads !== 'undefined') ? _leads.find(x => x.id === Number(entityId)) : null;
+      if (l && l.status === 'new') l.status = 'contacted';
+    } catch (e) { console.error('lead contacted', e); }
+  }
 }
 
 /* ---------- 10. מעקב היסטוריה — Audit (פיצ'ר #11) ----------
