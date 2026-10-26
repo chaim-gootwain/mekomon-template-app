@@ -71,16 +71,71 @@ const AI_FIELDS = [
   ['key_client_questions', 'שאלות מפתח'], ['sales_techniques', 'טכניקות מכירה'],
   ['missed_opportunities', 'הזדמנויות שהוחמצו'], ['trust_sentences', 'משפטי אמון'],
 ];
+const AI_LABELS = Object.fromEntries(AI_FIELDS);
+
+/* ערך "ריק" מהניתוח — לא מציגים תא (0, [], {}, "none", "No objections identified"...) */
+function aiIsEmpty(s) {
+  const t = String(s == null ? '' : s).trim().replace(/[.\s]+$/, '').toLowerCase();
+  return !t || t === '0' || t === '[]' || t === '{}' || t === 'null' || t === 'none' || t === 'n/a'
+    || t === '-' || /^no (specific )?(objections?|needs|questions|action items?)( \w+)*$/.test(t);
+}
+
+/* ערך שדה ניתוח -> טקסט קריא. השדות מגיעים כ-jsonb (מערך/אובייקט/מחרוזת JSON),
+   ו-String() עליהם הציג "[object Object]". מערך -> שורות עם •. */
+function aiFmt(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (/^[\[{]/.test(t)) { try { return aiFmt(JSON.parse(t)); } catch (e) { /* טקסט רגיל */ } }
+    return aiIsEmpty(t) ? '' : t;
+  }
+  if (Array.isArray(v)) {
+    const items = v.map(aiFmt).filter(x => x && !aiIsEmpty(x));
+    return items.length > 1 ? items.map(x => '• ' + x).join('\n') : (items[0] || '');
+  }
+  if (typeof v === 'object') { const t = suggVal(v); return aiIsEmpty(t) ? '' : t; }
+  return aiIsEmpty(v) ? '' : String(v);
+}
+
+/* חלק מהניתוחים מגיעים כשדה טקסט אחד עם שורות "action_items: ..." של שדות אחרים.
+   מפרקים לשדות הנכונים (בלי לדרוס שדה שכבר מלא) ומשאירים בשדה רק את מה ששייך לו. */
+function aiNormalize(a) {
+  const out = {};
+  AI_FIELDS.forEach(([k]) => { out[k] = aiFmt(a[k]); });
+  AI_FIELDS.forEach(([k]) => {
+    const txt = out[k];
+    if (!txt || !/^\s*[a-z_]+\s*:/m.test(txt)) return;
+    const own = [];
+    let cur = null;
+    txt.split('\n').forEach(line => {
+      const m = line.match(/^\s*([a-z_]+)\s*:\s*(.*)$/);
+      if (m && AI_LABELS[m[1]]) { cur = m[1]; if (cur !== k) out['_x_' + cur] = (out['_x_' + cur] || []); }
+      const body = m && AI_LABELS[m[1]] ? m[2] : line;
+      if (!cur || cur === k) own.push(body);
+      else out['_x_' + cur].push(body);
+    });
+    out[k] = aiFmt(own.join('\n').trim());
+  });
+  AI_FIELDS.forEach(([k]) => {
+    const extra = out['_x_' + k];
+    if (extra) { if (!out[k]) out[k] = aiFmt(extra.join('\n').trim()); delete out['_x_' + k]; }
+  });
+  return out;
+}
 
 function aiPanelHtml(list) {
   if (!list.length) return '';
   aiEnsureStyles();
   return list.map(a => {
+    const f = aiNormalize(a);
     const cells = AI_FIELDS
-      .filter(([k]) => a[k] != null && String(a[k]).trim() !== '')
-      .map(([k, lbl]) => `<div class="ai-cell"><div class="lbl">${lbl}</div><div class="val">${esc(String(a[k]))}</div></div>`)
+      .filter(([k]) => f[k])
+      .map(([k, lbl]) => `<div class="ai-cell"><div class="lbl">${lbl}</div><div class="val">${esc(f[k])}</div></div>`)
       .join('');
+    const summary = aiFmt(a.summary);
     const sugg = (a.suggestions || []).map((s, i) => {
+      // הצעה ריקה ("No objections identified") — אין מה לאשר
+      if (s.status !== 'approved' && s.status !== 'rejected' && aiIsEmpty(suggVal(s.to))) return '';
       if (s.status === 'approved') return `<div class="row"><span class="ai-done">✓ ${esc(s.label)} → ${esc(suggVal(s.to))} (אושר)</span></div>`;
       if (s.status === 'rejected') return `<div class="row" style="opacity:.55"><span>✗ ${esc(s.label)} (נדחה)</span></div>`;
       return `<div class="row"><b>המערכת מציעה:</b> ${esc(s.label)} → <b>${esc(suggVal(s.to))}</b>
@@ -94,7 +149,7 @@ function aiPanelHtml(list) {
     const when = a.call_time ? heDateTime(a.call_time) : heDateTime(a.created_at);
     return `<div class="ai-panel">
       <div class="ai-head">🧠 תובנות AI · שיחה ${when} ${aiSentimentBadge(a.sentiment)}</div>
-      ${a.summary ? `<div class="ai-cell" style="margin-bottom:10px"><div class="lbl">סיכום</div><div class="val">${esc(a.summary)}</div></div>` : ''}
+      ${summary ? `<div class="ai-cell" style="margin-bottom:10px"><div class="lbl">סיכום</div><div class="val">${esc(summary)}</div></div>` : ''}
       ${cells ? `<div class="ai-grid">${cells}</div>` : ''}
       ${sugg ? `<div class="ai-sugg">${sugg}</div>` : ''}
       ${a.transcript ? `<div class="ai-transcript">
@@ -112,6 +167,7 @@ function aiPanelHtml(list) {
 const AI_ALLOWED_FIELDS = ['temperature', 'est_value', 'objection'];
 function aiApplyToLead(leadId, field, value) {
   if (!AI_ALLOWED_FIELDS.includes(field)) return Promise.resolve({ data: null, error: null });
+  value = suggVal(value); // ההצעה יכולה להגיע כאובייקט/מערך
   const upd = {};
   if (field === 'temperature') upd.temperature = value === 'חם' ? 'hot' : value === 'קר' ? 'cold' : 'warm';
   else if (field === 'est_value') upd.est_value = Number(String(value).replace(/\D/g, '')) || null;
@@ -127,11 +183,11 @@ async function _aiSetStatus(analysisId, idx, status, newVal) {
   sug[idx].status = status;
   if (status === 'approved' && row.lead_id) {
     await aiApplyToLead(row.lead_id, sug[idx].field, sug[idx].to);
-    await addInteraction('lead', row.lead_id, `הצעת AI אושרה: ${sug[idx].label} ← ${sug[idx].to}`);
+    await addInteraction('lead', row.lead_id, `הצעת AI אושרה: ${sug[idx].label} ← ${suggVal(sug[idx].to)}`);
     const l = (typeof _leads !== 'undefined') ? _leads.find(x => x.id === row.lead_id) : null;
     if (l) {
       if (sug[idx].field === 'temperature') l.temperature = sug[idx].to === 'חם' ? 'hot' : sug[idx].to === 'קר' ? 'cold' : 'warm';
-      else if (sug[idx].field === 'objection') l.objection = sug[idx].to;
+      else if (sug[idx].field === 'objection') l.objection = suggVal(sug[idx].to);
       else if (sug[idx].field === 'est_value') l.est_value = Number(String(sug[idx].to).replace(/\D/g, '')) || null;
     }
   }
