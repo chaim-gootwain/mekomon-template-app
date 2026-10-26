@@ -88,25 +88,6 @@ function aiIsEmpty(s) {
 function aiSaysNoObjection(t) {
   return /no (specific |clear )?objections?|without objections?|לא (זוהו|זוהתה|נמצאו|הועלו|עלו|היו) התנגדו|אין התנגדו|ללא התנגדו/i.test(String(t == null ? '' : t));
 }
-/* JSON שבור (זבל סוגריים, טקסט הוראות דלף): מחלצים רק ערכי תוכן מוכרים,
-   ומדלגים על מפתחות טכניים (keywords, word/count, participants, influence...) */
-const AI_SALVAGE_MAIN = ['client_question', 'question', 'key_question', 'need', 'client_need', 'client_objection', 'objection',
-  'missed_opportunity', 'action_item', 'action', 'next_step', 'task', 'sales_technique', 'technique', 'trust_sentence', 'sale_product', 'product', 'deal_outcome'];
-const AI_SALVAGE_DETAIL = ['sales_person_response', 'suggestion', 'response', 'description', 'details'];
-function aiSalvage(t) {
-  const re = /"([A-Za-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
-  const out = [];
-  let m, last = -1;
-  while ((m = re.exec(t)) !== null) {
-    const k = m[1].toLowerCase();
-    let v = m[2];
-    try { v = JSON.parse('"' + v + '"'); } catch (e) { /* כמו שהוא */ }
-    v = String(v).trim();
-    if (AI_SALVAGE_MAIN.includes(k)) { if (aiIsEmpty(v)) last = -1; else { out.push(v); last = out.length - 1; } }
-    else if (AI_SALVAGE_DETAIL.includes(k) && last >= 0 && !aiIsEmpty(v)) out[last] += ' – ' + v;
-  }
-  return out.length > 1 ? out.map(x => '• ' + x).join('\n') : (out[0] || '');
-}
 const AI_SCHEMA_TYPES = ['string', 'number', 'integer', 'array', 'object', 'boolean', 'null'];
 const AI_MAIN_KEYS = ['client_objection', 'objection', 'need', 'client_need', 'action', 'action_item', 'task', 'question', 'client_question'];
 
@@ -116,9 +97,7 @@ function aiFmt(v) {
   if (v == null) return '';
   if (typeof v === 'string') {
     const t = v.trim();
-    if (/^[\s:]*[\[{]/.test(t) || /"[A-Za-z_]+"\s*:\s*[\["{]/.test(t)) {
-      try { return aiFmt(JSON.parse(t)); } catch (e) { return aiSalvage(t); } // JSON שבור מ-Voicenter
-    }
+    if (/^[\[{]/.test(t)) { try { return aiFmt(JSON.parse(t)); } catch (e) { /* טקסט רגיל */ } }
     return aiIsEmpty(t) ? '' : t;
   }
   if (Array.isArray(v)) {
