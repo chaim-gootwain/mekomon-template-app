@@ -84,6 +84,10 @@ function aiIsEmpty(s) {
     || /^לא (זוהו|זוהה|נמצאו|נמצא|הועלו|הועלה|צוינו|צוין)(\s|$)/.test(t);
 }
 
+/* "התנגדות" שאומרת שאין התנגדויות — גם בתוך משפט ארוך/משובש */
+function aiSaysNoObjection(t) {
+  return /no (specific |clear )?objections?|without objections?|לא (זוהו|זוהתה|נמצאו|הועלו|עלו|היו) התנגדו|אין התנגדו|ללא התנגדו/i.test(String(t == null ? '' : t));
+}
 const AI_SCHEMA_TYPES = ['string', 'number', 'integer', 'array', 'object', 'boolean', 'null'];
 const AI_MAIN_KEYS = ['client_objection', 'objection', 'need', 'client_need', 'action', 'action_item', 'task', 'question', 'client_question'];
 
@@ -142,6 +146,7 @@ function aiPanelHtml(list) {
   aiEnsureStyles();
   return list.map(a => {
     const f = aiNormalize(a);
+    if (f.objections && aiSaysNoObjection(f.objections)) f.objections = '';
     const cells = AI_FIELDS
       .filter(([k]) => f[k])
       .map(([k, lbl]) => `<div class="ai-cell"><div class="lbl">${lbl}</div><div class="val">${esc(f[k])}</div></div>`)
@@ -149,7 +154,8 @@ function aiPanelHtml(list) {
     const summary = aiFmt(a.summary);
     const sugg = (a.suggestions || []).map((s, i) => {
       // הצעה ריקה ("No objections identified") — אין מה לאשר
-      if (s.status !== 'approved' && s.status !== 'rejected' && aiIsEmpty(suggVal(s.to))) return '';
+      if (s.status !== 'approved' && s.status !== 'rejected'
+        && (aiIsEmpty(suggVal(s.to)) || (s.field === 'objection' && aiSaysNoObjection(suggVal(s.to))))) return '';
       if (s.status === 'approved') return `<div class="row"><span class="ai-done">✓ ${esc(s.label)} → ${esc(suggVal(s.to))} (אושר)</span></div>`;
       if (s.status === 'rejected') return `<div class="row" style="opacity:.55"><span>✗ ${esc(s.label)} (נדחה)</span></div>`;
       return `<div class="row"><b>המערכת מציעה:</b> ${esc(s.label)} → <b>${esc(suggVal(s.to))}</b>
