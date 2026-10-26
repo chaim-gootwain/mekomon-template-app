@@ -269,6 +269,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_send_document') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'send_document' };
       await mgrProposeSendDocument(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_add_charge') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_charge' };
+      await mgrProposeAddCharge(r.data.proposal);
     } else if (r.data.proposal.name === 'propose_cancel_charges') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'cancel_charges' };
       await mgrProposeCancelCharges(r.data.proposal);
@@ -932,6 +935,91 @@ async function mgrSendDocumentCancel() {
    אותם כללים של custChargeCancel (כפתור ה-✕ בכרטסת): רק חיוב פתוח,
    בלי תשלומים רשומים (אחרת — זיכוי), מסמכי EZcount לא נגעים; רק
    ספר החוב מתוקן, עם הערה וציר זמן. */
+/* ---------- רישום חיוב ידני / חוב ישן (כרטיס אישור) ----------
+   אותה כתיבה כמו "+ חיוב ידני" במסך הגבייה (insert ל-charges, RLS אוכף).
+   תאריך החיוב קובע את סדר סגירת התשלומים — לחוב ישן מזינים את התאריך
+   המקורי, כדי שקבלה עליו לא תיסגר בטעות על חיובים חדשים. */
+let _mgrAddCh = null;
+async function mgrProposeAddCharge(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const amount = Number(inp.amount) || 0;
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!cid) { await fail('חסר מזהה לקוח.'); return; }
+  if (!(amount > 0)) { await fail('חסר סכום תקין לחיוב.'); return; }
+  const cust = (cache.customers || []).find(x => x.id === cid);
+  if (!cust) { await fail('הלקוח לא נמצא.'); return; }
+  const dateOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '';
+  _mgrAddCh = { toolUseId: p.tool_use_id, cid, name: cust.name || inp.customer_name || '', agentId: cust.agent_id || null };
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrAddChCard';
+  card.innerHTML = `
+    <div class="hd">➕ רישום חיוב בספר החוב — לאישור</div>
+    <div class="ic-warn">רישום בכרטסת בלבד — לא מופק שום מסמך. תאריך החיוב קובע את סדר סגירת התשלומים (הוותיק נסגר ראשון) — לחוב ישן השאר את התאריך המקורי.</div>
+    <div class="grid2">
+      <div class="field"><label>לקוח</label><input type="text" value="${esc(_mgrAddCh.name)}" disabled></div>
+      <div class="field"><label>סכום בש"ח (כולל מע"מ)</label><input type="number" id="mgrAddChAmt" step="any" min="0" value="${amount}"></div>
+    </div>
+    <div class="field"><label>תיאור</label><input type="text" id="mgrAddChDesc" value="${esc(String(inp.description || '').trim())}"></div>
+    <div class="grid2">
+      <div class="field"><label>תאריך החיוב (לחוב ישן — המקורי)</label><input type="date" id="mgrAddChDate" value="${dateOk(inp.issued_date) || today()}"></div>
+      <div class="field"><label>לתשלום עד (אופציונלי)</label><input type="date" id="mgrAddChDue" value="${dateOk(inp.due_date)}"></div>
+    </div>
+    <div class="field"><label>הערות (אופציונלי)</label><input type="text" id="mgrAddChNotes" value="${esc(String(inp.notes || '').trim())}"></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrAddChBtn" onclick="mgrAddChargeApprove()">➕ רשום את החיוב</button>
+      <button class="btn btn-ghost" onclick="mgrAddChargeCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrAddChargeApprove() {
+  const s = _mgrAddCh;
+  if (!s) return;
+  const val = (id) => String((document.getElementById(id) || {}).value || '').trim();
+  const amount = Number(val('mgrAddChAmt'));
+  const description = val('mgrAddChDesc');
+  if (!(amount > 0)) { toast('חסר סכום תקין', true); return; }
+  if (!description) { toast('חסר תיאור', true); return; }
+  const rec = {
+    customer_id: s.cid, amount: Math.round(amount * 100) / 100, description,
+    issued_date: /^\d{4}-\d{2}-\d{2}$/.test(val('mgrAddChDate')) ? val('mgrAddChDate') : today(),
+    agent_id: s.agentId,
+  };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val('mgrAddChDue'))) rec.due_date = val('mgrAddChDue');
+  if (val('mgrAddChNotes')) rec.notes = val('mgrAddChNotes');
+  const btn = document.getElementById('mgrAddChBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'רושם...'; }
+  mgrSetBusy(true);
+  const { data: ins, error } = await db.from('charges').insert(rec).select('id').single();
+  mgrSetBusy(false);
+  document.getElementById('mgrAddChCard')?.remove();
+  const id = s.toolUseId;
+  if (error) {
+    icSayErr('הרישום נכשל: ' + esc(error.message || ''));
+    _mgrAddCh = null;
+    await mgrResolveProposal(id, 'הרישום נכשל: ' + String(error.message || error).slice(0, 150));
+    return;
+  }
+  try { await addInteraction('customer', s.cid, '➕ נרשם חיוב מהסוכן: ' + description + ' — ' + money(rec.amount) + ' (תאריך ' + rec.issued_date + ')'); } catch (e) { }
+  icSayOk('✅ נרשם חיוב של <b>' + money(rec.amount) + '</b> ל<b>' + esc(s.name) + '</b> (תאריך ' + esc(rec.issued_date) + ') — מופיע בכרטסת ובמסכי הגבייה.');
+  _mgrAddCh = null;
+  await mgrResolveProposal(id, 'אושר ונרשם בפועל: חיוב #' + (ins && ins.id) + ' על ' + money(rec.amount) + ' (תאריך ' + rec.issued_date + '). charge_id=' + (ins && ins.id) + ' — אפשר להשתמש בו ב-target_charge_ids.');
+}
+async function mgrAddChargeCancel() {
+  const s = _mgrAddCh;
+  if (!s) return;
+  document.getElementById('mgrAddChCard')?.remove();
+  icSay('בוטל — לא נרשם חיוב.');
+  const id = s.toolUseId;
+  _mgrAddCh = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — לא נרשם חיוב.');
+}
+
 let _mgrCancel = null;
 async function mgrProposeCancelCharges(p) {
   const inp = p.input || {};
