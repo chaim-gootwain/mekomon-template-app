@@ -361,7 +361,8 @@ async function openLeadCard(id) {
     <h3>${esc(l.name)} ${pill('lead', l.status)}
       ${viewOnly ? '<span class="pill amber">👁 צפייה בלבד — ליד של סוכן אחר</span>' : ''}</h3>
     <div class="grid2" style="font-size:.9rem">
-      <div><label>טלפון</label><b dir="ltr">${esc(l.phone) || '—'}</b></div>
+      <div><label>טלפון</label><b dir="ltr">${esc(l.phone) || '—'}</b>
+        ${leadEditable(l) && !unassigned ? `<button class="btn btn-sm btn-ghost" title="עדכון מספר הטלפון" onclick="leadPhoneEdit(${id})">✏️</button>` : ''}</div>
       <div><label>אימייל</label><b dir="ltr">${esc(l.email) || '—'}</b></div>
       <div><label>מקור</label><b>${esc(l.source) || '—'}</b></div>
       <div><label>סוכן</label><b>${esc(nameOf('agents', l.agent_id)) || '<span class="pill amber">ללא שיוך</span>'}</b></div>
@@ -412,11 +413,18 @@ function leadFollowup(id) {
   document.getElementById('viewBack').classList.remove('open');
   openForm('פולו-אפ — מה קורה עם הלקוח?', [
     { name: 'outcome', label: 'סיכום השיחה / מה קרה בפולו-אפ', type: 'textarea', required: true, rows: 3 },
+    { name: 'phone', label: 'טלפון (לעדכון אם התקבל מספר אחר)', dir: 'ltr' },
     { name: 'status', label: 'סטטוס הליד עכשיו', type: 'select', required: true,
       options: Object.entries(STATUS.lead).map(([v, t]) => ({ v, t: t[0] })) },
     { name: 'follow_up', label: 'תאריך הפולו-אפ הבא (אם צריך עוד מעקב)', type: 'date' },
     { name: 'follow_up_time', label: 'שעת הפולו-אפ הבא (לתזכורת)', type: 'time' },
-  ], { status: l.status, follow_up: l.follow_up, follow_up_time: l.follow_up_time }, async (rec) => {
+  ], { status: l.status, follow_up: l.follow_up, follow_up_time: l.follow_up_time, phone: l.phone }, async (rec) => {
+    // מספר חדש — בדיקת כפילות + עדכון (אם נחסם, הטופס נשאר פתוח)
+    const newPhone = (rec.phone || '').trim();
+    delete rec.phone;
+    if (newPhone && newPhone !== (l.phone || '')) {
+      if (!(await leadPhoneSave(id, newPhone))) throw new Error('phone-blocked');
+    }
     const nextTxt = rec.follow_up ? ` · מעקב הבא: ${heDate(rec.follow_up)}` : '';
     await addInteraction('lead', id, `📅 פולו-אפ: ${rec.outcome} · סטטוס: ${STATUS.lead[rec.status][0]}${nextTxt}`);
 
@@ -443,10 +451,52 @@ function leadFollowup(id) {
   });
 }
 
+/* --- עדכון טלפון של ליד: בדיקת כפילות, שמירת הישן כטלפון נוסף, תיעוד בציר הזמן --- */
+async function leadPhoneSave(id, newPhone) {
+  const l = _leads.find(x => x.id === id);
+  if (!l) return false;
+  const oldPhone = l.phone || '';
+  const dups = (await run(db.rpc('check_duplicate_phone', { p_phone: newPhone })))
+    .filter(d => !(d.kind === 'lead' && d.name === l.name)); // הליד עצמו
+  if (dups.length) {
+    const d = dups[0];
+    const kind = d.kind === 'lead' ? 'ליד' : 'לקוח';
+    if (!d.mine && !d.unassigned && !isAdmin()) {
+      showOops(`אופססס! 🤚<br>המספר ${esc(newPhone)} כבר נמצא אצל סוכן אחר (${kind} "${esc(d.name)}").<br><b>לא ניתן לעדכן.</b>`);
+      return false;
+    }
+    if (!confirm(`שים לב: המספר ${newPhone} כבר קיים אצל ${kind} "${d.name}".\nלעדכן בכל זאת?`)) return false;
+  }
+  const upd = { phone: newPhone };
+  if (oldPhone && !l.whatsapp && confirm(`לשמור את המספר הקודם (${oldPhone}) כטלפון נוסף?`)) upd.whatsapp = oldPhone;
+  await run(db.from('leads').update(upd).eq('id', id));
+  Object.assign(l, upd);
+  await addInteraction('lead', id, `📞 הטלפון עודכן: ${oldPhone || '—'} ← ${newPhone}`);
+  return true;
+}
+
+async function leadPhoneEdit(id) {
+  const l = _leads.find(x => x.id === id);
+  if (!l) return;
+  const v = prompt('מספר טלפון חדש:', l.phone || '');
+  if (v == null) return;
+  const newPhone = v.trim();
+  if (!newPhone || newPhone === (l.phone || '')) return;
+  if (await leadPhoneSave(id, newPhone)) { toast('הטלפון עודכן ✓'); openLeadCard(id); }
+}
+
 function leadEdit(id) {
   const l = _leads.find(x => x.id === id);
   document.getElementById('viewBack').classList.remove('open');
   openForm('עריכת ליד — ' + l.name, LEAD_FIELDS(), l, async (rec) => {
+    // טלפון שהשתנה — דרך leadPhoneSave (בדיקת כפילות + תיעוד)
+    const newPhone = (rec.phone || '').trim();
+    if (newPhone && newPhone !== (l.phone || '')) {
+      if (!(await leadPhoneSave(id, newPhone))) throw new Error('phone-blocked');
+      if (!rec.whatsapp && l.whatsapp) rec.whatsapp = l.whatsapp; // המספר הקודם שנשמר כטלפון נוסף
+    }
+    delete rec.phone;
+    if (!newPhone && l.phone) rec.phone = null; // מחיקת המספר — בלי בדיקה
     await run(db.from('leads').update(rec).eq('id', id));
     fuClear(id);
     await addInteraction('lead', id, 'הפרטים עודכנו');
