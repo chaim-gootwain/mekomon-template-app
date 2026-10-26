@@ -75,12 +75,17 @@ const AI_LABELS = Object.fromEntries(AI_FIELDS);
 
 /* ערך "ריק" מהניתוח — לא מציגים תא (0, [], {}, "none", "No objections identified"...) */
 function aiIsEmpty(s) {
-  const t = String(s == null ? '' : s).trim().replace(/[.\s]+$/, '').toLowerCase();
+  const t = String(s == null ? '' : s).trim().replace(/^["'\s]+|["'.\s]+$/g, '').toLowerCase();
   // שורות ישנות שנשמרו כטקסט "[object Object], [object Object]" — המידע אבד בקליטה
   if (/^(\[object object\][,\s]*)+$/.test(t)) return true;
   return !t || t === '0' || t === '[]' || t === '{}' || t === 'null' || t === 'none' || t === 'n/a'
-    || t === '-' || /^no (specific )?(objections?|needs|questions|action items?)( \w+)*$/.test(t);
+    || t === '-' || /^no (specific )?(objections?|needs|questions|action items?)( \w+)*$/.test(t)
+    || /^(no|none|not|nothing)\b.{0,40}\b(identified|mentioned|found|raised|discussed|expressed|detected)$/.test(t)
+    || /^לא (זוהו|זוהה|נמצאו|נמצא|הועלו|הועלה|צוינו|צוין)(\s|$)/.test(t);
 }
+
+const AI_SCHEMA_TYPES = ['string', 'number', 'integer', 'array', 'object', 'boolean', 'null'];
+const AI_MAIN_KEYS = ['client_objection', 'objection', 'need', 'client_need', 'action', 'action_item', 'task', 'question', 'client_question'];
 
 /* ערך שדה ניתוח -> טקסט קריא. השדות מגיעים כ-jsonb (מערך/אובייקט/מחרוזת JSON),
    ו-String() עליהם הציג "[object Object]". מערך -> שורות עם •. */
@@ -95,7 +100,14 @@ function aiFmt(v) {
     const items = v.map(aiFmt).filter(x => x && !aiIsEmpty(x));
     return items.length > 1 ? items.map(x => '• ' + x).join('\n') : (items[0] || '');
   }
-  if (typeof v === 'object') { const t = suggVal(v); return aiIsEmpty(t) ? '' : t; }
+  if (typeof v === 'object') {
+    // הגדרת סכמה ({type:"string",...}) — לא תוכן
+    if (typeof v.type === 'string' && AI_SCHEMA_TYPES.includes(v.type)) return '';
+    // פריט שהשדה העיקרי שלו ריק ("client_objection": "No objections identified") — ריק כולו
+    const main = AI_MAIN_KEYS.find(k => typeof v[k] === 'string');
+    if (main && !aiFmt(v[main])) return '';
+    const t = suggVal(v); return aiIsEmpty(t) ? '' : t;
+  }
   return aiIsEmpty(v) ? '' : String(v);
 }
 
