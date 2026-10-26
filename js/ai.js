@@ -196,6 +196,27 @@ async function _aiSetStatus(analysisId, idx, status, newVal) {
   await db.from('call_analysis').update({ suggestions: sug }).eq('id', analysisId);
 }
 
+/* עיבוד מחדש של ניתוחים שכבר נקלטו (Edge ‏call-analysis?action=reprocess, מנהל בלבד):
+   פירוק מחדש מהנתונים המקוריים + תרגום לעברית. רץ באצוות עד הסוף. */
+async function aiReprocess(btn) {
+  if (!confirm('לעבד מחדש את כל ניתוחי השיחות הקיימים? (פירוק מחדש ותרגום לעברית — עשוי לקחת כמה דקות)')) return;
+  if (btn) btn.disabled = true;
+  let after = 0, total = 0;
+  try {
+    for (;;) {
+      const { data, error } = await db.functions.invoke('call-analysis?action=reprocess', { body: { after, limit: 10 } });
+      if (error || !data || !data.ok) throw error || new Error((data && data.error) || 'שגיאה');
+      total += data.processed; after = data.next_after;
+      toast(`עובדו ${total} ניתוחים...`);
+      if (data.done) break;
+    }
+    toast(`✓ הסתיים — עובדו ${total} ניתוחים`);
+  } catch (e) {
+    console.error('ai reprocess', e);
+    toast('העיבוד מחדש נכשל' + (total ? ` אחרי ${total} ניתוחים` : '') + ' — ייתכן שהפונקציה call-analysis עוד לא עודכנה', true);
+  } finally { if (btn) btn.disabled = false; }
+}
+
 let _curAiLead = null;
 
 async function aiApprove(id, idx) {

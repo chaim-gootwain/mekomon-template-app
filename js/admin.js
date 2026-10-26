@@ -210,6 +210,7 @@ el.innerHTML = `
 <input type="checkbox" id="setAi" ${aiInsightsOn() ? 'checked' : ''} onchange="aiInsightsSave(this.checked)" style="width:18px;height:18px">
 תובנות AI פעילות (פאנל תובנות בכרטיס הליד 🧠)
 </label>
+${aiInsightsOn() ? `<button class="btn btn-sm btn-ghost" style="margin-top:8px" onclick="aiReprocess(this)">🔄 עיבוד מחדש של ניתוחים קיימים (עברית · שדות תקינים)</button>` : ''}
 </div>
 
 <div class="card card-pad">
