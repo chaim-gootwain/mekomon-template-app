@@ -1,0 +1,297 @@
+// netlify/lib/beni-pay.js
+// -----------------------------------------------------------------------------
+// "בני" — תשלום באשראי (קארדקום) מקצה לקצה:
+//   linkFor(customerId)  → קישור קבוע ללקוח (…/pay?t=<טוקן>). בלחיצה נבנה דף תשלום לסכום הפתוח *באותו רגע*
+//                          — הקישור לא "מתיישן" ולא נשאר עם סכום ישן.
+//   settle(lowProfileId) → אחרי webhook: אימות מול קארדקום → קבלה ב-EZcount (beni-receipt) →
+//                          רישום התשלום בספר (payments/charges, בדיוק כמו applyInvoiceToLedger באתר) → מייל לחיים.
+//   אם הקבלה נכשלה — לא רושמים תשלום (אחרת קבלה ידנית מהאתר הייתה רושמת אותו פעם שנייה);
+//   חיים מקבל מייל להפיק קבלה מהאתר כרגיל, והיא גם תרשום את התשלום.
+// -----------------------------------------------------------------------------
+const crypto = require("crypto");
+const store = require("./beni-store");
+const cardcom = require("./cardcom");
+const { sendMail } = require("./beni-mail");
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SITE = process.env.URL || "https://imanuel-sheli.netlify.app";
+const OWNER = process.env.BENI_OWNER_EMAIL || "e77050@gmail.com";
+const OPEN = ["pending", "invoiced", "partial", "overdue"];
+const H = (x = {}) => ({ apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}`, ...x });
+const money = n => "₪" + (Math.round(Number(n) * 100) / 100).toLocaleString("he-IL");
+const israelToday = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+
+async function sb(pathq) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${pathq}`, { headers: H() });
+  if (!r.ok) throw new Error(`supabase ${r.status} ${pathq.split("?")[0]}: ${(await r.text()).slice(0, 200)}`);
+  return r.json();
+}
+async function sbWrite(method, pathq, body, prefer = "return=representation") {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${pathq}`, { method, headers: H({ "content-type": "application/json", Prefer: prefer }), body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`supabase ${method} ${r.status} ${pathq.split("?")[0]}: ${(await r.text()).slice(0, 200)}`);
+  return prefer.includes("representation") ? r.json() : null;
+}
+
+// החובות הפתוחים של לקוח, מהוותיק לחדש, עם יתרה
+async function openCharges(customerId) {
+  const rows = await sb(`charges?select=id,amount,description,status,issued_date,due_date,invoice_number&customer_id=eq.${customerId}&status=in.(${OPEN.join(",")})&order=issued_date.asc.nullsfirst,id.asc&limit=200`);
+  if (!rows.length) return [];
+  const pays = await sb(`payments?select=charge_id,amount&charge_id=in.(${rows.map(r => r.id).join(",")})`);
+  const paid = {}; pays.forEach(p => paid[p.charge_id] = (paid[p.charge_id] || 0) + Number(p.amount || 0));
+  return rows.map(r => ({ ...r, balance: Math.round((Number(r.amount) - (paid[r.id] || 0)) * 100) / 100 })).filter(r => r.balance > 0.009);
+}
+
+// ---------- קישור קבוע ללקוח ----------
+async function tokenFor(customerId) {
+  return tokenForMax(customerId, null);
+}
+
+// מקסימום תשלומים שהלקוח יוכל לבחור בדף קארדקום (1–12). null = ברירת המחדל
+// של המופע (CARDCOM_MAX_PAYMENTS). מספר מפורש מקבל טוקן נפרד — הקישור
+// הקבוע של הלקוח (זה שבני שולח בתזכורות) לא משתנה.
+const clampPayments = n => { const v = parseInt(n, 10); return v >= 1 ? Math.min(12, v) : null; };
+async function tokenForMax(customerId, maxPayments) {
+  const mp = clampPayments(maxPayments);
+  const key = mp ? `paycust-max/${Number(customerId)}-${mp}.json` : `paycust/${customerId}.json`;
+  const c = await store.get(key).catch(() => null);
+  if (c && c.token) return c.token;
+  const token = crypto.randomBytes(12).toString("base64url");
+  await store.put(`paytok/${token}.json`, { customerId: Number(customerId), ...(mp ? { maxPayments: mp } : {}), at: Date.now() });
+  await store.put(key, { token });
+  return token;
+}
+const linkFor = async (customerId, maxPayments) => `${SITE}/.netlify/functions/pay?t=${await tokenForMax(customerId, maxPayments)}`;
+
+// קישור לסכום קבוע (מסוכן המקומון / פקודת מייל של חיים): טוקן נפרד פר
+// (לקוח, סכום). הקישור הקבוע של הלקוח נשאר תמיד על כל היתרה. החלטת חיים
+// (21.10.2026): קישור עם סכום נגבה גם כשאין יתרה פתוחה (מודעה שטרם חויבה) —
+// אחרי התשלום מופקת חשבונית מס-קבלה אוטומטית על החלק שאין לו מסמך.
+// extra: { note?: על מה התשלום (מודפס על המסמך), ad_id?: שיוך למודעה —
+// נוצר חיוב עם ad_id (טריגר הפרסום מדלג עליה, לא תחויב שוב) והיא מסומנת שולם,
+// max_payments?: מקסימום תשלומים בדף — טוקן נפרד פר מספר }
+async function tokenForAmount(customerId, amount, extra) {
+  const amt = Math.round(Number(amount) * 100) / 100;
+  const note = extra && extra.note ? String(extra.note).slice(0, 120) : null;
+  const adId = extra && Number(extra.ad_id) > 0 ? Number(extra.ad_id) : null;
+  const mp = clampPayments(extra && extra.max_payments);
+  const key = `paycust-amt/${Number(customerId)}-${Math.round(amt * 100)}${mp ? `-p${mp}` : ""}.json`;
+  const payload = { customerId: Number(customerId), amount: amt, ...(note ? { note } : {}), ...(adId ? { ad_id: adId } : {}), ...(mp ? { maxPayments: mp } : {}), at: Date.now() };
+  const c = await store.get(key).catch(() => null);
+  if (c && c.token) {
+    if (note || adId) await store.put(`paytok/${c.token}.json`, payload);  // עדכון ההקשר על אותו קישור
+    return c.token;
+  }
+  const token = crypto.randomBytes(12).toString("base64url");
+  await store.put(`paytok/${token}.json`, payload);
+  await store.put(key, { token });
+  return token;
+}
+const linkForAmount = async (customerId, amount, extra) => `${SITE}/.netlify/functions/pay?t=${await tokenForAmount(customerId, amount, extra)}`;
+
+// לחיצה על הקישור → דף תשלום לסכום הפתוח עכשיו
+async function startPayment(token) {
+  if (!/^[A-Za-z0-9_-]{10,40}$/.test(token || "")) return { error: "קישור לא תקין." };
+  const t = await store.get(`paytok/${token}.json`);
+  if (!t) return { error: "קישור לא תקין." };
+  const [cust] = await sb(`customers?select=id,name,invoice_name,email,phone&id=eq.${t.customerId}`);
+  if (!cust) return { error: "קישור לא תקין." };
+  const charges = await openCharges(cust.id);
+  const total = Math.round(charges.reduce((s, c) => s + c.balance, 0) * 100) / 100;
+  // טוקן עם סכום קבוע: גובים את הסכום שנקבע גם כשאין יתרה פתוחה (מודעה
+  // שטרם חויבה — החלטת חיים 21.10.2026); החלק שמעבר לחובות נסגר ב-settle
+  // בחשבונית מס-קבלה. קישור בלי סכום — רק כשיש יתרה, כמו תמיד.
+  const want = Math.round((Number(t.amount) || 0) * 100) / 100;
+  if (!(total > 0) && !(want > 0)) return { nothing: true, name: cust.name };
+  const amount = want > 0 ? want : total;
+  const nonce = crypto.randomBytes(6).toString("hex");
+  const page = await cardcom.createPage({ amount, returnValue: `beni:${cust.id}:${nonce}`, productName: (t.note ? `${t.note} — ` : `תשלום יתרה — `) + cust.name,
+    name: cust.invoice_name || cust.name, email: cust.email, phone: cust.phone, maxPayments: t.maxPayments || undefined,
+    webhookUrl: `${SITE}/.netlify/functions/cardcom-webhook`,
+    successUrl: `${SITE}/.netlify/functions/pay?done=ok`, failedUrl: `${SITE}/.netlify/functions/pay?done=fail` });
+  await store.put(`pay/${store.safe(page.lowProfileId)}.json`, { customerId: cust.id, amount, chargeIds: charges.map(c => c.id),
+    ...(want > 0 ? { fixed: want } : {}), ...(t.note ? { note: t.note } : {}), ...(t.ad_id ? { ad_id: Number(t.ad_id) } : {}), nonce, at: Date.now() });
+  return { url: page.url };
+}
+
+// ---------- אחרי תשלום ----------
+async function settle(lowProfileId) {
+  const lp = store.safe(lowProfileId);
+  const rec = await store.get(`pay/${lp}.json`);
+  if (!rec) return { ok: false, error: "unknown_page" };                     // דף שלא בני יצר
+  const res = await cardcom.getResult(lowProfileId);
+  if (rec.kind === "luach") return require("./luach-pay").settleLuach(lp, rec, res);  // מודעת לוח מהטופס הציבורי
+  if (!String(res.ReturnValue || "").startsWith(`beni:${rec.customerId}:${rec.nonce}`)) return { ok: false, error: "mismatch" };
+  if (!cardcom.isPaid(res)) return { ok: false, error: "not_paid", code: res.ResponseCode };
+  if (!(await store.claim(`pay_${lp}`))) return { ok: true, duplicate: true }; // webhook כפול
+  const tx = res.TranzactionInfo, amount = Math.round(Number(tx.Amount) * 100) / 100;
+  const [cust] = await sb(`customers?select=id,name,agent_id&id=eq.${rec.customerId}`);
+  const who = cust ? cust.name : `#${rec.customerId}`;
+  const deal = `קארדקום ${tx.TranzactionId}${tx.ApprovalNumber ? `, אישור ${tx.ApprovalNumber}` : ""}`;
+  const payDate = String(tx.CreateDate || "").slice(0, 10).match(/^\d{4}-\d{2}-\d{2}$/) ? String(tx.CreateDate).slice(0, 10) : israelToday();
+
+  // החובות לסגירה: הפתוחים עכשיו (ייתכן ששולם חלק בינתיים) — מהוותיק לחדש
+  const open = await openCharges(rec.customerId);
+  const allocs = []; let left = amount;
+  for (const c of open) { if (left <= 0.009) break; const a = Math.min(left, c.balance); allocs.push({ ...c, applied: Math.round(a * 100) / 100 }); left = Math.round((left - a) * 100) / 100; }
+  // איזה מסמך יש לכל חיוב (לפי מספר המסמך שבחיוב → טבלת documents של EZcount):
+  //   חשבון עסקה (proforma) → חשבונית מס-קבלה שסוגרת אותו (parent)
+  //   חשבונית מס            → קבלה
+  //   בלי מסמך / עודף        → בני לא מפיק מסמך ולא רושם — חיים מפיק מהאתר (ההפקה שם גם רושמת את התשלום)
+  // (20.10.2026: בני הפיק קבלה על חשבון עסקה וחשבונית מס-קבלה על חיוב בלי מסמך — שתיהן שגויות)
+  const nums = [...new Set(allocs.map(a => String(a.invoice_number || "").trim()).filter(Boolean))];
+  const docs = {};
+  if (nums.length) (await sb(`documents?select=doc_number,doc_kind,doc_uuid,status&customer_id=eq.${rec.customerId}&status=eq.issued&doc_number=in.(${nums.map(n => `"${n.replace(/"/g, "")}"`).join(",")})`))
+    .forEach(d => { docs[String(d.doc_number)] = d; });
+  const groups = [], undocumented = [];
+  for (const a of allocs) {
+    const d = docs[String(a.invoice_number || "").trim()];
+    if (d && d.doc_kind === "proforma") {
+      let g = groups.find(x => x.kind === "invoice_receipt" && x.parent === d.doc_uuid);
+      if (!g) groups.push(g = { kind: "invoice_receipt", parent: d.doc_uuid, ref: d.doc_number, allocs: [], sum: 0 });
+      g.allocs.push(a); g.sum += a.applied;
+    } else if (d && d.doc_kind === "tax_invoice") {
+      let g = groups.find(x => x.kind === "receipt");
+      if (!g) groups.push(g = { kind: "receipt", allocs: [], sum: 0 });
+      g.allocs.push(a); g.sum += a.applied;
+    } else undocumented.push(a);
+  }
+
+  const lines = [], adminRows = await sb("profiles?select=id&role=eq.admin&active=eq.true&limit=1"), createdBy = adminRows[0] ? adminRows[0].id : null;
+  for (const g of groups) {
+    const items = g.allocs.map(a => ({ details: a.description || `חיוב #${a.id}`, amount: 1, price: a.applied }));
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/beni-receipt`, { method: "POST", headers: H({ "content-type": "application/json" }),
+      body: JSON.stringify({ customer_id: rec.customerId, doc_kind: g.kind, items, parent: g.parent || null, transaction_id: `cardcom-${tx.TranzactionId}-${g.kind}${g.ref ? "-" + g.ref : ""}`,
+        payment: { sum: Math.round(g.sum * 100) / 100, cc_last4: tx.Last4CardDigitsString || String(tx.Last4CardDigits || ""), installments: tx.NumberOfPayments || 1, date: payDate.split("-").reverse().join("/") },
+        comment: `תשלום באשראי (${deal})` }) });
+    const d = await r.json().catch(() => ({}));
+    if (!d.ok) { lines.push(`⚠️ ${g.kind === "receipt" ? "קבלה" : "חשבונית מס-קבלה"} על ${money(g.sum)} לא הופקה (${d.error || r.status}). התשלום *לא* נרשם בספר — תפיק את המסמך מהאתר כרגיל, והוא ירשום את התשלום.`); continue; }
+    const doc = d.document || {}, tag = ` #doc:${doc.doc_number || doc.transaction_id} #cardcom:${tx.TranzactionId}`;
+    try {
+    for (const a of g.allocs) {
+      await sbWrite("POST", "payments", { charge_id: a.id, customer_id: rec.customerId, amount: a.applied, method: "credit", paid_date: payDate,
+        notes: `תשלום באשראי (בני, ${deal})${tag}`, created_by: createdBy }, "return=minimal");
+      await sbWrite("PATCH", `charges?id=eq.${a.id}`, { status: a.balance - a.applied <= 0.009 ? "paid" : "partial" }, "return=minimal");
+    }
+    } catch (e) { lines.push(`⚠️ המסמך ${doc.doc_number || ""} הופק, אבל רישום התשלום בספר נכשל באמצע (${String(e.message || e).slice(0, 120)}) — תבדוק בכרטיס הלקוח`); }
+    lines.push(`✅ ${g.kind === "receipt" ? "קבלה" : `חשבונית מס-קבלה (סוגרת חשבון עסקה ${g.ref})`} ${doc.doc_number || ""} על ${money(g.sum)}${d.mode === "demo" ? " (⚠️ EZcount במצב דמו — לא מסמך חוקי)" : ""}${doc.pdf_url ? `\n   ${doc.pdf_url}` : ""}`);
+  }
+  const undocSum = Math.round((undocumented.reduce((t, a) => t + a.applied, 0) + Math.max(0, left)) * 100) / 100;
+  if (undocSum > 0.009 && rec.fixed > 0) {
+    // קישור סכום מכוון (מהסוכן / פקודת חיים): על החלק שאין לו מסמך מופקת
+    // חשבונית מס-קבלה אוטומטית (החלטת חיים 21.10.2026) — למשל מודעה שטרם
+    // חויבה. עם ad_id: נוצר חיוב עם שיוך למודעה (טריגר הפרסום ידלג — לא
+    // תחויב שוב) והמודעה מסומנת שולם.
+    const leftAmt = Math.round(Math.max(0, left) * 100) / 100;
+    const fxItems = undocumented.map(a => ({ details: a.description || `חיוב #${a.id}`, amount: 1, price: a.applied }));
+    if (leftAmt > 0.009) fxItems.push({ details: rec.note || "תשלום על חשבון", amount: 1, price: leftAmt });
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/beni-receipt`, { method: "POST", headers: H({ "content-type": "application/json" }),
+      body: JSON.stringify({ customer_id: rec.customerId, doc_kind: "invoice_receipt", items: fxItems, transaction_id: `cardcom-${tx.TranzactionId}-fixed`,
+        payment: { sum: undocSum, cc_last4: tx.Last4CardDigitsString || String(tx.Last4CardDigits || ""), installments: tx.NumberOfPayments || 1, date: payDate.split("-").reverse().join("/") },
+        comment: `תשלום באשראי (${deal})${rec.note ? ` — ${rec.note}` : ""}` }) });
+    const d = await r.json().catch(() => ({}));
+    if (!d.ok) lines.push(`⚠️ חשבונית מס-קבלה על ${money(undocSum)} (${rec.note || "קישור סכום"}) לא הופקה (${d.error || r.status}). התשלום על החלק הזה *לא* נרשם בספר — תפיק מהאתר (אשראי, ${deal}).`);
+    else {
+      const doc = d.document || {}, tag = ` #doc:${doc.doc_number || doc.transaction_id} #cardcom:${tx.TranzactionId}`;
+      try {
+        for (const a of undocumented) {
+          await sbWrite("POST", "payments", { charge_id: a.id, customer_id: rec.customerId, amount: a.applied, method: "credit", paid_date: payDate,
+            notes: `תשלום באשראי (בני, ${deal})${tag}`, created_by: createdBy }, "return=minimal");
+          await sbWrite("PATCH", `charges?id=eq.${a.id}`, { status: a.balance - a.applied <= 0.009 ? "paid" : "partial" }, "return=minimal");
+        }
+        if (leftAmt > 0.009) {
+          const [ch] = await sbWrite("POST", "charges", { customer_id: rec.customerId, ad_id: rec.ad_id || null, amount: leftAmt,
+            description: (rec.note || "תשלום על חשבון") + ` (${deal})`, issued_date: payDate, due_date: payDate, status: "paid",
+            invoice_number: doc.doc_number || null, agent_id: cust && cust.agent_id || null, notes: `שולם מראש בקישור תשלום${tag}` });
+          if (ch) await sbWrite("POST", "payments", { charge_id: ch.id, customer_id: rec.customerId, amount: leftAmt, method: "credit", paid_date: payDate,
+            notes: `תשלום באשראי (בני, ${deal})${tag}`, created_by: createdBy }, "return=minimal");
+          if (rec.ad_id) await sbWrite("PATCH", `ads?id=eq.${rec.ad_id}&customer_id=eq.${rec.customerId}`, { deal_stage: "paid" }, "return=minimal");
+        }
+        lines.push(`✅ חשבונית מס-קבלה ${doc.doc_number || ""} על ${money(undocSum)}${rec.note ? ` — ${rec.note}` : ""}${rec.ad_id ? " (המודעה סומנה שולם)" : ""}${d.mode === "demo" ? " (⚠️ EZcount במצב דמו — לא מסמך חוקי)" : ""}${doc.pdf_url ? `\n   ${doc.pdf_url}` : ""}`);
+      } catch (e) { lines.push(`⚠️ המסמך ${doc.doc_number || ""} הופק, אבל רישום התשלום בספר נכשל באמצע (${String(e.message || e).slice(0, 120)}) — תבדוק בכרטיס הלקוח`); }
+    }
+  } else if (undocSum > 0.009) lines.push(`🟡 ${money(undocSum)} מהתשלום הם על ${undocumented.length ? `חיובים בלי חשבון עסקה/חשבונית (${undocumented.map(a => `${a.description || "חיוב #" + a.id} — ${money(a.applied)}`).join("; ")})` : ""}${left > 0.009 ? `${undocumented.length ? " + " : ""}עודף מעבר לחוב (${money(left)})` : ""}.\n   על החלק הזה לא הפקתי מסמך ולא רשמתי תשלום — תפיק מהאתר את המסמך המתאים (למשל חשבונית מס-קבלה, אמצעי תשלום: אשראי, ${deal}); ההפקה שם גם תרשום את התשלום.`);
+  // התשלום עצמו התקבל — הקפאת תזכורות לא נדרשת: החוב נסגר בספר והתוכנית מחשבת יתרה מחדש
+  await sendMail(OWNER, `💳 בני: ${who} שילם ${money(amount)} באשראי`,
+    `${who} שילם ${money(amount)} בקארדקום (${deal}${Number(tx.NumberOfPayments) > 1 ? `, ${tx.NumberOfPayments} תשלומים` : ""}).\n\n${lines.join("\n")}\n\nבני`);
+  return { ok: true, amount, lines };
+}
+
+// ---------- הוראת חיים: מסמך לתשלום שבני השאיר בלי מסמך ----------
+// חיוב בלי חשבון עסקה/חשבונית → settle לא מפיק מסמך ולא רושם, ומבקש מחיים. כשחיים אומר לבני
+// "תפיק חשבונית מס-קבלה על התשלום של X" — זה כאן (החלטת חיים 27.10.2026):
+//   מאתרים את עסקת קארדקום של הלקוח (אימות מול קארדקום), מחשבים כמה ממנה עוד לא נרשם בספר,
+//   ועל היתרה: חשבונית מס-קבלה (חיוב עם חשבון עסקה — סוגרת אותו; עם חשבונית מס — קבלה), ורישום בספר.
+async function documentPayment(customerId, txHint) {
+  customerId = Number(customerId);
+  const recs = [];
+  for (const o of await store.list("pay")) {
+    const r = await store.get(o.path);
+    if (r && Number(r.customerId) === customerId && r.kind !== "luach") recs.push({ lp: o.path.replace(/^pay\//, "").replace(/\.json$/, ""), r, at: r.at || 0 });
+  }
+  recs.sort((a, b) => b.at - a.at);
+  let found = null;
+  for (const x of recs.slice(0, 15)) {
+    const res = await cardcom.getResult(x.lp).catch(() => null);
+    if (!res || !cardcom.isPaid(res)) continue;
+    if (txHint && String(res.TranzactionInfo.TranzactionId) !== String(txHint).replace(/\D/g, "")) continue;
+    found = res; break;
+  }
+  if (!found) return { ok: false, error: `לא מצאתי עסקת קארדקום ששולמה${txHint ? ` (${txHint})` : ""} דרך קישור של בני ללקוח הזה` };
+  const tx = found.TranzactionInfo, amount = Math.round(Number(tx.Amount) * 100) / 100;
+  const deal = `קארדקום ${tx.TranzactionId}${tx.ApprovalNumber ? `, אישור ${tx.ApprovalNumber}` : ""}`;
+  const recorded = (await sb(`payments?select=amount,notes&customer_id=eq.${customerId}&notes=ilike.${encodeURIComponent(`*cardcom:${tx.TranzactionId}*`)}`))
+    .reduce((t, p) => t + Number(p.amount || 0), 0);
+  let left = Math.round((amount - recorded) * 100) / 100;
+  if (left <= 0.009) return { ok: false, error: `כל ${money(amount)} של העסקה (${deal}) כבר רשומים בספר עם מסמך` };
+  const remaining = left;
+  const payDate = String(tx.CreateDate || "").slice(0, 10).match(/^\d{4}-\d{2}-\d{2}$/) ? String(tx.CreateDate).slice(0, 10) : israelToday();
+  const open = await openCharges(customerId), allocs = [];
+  for (const c of open) { if (left <= 0.009) break; const a = Math.min(left, c.balance); allocs.push({ ...c, applied: Math.round(a * 100) / 100 }); left = Math.round((left - a) * 100) / 100; }
+  const nums = [...new Set(allocs.map(a => String(a.invoice_number || "").trim()).filter(Boolean))], docs = {};
+  if (nums.length) (await sb(`documents?select=doc_number,doc_kind,doc_uuid&customer_id=eq.${customerId}&status=eq.issued&doc_number=in.(${nums.map(n => `"${n.replace(/"/g, "")}"`).join(",")})`))
+    .forEach(d => { docs[String(d.doc_number)] = d; });
+  // קבוצות: חשבון עסקה → מס-קבלה עם parent; חשבונית מס → קבלה; בלי מסמך + עודף → מס-קבלה אחת (באישור חיים)
+  const groups = [];
+  const grp = (key, mk) => { let g = groups.find(x => x.key === key); if (!g) groups.push(g = { key, ...mk, allocs: [], sum: 0 }); return g; };
+  for (const a of allocs) {
+    const d = docs[String(a.invoice_number || "").trim()];
+    const g = d && d.doc_kind === "proforma" ? grp(`p${d.doc_uuid}`, { kind: "invoice_receipt", parent: d.doc_uuid, ref: d.doc_number })
+      : d && d.doc_kind === "tax_invoice" ? grp("r", { kind: "receipt" }) : grp("n", { kind: "invoice_receipt" });
+    g.allocs.push(a); g.sum += a.applied;
+  }
+  if (left > 0.009) { const g = grp("n", { kind: "invoice_receipt" }); g.leftover = left; g.sum += left; }
+  const [cust] = await sb(`customers?select=id,name,agent_id&id=eq.${customerId}`);
+  const adminRows = await sb("profiles?select=id&role=eq.admin&active=eq.true&limit=1"), createdBy = adminRows[0] ? adminRows[0].id : null;
+  const lines = [];
+  for (const g of groups) {
+    const items = g.allocs.map(a => ({ details: a.description || `חיוב #${a.id}`, amount: 1, price: a.applied }));
+    if (g.leftover) items.push({ details: "תשלום על חשבון", amount: 1, price: g.leftover });
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/beni-receipt`, { method: "POST", headers: H({ "content-type": "application/json" }),
+      body: JSON.stringify({ customer_id: customerId, doc_kind: g.kind, items, parent: g.parent || null, transaction_id: `cardcom-${tx.TranzactionId}-owner-${g.key}`,
+        payment: { sum: Math.round(g.sum * 100) / 100, cc_last4: tx.Last4CardDigitsString || String(tx.Last4CardDigits || ""), installments: tx.NumberOfPayments || 1, date: payDate.split("-").reverse().join("/") },
+        comment: `תשלום באשראי (${deal})` }) });
+    const d = await r.json().catch(() => ({}));
+    const name = g.kind === "receipt" ? "קבלה" : g.parent ? `חשבונית מס-קבלה (סוגרת חשבון עסקה ${g.ref})` : "חשבונית מס-קבלה";
+    if (!d.ok) { lines.push(`⚠️ ${name} על ${money(g.sum)} לא הופקה (${d.error || r.status}) — לא רשמתי כלום`); continue; }
+    if (d.duplicate) { lines.push(`• ${name} כבר הופקה קודם (${(d.document || {}).doc_number || ""}) — לא הפקתי שוב`); continue; }
+    const doc = d.document || {}, tag = ` #doc:${doc.doc_number || doc.transaction_id} #cardcom:${tx.TranzactionId}`;
+    try {
+      for (const a of g.allocs) {
+        await sbWrite("POST", "payments", { charge_id: a.id, customer_id: customerId, amount: a.applied, method: "credit", paid_date: payDate,
+          notes: `תשלום באשראי (בני, ${deal}, לפי הוראת חיים)${tag}`, created_by: createdBy }, "return=minimal");
+        await sbWrite("PATCH", `charges?id=eq.${a.id}`, { status: a.balance - a.applied <= 0.009 ? "paid" : "partial" }, "return=minimal");
+      }
+      if (g.leftover) {
+        const [ch] = await sbWrite("POST", "charges", { customer_id: customerId, amount: g.leftover, description: `תשלום על חשבון (${deal})`, issued_date: payDate,
+          due_date: payDate, status: "paid", invoice_number: doc.doc_number || null, agent_id: cust && cust.agent_id || null, notes: `תשלום על חשבון${tag}` });
+        if (ch) await sbWrite("POST", "payments", { charge_id: ch.id, customer_id: customerId, amount: g.leftover, method: "credit", paid_date: payDate,
+          notes: `תשלום באשראי (בני, ${deal}, לפי הוראת חיים)${tag}`, created_by: createdBy }, "return=minimal");
+      }
+      lines.push(`✅ ${name} ${doc.doc_number || ""} על ${money(g.sum)}${d.mode === "demo" ? " (⚠️ EZcount במצב דמו)" : ""}${doc.pdf_url ? `\n   ${doc.pdf_url}` : ""}`);
+    } catch (e) { lines.push(`⚠️ ${name} ${doc.doc_number || ""} הופקה, אבל הרישום בספר נכשל באמצע (${String(e.message || e).slice(0, 120)}) — לבדוק בכרטיס הלקוח`); }
+  }
+  return { ok: true, deal, remaining, lines };
+}
+
+module.exports = { linkFor, linkForAmount, tokenFor, startPayment, settle, openCharges, documentPayment };
