@@ -58,6 +58,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - כמויות ומחירים גם במילים ("פעמיים"=2, "חמש מאות"=500).
 - "לקוח שילם" בלי סכום חדש → propose_pay_existing (הסכום יילקח מחשבון העסקה הפתוח שלו במערכת). אם ננקב סכום מפורש להפקה — זו הפקה רגילה (propose_issue_document).
 - תשלום על חיוב מסוים ("שילם את החוב הישן", "קבלה על ח.ע. 10217"): כש-propose_pay_existing לא מוצא את העסקה (ישנה/הופקה מחוץ למסלול) — get_customer_status למצוא את charge_id, ואז propose_issue_document (receipt או tax_invoice_receipt) עם target_charge_ids=[charge_id] ו-target_label. התשלום יירד בכרטסת בדיוק מהחיובים האלה; בלי target_charge_ids הוא נפרס מהחוב הישן לחדש. בתיאור השורה כתוב על מה התשלום.
+- חיוב חודשי: "מי מוגדר בחיוב חודשי" → get_monthly_billing_customers; ללקוח בודד — monthly_billing ב-get_customer_status. לקוח חודשי מדולג בחיוב הגיליון ומחויב במרוכז בסוף החודש. אין לך כלי להפעיל/לבטל חיוב חודשי — זה נעשה מכרטיס הלקוח במסך; אמור זאת כשמבקשים.
 - "גזירים" = תמונות המודעות כפי שפורסמו בעיתון. כשמבקשים גזירים — search_customers ואז show_customer_clips (הוא מציג למנהל את הטבלה וכפתור הורדה; אל תשתמש ב-get_customer_publications בשביל גזירים).
 - שליחת גזירים במייל ללקוח → propose_send_clips עם מספרי הגיליונות. אם המנהל לא ציין גיליונות — בדוק ב-get_customer_publications אילו גיליונות רלוונטיים (למשל האחרון שפורסם) והצע. המייל נשלח לכתובת שבכרטיס הלקוח, והמנהל מאשר בכרטיס לפני שליחה.
 - "צרף לי את החשבונית" / "תראה לי את המסמך" → get_customer_documents, ותן את הקישור בפורמט markdown: [חשבונית מס 10009 — PDF](pdf_url). הקישור נפתח בלחיצה אצל המנהל. מסמך בלי pdf_url — אמור שהקובץ לא זמין במערכת (הופק מחוץ למסלול הרגיל).
@@ -94,6 +95,11 @@ const TOOLS = [
       properties: { customer_id: { type: 'number', description: 'מזהה הלקוח מ-search_customers' } },
       required: ['customer_id']
     }
+  },
+  {
+    name: 'get_monthly_billing_customers',
+    description: 'רשימת הלקוחות המוגדרים בחיוב חודשי (מחויבים במרוכז בסוף החודש ומדולגים בחיוב הגיליון). השתמש ל"מי בחיוב חודשי", "האם X מוגדר חיוב חודשי" (או בדוק monthly_billing ב-get_customer_status). שינוי ההגדרה — רק מכרטיס הלקוח במסך.',
+    input_schema: { type: 'object', properties: {}, required: [] }
   },
   {
     name: 'get_customer_publications',
@@ -529,7 +535,29 @@ async function runReadTool(caller, name, input) {
     const openProformas = (profs || []).filter(d => !d.settled_at)
       .map(d => ({ doc_number: d.doc_number, total: d.total, created_at: (d.created_at || '').slice(0, 10) }));
 
-    return { debt_total: debtTotal, open_charges: openCharges.slice(0, 15), active_contracts: activeContracts, open_proformas: openProformas };
+    // דגל חיוב חודשי — הרשימה שמורה בהגדרות (monthly_billing_customers)
+    let monthlyBilling = false;
+    try {
+      const { data: mb } = await caller.from('settings').select('value').eq('key', 'monthly_billing_customers').limit(1);
+      monthlyBilling = (JSON.parse((mb && mb[0] && mb[0].value) || '[]') || []).includes(cid);
+    } catch (_e) { /* הגדרה חסרה/לא תקינה — לא חוסמים את הסטטוס */ }
+
+    return { debt_total: debtTotal, open_charges: openCharges.slice(0, 15), active_contracts: activeContracts, open_proformas: openProformas, monthly_billing: monthlyBilling };
+  }
+
+  if (name === 'get_monthly_billing_customers') {
+    const { data: mb, error } = await caller.from('settings').select('value').eq('key', 'monthly_billing_customers').limit(1);
+    if (error) return { error: error.message };
+    let ids = [];
+    try { ids = (JSON.parse((mb && mb[0] && mb[0].value) || '[]') || []).map(Number).filter((n) => n > 0); } catch (_e) { }
+    if (!ids.length) return { customers: [], note: 'אף לקוח לא מוגדר בחיוב חודשי. ההגדרה נעשית מכרטיס הלקוח במסך (כפתור "חיוב חודשי") — אין לסוכן כלי לשנות אותה.' };
+    const { data: custs } = await caller.from('customers').select('id,name').in('id', ids);
+    const nameOfC = {};
+    (custs || []).forEach((c) => nameOfC[c.id] = c.name);
+    return {
+      customers: ids.map((id) => ({ customer_id: id, name: nameOfC[id] || ('#' + id) })),
+      note: 'לקוח בחיוב חודשי מדולג בחיוב הגיליון ומחויב במרוכז בסוף החודש. שינוי הרשימה — מכרטיס הלקוח במסך, לא דרך הסוכן.'
+    };
   }
 
   if (name === 'get_debtors') {
