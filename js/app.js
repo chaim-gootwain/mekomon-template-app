@@ -338,7 +338,7 @@ db.from('ads').select('id,title').ilike('title', like).limit(5),
 ]);
 if (seq !== _searchSeq) return; // תשובה איטית של חיפוש ישן לא דורסת את החדש
 const items = [
-...(leads.data || []).map(r => ({ kind: 'ליד', label: r.name + (r.phone ? ' · ' + r.phone : ''), page: 'leads' })),
+...(leads.data || []).map(r => ({ kind: 'ליד', label: r.name + (r.phone ? ' · ' + r.phone : ''), page: 'leads', id: r.id })),
 ...(customers.data || []).map(r => ({ kind: 'לקוח', label: r.name, page: 'customers', id: r.id })),
 ...(ads.data || []).map(r => ({ kind: 'מודעה', label: r.title, page: 'ads' })),
 ...(articles.data || []).map(r => ({ kind: 'כתבה', label: r.title, page: 'articles' })),
@@ -355,6 +355,7 @@ function searchGo(page, id) {
 document.getElementById('searchResults').classList.add('hidden');
 document.getElementById('searchInput').value = '';
 if (page === 'customers' && id) { openPage('customers').then(() => window.openCustomerCard && openCustomerCard(id)); }
+else if (page === 'leads' && id) { openPage('leads').then(() => window.openLeadCard && openLeadCard(id)); }
 else openPage(page);
 }
 
