@@ -18,8 +18,10 @@
 // הרשאות: משתמש מחובר מקבל רק את השלוחה של עצמו. מנהל רשאי לבקש
 // סוכן אחר (agent_id). פונקציית החיוג לא שונתה.
 //
-// body: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', agent_id?: number }
+// body: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', agent_id?: number, detail?: true }
 // תשובה: { ok, ext, days: { 'YYYY-MM-DD': {calls,answered,unanswered,talk_sec} } }
+//        עם detail — גם calls: [{id,at,dir:'out'|'in',number,answered,sec}]
+//        (שיחות חוזרות מלקוחות שהסוכן חייג אליהם) + cdr_types, inbound_error
 //        או { ok:false, code:'no_secret'|'no_ext'|'voicenter', error }
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -41,6 +43,16 @@ function json(body: unknown, status = 200) {
 // הצלצול אל הסוכן עצמו — לא נספרת, אלא אם אין שום רגל 2 (ראה fallback).
 const CUSTOMER_LEGS = new Set([4, 10, 15, 22]);
 const AGENT_LEGS = new Set([9, 14, 21]);
+// שיחה נכנסת מבחוץ (1 = Incoming). ⚠️ לאמת מול נתוני אמת — תשובת
+// detail מחזירה cdr_types (ספירה פר CdrType) כדי שאפשר יהיה לבדוק.
+const INBOUND_TYPES = new Set([1]);
+
+// מספר ישראלי מנורמל: ספרות בלבד, 972 → 0 (כמו normPhone בצד הלקוח)
+function normNum(p: unknown) {
+  let s = String(p ?? '').replace(/\D/g, '');
+  if (s.startsWith('972')) s = '0' + s.slice(3);
+  return s.length >= 9 ? s : '';
+}
 
 const ilDay = (d: Date) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit'
@@ -92,7 +104,7 @@ Deno.serve(async (req) => {
       fromdate: fromUtc.toISOString().replace(/\.\d{3}Z$/, 'Z'),
       todate: toUtc.toISOString().replace(/\.\d{3}Z$/, 'Z'),
       extensions: [ext],
-      fields: ['CallID', 'DateEpoch', 'Duration', 'DialStatus', 'CdrType', 'Callerextension', 'Targetextension']
+      fields: ['CallID', 'DateEpoch', 'Duration', 'DialStatus', 'CdrType', 'Callerextension', 'Targetextension', 'TargetNumber']
     };
     const r = await fetch('https://api.voicenter.com/hub/cdr/', {
       method: 'POST',
@@ -128,7 +140,69 @@ Deno.serve(async (req) => {
         d.talk_sec += Math.max(0, Number(c.Duration) || 0);
       } else d.unanswered++;
     }
-    return json({ ok: true, ext, total: list.length, days });
+    if (!body.detail) return json({ ok: true, ext, total: list.length, days });
+
+    // ---------- detail: רשימת שיחות + שיחות חוזרות ----------
+    // יוצאות: רגל הלקוח של הסוכן (המספר = TargetNumber).
+    // נכנסות: שאילתה שנייה על כל הארגון (בלי סינון שלוחה — לקוח שחוזר
+    // מתקשר בדרך כלל לקו הראשי ולא לשלוחה), ומחזירים רק שיחות ממספרים
+    // שהסוכן עצמו חייג אליהם בטווח (CDR או call_log) — לא שיחות של אחרים.
+    const calls: { id: string; at: number; dir: 'out' | 'in'; number: string; answered: boolean; sec: number }[] = [];
+    const dialed = new Set<string>();
+    if (hasCustomerLeg) {
+      const seenOut = new Set<string>();
+      for (const c of counted) {
+        const num = normNum(c.TargetNumber);
+        if (!num) continue;
+        const key = String(c.CallID || '') + ':' + c.CdrType;
+        if (c.CallID && seenOut.has(key)) continue;
+        seenOut.add(key);
+        dialed.add(num);
+        calls.push({
+          id: String(c.CallID || ''), at: Number(c.DateEpoch) || 0, dir: 'out', number: num,
+          answered: String(c.DialStatus).toUpperCase() === 'ANSWER', sec: Math.max(0, Number(c.Duration) || 0)
+        });
+      }
+    }
+    const { data: logRows } = await caller.from('call_log').select('target')
+      .eq('user_id', agent?.profile_id || user.id)
+      .gte('created_at', fromUtc.toISOString()).lte('created_at', toUtc.toISOString()).limit(5000);
+    (logRows || []).forEach((r: any) => { const n = normNum(r.target); if (n) dialed.add(n); });
+
+    // cdr_types — ספירת כל סוגי הרשומות בשאילתת הארגון, לאימות INBOUND_TYPES
+    const cdr_types: Record<string, number> = {};
+    let inbound_error: string | null = null;
+    if (dialed.size) {
+      const r2 = await fetch('https://api.voicenter.com/hub/cdr/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...vcReq, extensions: undefined, fields: [...vcReq.fields, 'CallerNumber'] })
+      });
+      const d2 = await r2.json().catch(() => null);
+      if (d2 && Number(d2.ERROR_NUMBER) === 0 && Array.isArray(d2.CDR_LIST)) {
+        // שיחה נכנסת שצלצלה אצל כמה סוכנים = כמה רשומות לאותו CallID —
+        // מאחדים לשיחה אחת, ונענתה אם אחת הרשומות נענתה
+        const byId = new Map<string, { id: string; at: number; dir: 'in'; number: string; answered: boolean; sec: number }>();
+        for (const c of d2.CDR_LIST) {
+          const t = Number(c.CdrType);
+          cdr_types[t] = (cdr_types[t] || 0) + 1;
+          if (!INBOUND_TYPES.has(t)) continue;
+          const num = normNum(c.CallerNumber);
+          if (!num || !dialed.has(num)) continue;
+          const id = String(c.CallID || '') || `${num}:${c.DateEpoch}`;
+          const answered = String(c.DialStatus).toUpperCase() === 'ANSWER';
+          const sec = Math.max(0, Number(c.Duration) || 0);
+          const prev = byId.get(id);
+          if (prev) { prev.answered ||= answered; prev.sec = Math.max(prev.sec, sec); continue; }
+          byId.set(id, { id, at: Number(c.DateEpoch) || 0, dir: 'in', number: num, answered, sec });
+        }
+        calls.push(...byId.values());
+      } else {
+        inbound_error = `Voicenter ${d2?.ERROR_NUMBER ?? r2.status}: ${d2?.ERROR_DESCRIPTION || 'no response'}`;
+      }
+    }
+    calls.sort((a, b) => a.at - b.at);
+    return json({ ok: true, ext, total: list.length, days, calls, cdr_types, inbound_error });
   } catch (e) {
     return json({ ok: false, error: String((e as Error)?.message || e) }, 500);
   }
