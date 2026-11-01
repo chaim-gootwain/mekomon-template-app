@@ -502,7 +502,11 @@ async function invLinkAdsToDoc(doc, adIds, contractId) {
     if (contractId) links.contract = { id: contractId, prev_prepaid: contractPrev };
     try { await db.from('documents').update({ ad_links: links }).eq('id', doc.id); } catch (e) { /* עמודת ad_links אולי לא קיימת במופע — לא חוסם */ }
   }
-  if (ids.size) await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', [...ids]).or('deal_stage.is.null,deal_stage.neq.paid');
+  if (ids.size) {
+    await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', [...ids]).or('deal_stage.is.null,deal_stage.neq.paid');
+    // עדכון הפלטפלן הפתוח (מודעות בזיכרון) — אחרת עריכה שם מחזירה את הערך הישן
+    if (typeof _fpAds !== 'undefined' && Array.isArray(_fpAds)) _fpAds.forEach(a => { if (ids.has(a.id) && a.deal_stage !== 'paid') a.deal_stage = 'invoiced'; });
+  }
   if (contractId) await markContractPrepaid(contractId);
 }
 
