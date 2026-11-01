@@ -63,6 +63,16 @@ location.reload();
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
 const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
+/* portal_token הוא מפתח הכניסה של הלקוח לפורטל — מי שמחזיק אותו מגיש מודעות בשם הלקוח.
+   רק מנהל ואנשי מכירות צריכים אותו (קישור הפורטל בכרטיס הלקוח); לשאר התפקידים מוסרים
+   אותו משורות שנטענו עם select('*'), כדי שלא יישב בזיכרון הדפדפן ולא יוצג בשום מקום */
+const custCanPortal = () => ['admin', 'sales'].includes(profile.role);
+function custSafe(rows) {
+if (custCanPortal() || !rows) return rows;
+(Array.isArray(rows) ? rows : [rows]).forEach(r => { if (r) delete r.portal_token; });
+return rows;
+}
+
 async function refreshCache() {
 const role = profile.role;
 const jobs = [
@@ -75,8 +85,10 @@ if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
 // nameOf ובדיקות הכפילויות פשוט לא ראו את סוף הרשימה
 // status/status_reason/fixed_discount חייבים להיות כאן: שער החסימה וההנחה
 // הקבועה קוראים מהמטמון, ושורה בלי העמודות האלה נראית כמו "אין סטטוס/אין הנחה"
-const _custCols = 'id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
-const _custColsOld = 'id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms';
+// portal_token נטען רק למנהל ולמכירות (ר' custSafe)
+const _tok = custCanPortal() ? 'portal_token,' : '';
+const _custCols = 'id,name,agent_id,phone,email,whatsapp,' + _tok + 'business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
+const _custColsOld = 'id,name,agent_id,phone,email,' + _tok + 'business_id,invoice_name,order_doc_type,payment_terms';
 const _pageCust = async (cols) => {
   const all = [];
   for (let f = 0; f < 50000; f += 1000) {
