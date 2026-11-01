@@ -61,7 +61,7 @@ function _importTerms(v) { const x = String(v || '').replace(/\s/g, ''); if (/60
 
 Pages.customers = {
 render: async (el) => {
-_customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
+_customers = custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
 const canWrite = ['admin', 'sales'].includes(profile.role);
 el.innerHTML = `
 <div class="page-head">
@@ -250,7 +250,7 @@ if (typeof onDone === 'function') await onDone(data);
 async function customerEdit(id) {
 // כשהכרטיס נפתח שלא מדף הלקוחות המטמון עשוי להיות ריק — נטען מהמסד במקום לקרוס
 let c = (_customers || []).find(x => x.id === id);
-if (!c) c = (await run(db.from('customers').select('*').eq('id', id).limit(1)))[0];
+if (!c) c = custSafe((await run(db.from('customers').select('*').eq('id', id).limit(1)))[0]);
 if (!c) { toast('הלקוח לא נמצא', true); return; }
 document.getElementById('viewBack').classList.remove('open');
 openForm('עריכת לקוח — ' + c.name, CUSTOMER_FIELDS, c, async (rec) => {
@@ -267,7 +267,7 @@ openPage('customers');
 async function openCustomerCard(id) {
 _ccEnsureCss();
 let c = _customers.find(x => x.id === id);
-if (!c) c = await run(db.from('customers').select('*').eq('id', id).single());
+if (!c) c = custSafe(await run(db.from('customers').select('*').eq('id', id).single()));
 const canWrite = ['admin', 'sales'].includes(profile.role);
 const canMoney = ['admin', 'sales'].includes(profile.role);
 
@@ -711,7 +711,7 @@ async function customersImportCommit() {
 async function portalTokenReset(id) {
 if (!confirm('לחדש את הקישור? הקישור הישן יפסיק לעבוד מיידית.')) return;
 await run(db.rpc('reset_portal_token', { p_customer_id: id }));
-_customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
+_customers = custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
 await refreshCache();
 toast('קישור חדש הונפק');
 openCustomerCard(id);
