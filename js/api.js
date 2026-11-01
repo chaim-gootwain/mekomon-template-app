@@ -73,6 +73,18 @@ if (custCanPortal() || !rows) return rows;
 return rows;
 }
 
+/* טעינת לקוח מלא — המקום היחיד שקורא את כל עמודות customers. כל כלל על נתוני לקוח
+   (מי רואה את portal_token, ובעתיד רשימת עמודות מפורשת במקום '*') נכתב כאן בלבד.
+   שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
+   custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
+async function custLoadAll() {
+return custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
+}
+async function custLoad(id, { required = false } = {}) {
+const q = db.from('customers').select('*').eq('id', id);
+return custSafe(required ? await run(q.single()) : (await run(q.limit(1)))[0]);
+}
+
 async function refreshCache() {
 const role = profile.role;
 const jobs = [

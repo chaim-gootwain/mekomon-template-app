@@ -300,7 +300,7 @@ async function issueBillingReceipt(issueId, customerId) {
   const ads = await run(db.from('ads').select('*').eq('issue_id', issueId).eq('customer_id', customerId).not('status', 'in', '("cancelled","rejected")'));
   const items = _ibItems(ads, issue);
   if (!items.length) { toast('אין מודעות עם מחיר לחיוב', true); return; }
-  const cust = (cache.customers || []).find(c => c.id === customerId) || (await run(db.from('customers').select('*').eq('id', customerId).limit(1)))[0];
+  const cust = (cache.customers || []).find(c => c.id === customerId) || await custLoad(customerId);
   if (!cust) { toast('לקוח לא נמצא', true); return; }
   document.getElementById('viewBack')?.classList.remove('open');
   if (typeof invOpenModal === 'function') {

@@ -153,12 +153,12 @@ function _monthIssues() {
 
 async function invIssueOrder(cid) {
   if (typeof checkCustomerStatusGate === 'function') { const _okS = await checkCustomerStatusGate(cid, 'הפקת חשבונית'); if (!_okS) return; }
-  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  const c = _customers.find(x => x.id === cid) || await custLoad(cid, { required: true });
   const kind = c.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
   await invOpenModal(c, kind, false);
 }
 async function invIssuePayment(cid) {
-  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  const c = _customers.find(x => x.id === cid) || await custLoad(cid, { required: true });
   const docs = await loadCustomerDocs(cid);
   const hasTaxInvoice = docs.some(d => d.doc_kind === 'tax_invoice' && d.status !== 'failed');
   const kind = hasTaxInvoice ? 'receipt' : 'invoice_receipt';
@@ -174,7 +174,7 @@ async function invIssueReceiptFor(docId) {
   if (!parentUuid) { toast('חסר מזהה מסמך לשיוך', true); return; }
   const kind = d.doc_kind === 'tax_invoice' ? 'receipt' : 'invoice_receipt';
   if (typeof checkCustomerStatusGate === 'function') { const _ok = await checkCustomerStatusGate(d.customer_id, 'הנפקת קבלה'); if (!_ok) return; }
-  const c = _customers.find(x => x.id === d.customer_id) || await run(db.from('customers').select('*').eq('id', d.customer_id).single());
+  const c = _customers.find(x => x.id === d.customer_id) || await custLoad(d.customer_id, { required: true });
   await invOpenModal(c, kind, true, { parentUuid, amount: d.total, srcLabel: DOC_KIND_HE[d.doc_kind] || 'מסמך', srcNumber: d.doc_number });
 }
 
@@ -665,7 +665,7 @@ async function invIssueReceiptDirect(cid) {
     const _okS = await checkCustomerStatusGate(cid, 'הפקת חשבונית מס קבלה');
     if (!_okS) return;
   }
-  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  const c = _customers.find(x => x.id === cid) || await custLoad(cid, { required: true });
   await invOpenModal(c, 'invoice_receipt', true);
 }
 
@@ -728,7 +728,7 @@ async function invIssueFromAd(adId) {
   if (!a) { toast('מודעה לא נמצאה', true); return; }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === a.customer_id))
     || ((typeof cache !== 'undefined' && cache.customers) || []).find(x => x.id === a.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', a.customer_id).limit(1)))[0];
+    || await custLoad(a.customer_id);
   let label = 'מודעה בודדת';
   if (a.contract_id) {
     const _ct = (await run(db.from('contracts').select('id,price_item_id,total_inserts').eq('id', a.contract_id).limit(1)))[0];

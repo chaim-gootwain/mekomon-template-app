@@ -118,7 +118,7 @@ async function contractInvoice(contractId) {
   if (!ct) { toast('חוזה לא נמצא', true); return; }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === ct.customer_id))
     || (cache.customers || []).find(x => x.id === ct.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', ct.customer_id).limit(1)))[0];
+    || await custLoad(ct.customer_id);
   if (!cust) { toast('לקוח לא נמצא', true); return; }
   _ciCust = cust;
   _ciLines = [{ details: 'חבילת פרסום — ' + (nameOf('priceList', ct.price_item_id) || '') + ' × ' + ct.total_inserts, amount: 1, price: Number(ct.total_price) || 0 }];
@@ -147,7 +147,7 @@ async function contractInvoiceUnbilled(contractId) {
   if (!ct) { toast('חוזה לא נמצא', true); return; }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === ct.customer_id))
     || (cache.customers || []).find(x => x.id === ct.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', ct.customer_id).limit(1)))[0];
+    || await custLoad(ct.customer_id);
   const ads = (await run(db.from('ads').select('*').eq('contract_id', contractId).not('status', 'in', '("cancelled","rejected")'))) || [];
   const unbilled = ads.filter(a => !['invoiced', 'paid'].includes(a.deal_stage));
   if (!unbilled.length) { toast('כל מודעות החוזה כבר חויבו', true); return; }
