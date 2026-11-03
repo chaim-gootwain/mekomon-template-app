@@ -864,10 +864,11 @@ async function mgrProposeSendDocument(p) {
   mgrSetBusy(false);
   const doc = (docs || [])[0];
   const PAYABLE_KINDS = new Set(['proforma', 'tax_invoice']);
+  const kindHe = MGR_DOC_HE[(doc && doc.doc_kind)] || 'מסמך';
   let _payLinkUrl = '';
   if (doc && PAYABLE_KINDS.has(doc.doc_kind)) {
     try {
-      const pr = await mgrPayLinkMint(cid, 0, {});
+      const pr = await mgrPayLinkMint(cid, Number(doc.total) || 0, { note: kindHe + ' ' + num });
       if (pr && pr.link && pr.link.url) _payLinkUrl = pr.link.url;
     } catch (_e) {}
   }
@@ -875,7 +876,6 @@ async function mgrProposeSendDocument(p) {
   if (!doc.pdf_url) { await fail('למסמך ' + num + ' אין קובץ PDF במערכת — אי אפשר לצרף.'); return; }
   const email = String(cust && cust.email || '').trim();
   if (!email) { await fail('ללקוח ' + (cust && cust.name || '') + ' אין כתובת מייל בכרטיס — השלם אותה קודם ("תכניס את המייל... ללקוח...").'); return; }
-  const kindHe = MGR_DOC_HE[doc.doc_kind] || 'מסמך';
   const name = (cust && cust.name) || String(inp.customer_name || '');
   const defBody = 'שלום ' + name + ',\n\n' +
     'מצורף ' + kindHe + ' מספר ' + num + (doc.total ? ' על סך ' + money(Number(doc.total)) : '') + '.\n' +
