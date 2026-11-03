@@ -726,6 +726,67 @@ async function shCopyMsg(i) {
   catch (e) { openForm('בחרו והעתיקו את הנוסח', [{ name: 'body', label: m.title, type: 'textarea', rows: 14 }], { body: m.body }, async () => { }); }
 }
 
+/* ---------- שחרור לידים אוטומטי (מיגרציה 2026-11-03_lead_release) ---------- */
+function shLrCardHtml() {
+  const s = cache.settings || {};
+  const on = String(s.lead_release_enabled || '0') === '1';
+  const v = (k, d) => esc(String(s[k] != null && s[k] !== '' ? s[k] : d));
+  return `
+<b>♻️ שחרור לידים אוטומטי</b>
+<p class="muted" style="font-size:.82rem">ליד משויך שלא היה איתו קשר (שיחה, הערה, תיעוד) — יוצא מהשיוך ועובר למאגר, וכל סוכן יכול לתפוס אותו. ליד שפרסם נשאר אצל הסוכן לפי מספר הימים שלמטה מהפרסום האחרון. חל על לידים בלבד, לא על לקוחות. רץ כל לילה. דורש את המיגרציה 2026-11-03_lead_release.</p>
+<div class="grid2" style="margin-top:6px">
+<div class="field"><label>ימים בלי קשר עד שחרור</label><input id="shLrDays" type="number" min="1" value="${v('lead_release_days', 60)}" dir="ltr"></div>
+<div class="field"><label>ליד שפרסם — נשאר אצל הסוכן (ימים)</label><input id="shLrKeep" type="number" min="0" value="${v('lead_keep_advertiser_days', 120)}" dir="ltr"></div>
+</div>
+<label style="display:flex;gap:8px;align-items:center;margin-top:4px;cursor:pointer"><input id="shLrOn" type="checkbox" ${on ? 'checked' : ''} style="width:18px;height:18px"> שחרור אוטומטי פעיל</label>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+<button class="btn btn-sm" onclick="shLrSave()">💾 שמירה</button>
+<button class="btn btn-sm btn-ghost" onclick="shLrPreview()">👁 תצוגה מקדימה</button>
+<button class="btn btn-sm btn-ghost" onclick="shLrRunNow()">שחרור עכשיו</button>
+</div>
+${s.lead_release_last ? `<div class="muted" style="font-size:.78rem;margin-top:6px">הרצה אחרונה: ${esc(s.lead_release_last)} לידים</div>` : ''}
+<div id="shLrOut" style="margin-top:8px"></div>`;
+}
+
+async function shLrSave() {
+  const days = Number(document.getElementById('shLrDays').value), keep = Number(document.getElementById('shLrKeep').value);
+  const on = document.getElementById('shLrOn').checked;
+  if (!(days >= 1) || !(keep >= 0)) { toast('מספר ימים לא תקין', true); return; }
+  if (on && String(cache.settings.lead_release_enabled || '0') !== '1'
+    && !confirm('בהפעלה, בלילה הקרוב ישתחררו בבת אחת כל הלידים שעומדים בכלל.\nמומלץ קודם "תצוגה מקדימה". להפעיל?')) return;
+  const recs = [['lead_release_days', String(days)], ['lead_keep_advertiser_days', String(keep)], ['lead_release_enabled', on ? '1' : '0']];
+  await run(db.from('settings').upsert(recs.map(([key, value]) => ({ key, value }))), 'שמירת ההגדרות');
+  recs.forEach(([k, val]) => cache.settings[k] = val);
+  toast(on ? 'השחרור האוטומטי פעיל' : 'נשמר (השחרור האוטומטי כבוי)');
+}
+
+async function shLrPreview() {
+  const out = document.getElementById('shLrOut');
+  const { data, error } = await db.rpc('lead_release_candidates');
+  if (error) { out.innerHTML = '<p class="muted">לא ניתן לבדוק — ודאו שהורצה המיגרציה 2026-11-03_lead_release.sql ושההגדרות נשמרו.</p>'; return; }
+  const rows = data || [];
+  if (!rows.length) { out.innerHTML = '<p class="muted">אין כרגע לידים שישתחררו.</p>'; return; }
+  const leads = {};
+  try {
+    const r = await db.from('leads').select('id,name').in('id', rows.map(x => x.lead_id));
+    (r.data || []).forEach(l => leads[l.id] = l.name);
+  } catch (e) { }
+  out.innerHTML = `<b>${rows.length} לידים ישתחררו:</b>
+<div class="table-wrap" style="max-height:260px;overflow:auto;margin-top:6px"><table class="data"><thead><tr><th>ליד</th><th>סוכן</th><th>קשר אחרון</th></tr></thead><tbody>
+${rows.map(x => `<tr><td>${esc(leads[x.lead_id] || '#' + x.lead_id)}</td><td>${esc(nameOf('agents', x.agent_id))}</td><td>${heDate(localDay(x.last_contact))}</td></tr>`).join('')}
+</tbody></table></div>`;
+}
+
+async function shLrRunNow() {
+  if (!confirm('לשחרר עכשיו למאגר את כל הלידים שעומדים בכלל?')) return;
+  const { data, error } = await db.rpc('lead_release_stale', { p_force: true });
+  if (error) { toast('השחרור נכשל — ודאו שהורצה המיגרציה 2026-11-03_lead_release.sql', true); return; }
+  toast(`${data || 0} לידים שוחררו למאגר`);
+  await refreshCache();
+  const card = document.getElementById('shLrCard');
+  if (card) card.innerHTML = shLrCardHtml();
+}
+
 async function shToggleSave(on) {
   await run(db.from('settings').upsert({ key: 'sales_hub_enabled', value: on ? '1' : '0' }));
   cache.settings.sales_hub_enabled = on ? '1' : '0';
@@ -753,6 +814,11 @@ async function shToggleSave(on) {
         const anchor = el.querySelector('#activityLog');
         const anchorCard = anchor ? anchor.closest('.card') : null;
         if (anchorCard) el.insertBefore(card, anchorCard); else el.appendChild(card);
+        const lr = document.createElement('div');
+        lr.className = 'card card-pad';
+        lr.id = 'shLrCard';
+        lr.innerHTML = shLrCardHtml();
+        el.insertBefore(lr, card.nextSibling);
       } catch (e) { console.error('sales hub settings card', e); }
       return r;
     };
