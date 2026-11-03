@@ -77,7 +77,7 @@ const SH_DEFAULTS = {
     role: 'נציג/ת מכירות פרסום', scope: 'משרה חלקית, לפי סידור עבודה שבועי שייקבע מראש בתיאום',
     hourly: 50, tier1_cap: 15000, tier1_pct: 10, tier2_cap: 30000, tier2_pct: 14, tier3_pct: 17,
     bonus_threshold: 30000, bonus_amount: 500,
-    tier_mode: 'graded', basis: 'collected', trial_months: 3, tail_days: 30, extra: '',
+    tier_mode: 'graded', basis: 'collected', trial_months: 3, trial_unit: 'months', weekly_target: 5000, tail_days: 30, extra: '',  // trial_months = אורך תקופת הניסיון ביחידות trial_unit
   },
   contract_people: {},  // agentId → { id_number, address, start_date }
 };
@@ -292,7 +292,8 @@ ${row('שכר שעתי', money(c.hourly))}
 ${row('עמלות', esc(shTiersText(c, true)))}
 ${row('בונוס חודשי', Number(c.bonus_amount) ? money(c.bonus_amount) + ' במכירות של ' + money(c.bonus_threshold) + ' ומעלה' : 'ללא')}
 ${row('בסיס העמלה', c.basis === 'signed' ? 'הזמנות חתומות' : 'נגבה בפועל')}
-${row('תקופת ניסיון', Number(c.trial_months) ? c.trial_months + ' חודשים' : 'ללא')}
+${row('יעד מכירות שבועי', Number(c.weekly_target) ? 'לפחות ' + money(c.weekly_target) : 'ללא')}
+${row('תקופת ניסיון', shTrialText(c) || 'ללא')}
 </div>
 <div class="card card-pad"><b>הפקת הסכם לסוכן</b>
 ${shAgents().map(a => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
@@ -488,6 +489,15 @@ function shTiersText(c, short) {
   return t;
 }
 
+function shTrialText(c) {
+  const k = Number(c.trial_months || 0);
+  if (!k) return '';
+  const w = c.trial_unit === 'weeks';
+  if (k === 1) return w ? 'שבוע אחד' : 'חודש אחד';
+  if (k === 2) return w ? 'שבועיים' : 'חודשיים';
+  return k + (w ? ' שבועות' : ' חודשים');
+}
+
 function shContractTerms() {
   const c = shGet('contract');
   const rec0 = Object.assign({}, c, { employer: c.employer || (cache.settings || {}).paper_name || '' });
@@ -500,7 +510,9 @@ function shContractTerms() {
     { type: 'section', label: 'התפקיד' },
     { name: 'role', label: 'תואר התפקיד' },
     { name: 'scope', label: 'היקף המשרה' },
-    { name: 'trial_months', label: 'תקופת ניסיון (חודשים, 0 = ללא)', type: 'number' },
+    { name: 'trial_months', label: 'אורך תקופת הניסיון (0 = ללא)', type: 'number' },
+    { name: 'trial_unit', label: 'יחידת תקופת הניסיון', type: 'select', options: [{ v: 'months', t: 'חודשים' }, { v: 'weeks', t: 'שבועות' }] },
+    { name: 'weekly_target', label: 'יעד מכירות שבועי מינימלי (₪, 0 = ללא)', type: 'number' },
     { type: 'section', label: 'שכר ועמלות' },
     { name: 'hourly', label: 'שכר שעתי ברוטו (₪)', type: 'number', required: true },
     { name: 'tier1_cap', label: 'מדרגה 1 — עד (₪ לחודש)', type: 'number' },
@@ -543,7 +555,7 @@ function shContractPrint(a, p) {
   const employer = c.employer || (cache.settings || {}).paper_name || '@@PAPER_NAME@@';
   const blank = v => v ? esc(v) : '<span class="blank"></span>';
   const n = v => Number(v || 0).toLocaleString('he-IL');
-  const trial = Number(c.trial_months || 0);
+  const trial = shTrialText(c);
   const mode = c.tier_mode === 'whole'
     ? 'שיעור העמלה נקבע לפי סך המכירות של החודש וחל על כל הסכום, כדלקמן:'
     : 'העמלה מדורגת: כל חלק מסך המכירות החודשי מזכה בשיעור של המדרגה שבה הוא נמצא, כדלקמן:';
@@ -551,8 +563,8 @@ function shContractPrint(a, p) {
     ? 'העמלה תחושב על הזמנות פרסום חתומות שנסגרו על ידי העובד באותו חודש קלנדרי, לפני מע״מ ובניכוי הנחות. הזמנה שבוטלה או שלא נגבתה — העמלה בגינה תקוזז מהעמלות הבאות.'
     : 'העמלה תחושב על סכומים שנגבו בפועל באותו חודש קלנדרי מעסקאות שנסגרו על ידי העובד, לפני מע״מ ובניכוי הנחות, זיכויים וביטולים.';
   const sec = [
-    ['התפקיד', `העובד מועסק בתפקיד <b>${esc(c.role)}</b>. תפקידו כולל איתור ופנייה למפרסמים, מכירת שטחי פרסום ושירותים נלווים של המעסיק, תיעוד מלא של כל פנייה, שיחה ותוצאה במערכת המעסיק, קביעת פעולת המשך לכל ליד, ביצוע פולואפים, וכל משימה נוספת הקשורה לתפקיד שתוטל עליו מעת לעת.<br>העובד יפעל לפי נהלי המכירות של המעסיק, ישתמש במחירון ובהצעות המאושרים בלבד, ולא ייתן ללקוח הנחה, תנאי תשלום או התחייבות חריגה ללא אישור מראש מהמעסיק.`],
-    ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` ${trial} החודשים הראשונים הם תקופת ניסיון, שבמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
+    ['התפקיד', `העובד מועסק בתפקיד <b>${esc(c.role)}</b>. תפקידו כולל איתור ופנייה למפרסמים, מכירת שטחי פרסום ושירותים נלווים של המעסיק, תיעוד מלא של כל פנייה, שיחה ותוצאה במערכת המעסיק, קביעת פעולת המשך לכל ליד, ביצוע פולואפים, וכל משימה נוספת הקשורה לתפקיד שתוטל עליו מעת לעת.<br>העובד יפעל לפי נהלי המכירות של המעסיק, ישתמש במחירון ובהצעות המאושרים בלבד, ולא ייתן ללקוח הנחה, תנאי תשלום או התחייבות חריגה ללא אישור מראש מהמעסיק.` + (Number(c.weekly_target) ? `<br>יעד המכירות השבועי של העובד הוא <b>לפחות ${n(c.weekly_target)} ₪</b> (לפי בסיס חישוב העמלה שבסעיף העמלות). העמידה ביעד תיבחן במסגרת המשוב והמעקב השוטפים.` : '')],
+    ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` תקופת הניסיון היא ${trial} מיום תחילת העבודה, ובמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
     ['היקף המשרה ושעות העבודה', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה. שעות נוספות יבוצעו רק באישור מראש של המעסיק וישולמו לפי חוק שעות עבודה ומנוחה. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
     ['שכר יסוד', `בעבור כל שעת עבודה ישולם לעובד שכר של <b>${n(c.hourly)} ₪ ברוטו</b>. השכר ישולם עד ה-9 בכל חודש בעבור החודש הקודם, בצירוף תלוש שכר.`],
     ['עמלות מכירה', `בנוסף לשכר היסוד תשולם לעובד עמלה חודשית. ${mode}<ul>${shTiersText(c).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${basis}${Number(c.bonus_amount) ? `<br>בנוסף, בכל חודש שבו סך המכירות של העובד (לפי אותו בסיס חישוב) יגיע ל-${n(c.bonus_threshold)} ₪ ומעלה, ישולם לו בונוס של <b>${n(c.bonus_amount)} ₪ ברוטו</b>.` : ''}${Number(c.bonus_amount) ? '<br>העמלה והבונוס ישולמו יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות להם, ויפורטו בתלוש השכר.' : '<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר.'} עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${n(c.tail_days)} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`],
