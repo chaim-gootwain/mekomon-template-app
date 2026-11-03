@@ -61,7 +61,7 @@ const SH_DEFAULTS = {
     { title: 'הצפת חסמים', body: 'מציפים בזמן אמת: מה קרה, מה נוסה ומה העזרה הנדרשת. מחיר חריג, תלונה או חוסר בהירות במוצר מועברים למנהל.' },
     { title: 'סגירת יום', body: 'מעדכנים את המערכת, מדווחים פעילות ותוצאות, מציפים חסמים ומכינים את מחר. הדוח מסכם את היום; אינו מחליף תיעוד לקוחות.' },
     { title: 'מידע והרשאות', body: 'משתמשים בחשבון אישי ובהרשאות המתאימות לתפקיד. אין לשתף סיסמאות.' },
-    { title: 'שכר ועמלות · טיוטה לבירור', body: '50 ₪ לשעה; עד 15,000 ₪ — 10%; בין 15,000 ל־30,000 ₪ — 14%; מעל 30,000 ₪ — 17%. בונוס של 500 ₪ בחודש שבו המכירות מגיעות ל־30,000 ₪. נדרש להבהיר אם החישוב מדורג או על כלל המכירות, תקופת החישוב, בסיס גבייה או חתימה, מע״מ וביטולים.' },
+    { title: 'שכר ועמלות · טיוטה לבירור', body: '43 ₪ לשעה בתלוש שכר, או 50 ₪ לשעה + מע״מ כנגד חשבונית; עד 15,000 ₪ — 10%; בין 15,000 ל־30,000 ₪ — 14%; מעל 30,000 ₪ — 17%. בונוס של 500 ₪ בחודש שבו המכירות מגיעות ל־30,000 ₪. נדרש להבהיר אם החישוב מדורג או על כלל המכירות, תקופת החישוב, בסיס גבייה או חתימה, מע״מ וביטולים.' },
   ],
   messages: [
     { title: 'בוקר טוב', body: '*בוקר טוב צוות 🔥*\n\nהיעד הצוותי היום: ___\nהמיקוד המקצועי: ___\n\nנכנסים לשעון נוכחות, פותחים את המערכת ובודקים חזרות.\n\nכל אחד משתף:\n*היעד שלי:* ___\n*הפעולה שלי להשגת היעד:* ___\n\nנתקעתם? מציפים בזמן.\n*יום של עשייה ותוצאות!*' },
@@ -75,7 +75,7 @@ const SH_DEFAULTS = {
   contract: {
     employer: '', employer_id: '', employer_address: '', signer: '',
     role: 'נציג/ת מכירות פרסום', scope: 'משרה חלקית, לפי סידור עבודה שבועי שייקבע מראש בתיאום',
-    hourly: 50, tier1_cap: 15000, tier1_pct: 10, tier2_cap: 30000, tier2_pct: 14, tier3_pct: 17,
+    hourly: 43, hourly_invoice: 50, tier1_cap: 15000, tier1_pct: 10, tier2_cap: 30000, tier2_pct: 14, tier3_pct: 17,
     bonus_threshold: 30000, bonus_amount: 500,
     tier_mode: 'graded', basis: 'collected', trial_months: 3, trial_unit: 'months', weekly_target: 5000, tail_days: 30, extra: '',  // trial_months = אורך תקופת הניסיון ביחידות trial_unit
   },
@@ -277,7 +277,7 @@ ${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bot
   },
 
   contract() {
-    const c = shGet('contract'), people = shGet('contract_people');
+    const c = shTerms(), people = shGet('contract_people');
     const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${k}</span><b>${v || '<span style="color:#b91c1c">חסר</span>'}</b></div>`;
     return `
 <div class="page-head"><h2>הסכם עבודה לאנשי מכירות</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="shOnboard()">＋ איש/אשת מכירות חדש/ה</button><button class="btn btn-ghost" onclick="shContractTerms()">✏️ עריכת תנאי ההסכם</button></div></div>
@@ -289,7 +289,8 @@ ${row('ח.פ / ע.מ', esc(c.employer_id))}
 ${row('כתובת המעסיק', esc(c.employer_address))}
 ${row('חותם בשם המעסיק', esc(c.signer))}
 ${row('תפקיד', esc(c.role))}
-${row('שכר שעתי', money(c.hourly))}
+${row('שכר שעתי — שכיר (תלוש)', money(c.hourly) + ' ברוטו')}
+${row('תמורה שעתית — עצמאי (חשבונית)', money(c.hourly_invoice) + ' + מע״מ')}
 ${row('עמלות', esc(shTiersText(c, true)))}
 ${row('בונוס חודשי', Number(c.bonus_amount) ? money(c.bonus_amount) + ' במכירות של ' + money(c.bonus_threshold) + ' ומעלה' : 'ללא')}
 ${row('בסיס העמלה', c.basis === 'signed' ? 'הזמנות חתומות' : 'נגבה בפועל')}
@@ -478,6 +479,8 @@ function shListEdit(key) {
 }
 
 /* ---------- הסכם עבודה ---------- */
+function shTerms() { return Object.assign({}, SH_DEFAULTS.contract, shGet('contract')); }
+
 function shTiersText(c, short) {
   const n = v => Number(v || 0).toLocaleString('he-IL');
   const top = c.tier3_pct === '' || c.tier3_pct == null ? c.tier2_pct : c.tier3_pct;
@@ -500,7 +503,7 @@ function shTrialText(c) {
 }
 
 function shContractTerms() {
-  const c = shGet('contract');
+  const c = shTerms();
   const rec0 = Object.assign({}, c, { employer: c.employer || (cache.settings || {}).paper_name || '' });
   openForm('תנאי הסכם העבודה', [
     { type: 'section', label: 'פרטי המעסיק' },
@@ -515,7 +518,8 @@ function shContractTerms() {
     { name: 'trial_unit', label: 'יחידת תקופת הניסיון', type: 'select', options: [{ v: 'months', t: 'חודשים' }, { v: 'weeks', t: 'שבועות' }] },
     { name: 'weekly_target', label: 'יעד מכירות שבועי מינימלי (₪, 0 = ללא)', type: 'number' },
     { type: 'section', label: 'שכר ועמלות' },
-    { name: 'hourly', label: 'שכר שעתי ברוטו (₪)', type: 'number', required: true },
+    { name: 'hourly', label: 'שכר שעתי — שכיר, בתלוש (₪ ברוטו)', type: 'number', required: true },
+    { name: 'hourly_invoice', label: 'תמורה שעתית — עצמאי, כנגד חשבונית (₪ + מע״מ)', type: 'number', required: true },
     { name: 'tier1_cap', label: 'מדרגה 1 — עד (₪ לחודש)', type: 'number' },
     { name: 'tier1_pct', label: 'מדרגה 1 — עמלה %', type: 'number' },
     { name: 'tier2_cap', label: 'מדרגה 2 — עד (₪ לחודש)', type: 'number' },
@@ -537,11 +541,12 @@ function shContractForm(agentId) {
   const a = (cache.agents || []).find(x => x.id === agentId);
   if (!a) return;
   const people = shGet('contract_people');
-  const p = Object.assign({ start_date: today(), gender: 'm', comp_mode: 'tiers' }, people[agentId] || {},
+  const p = Object.assign({ start_date: today(), gender: 'm', emp_type: 'payslip', comp_mode: 'tiers' }, people[agentId] || {},
     { pct_new: Number(a.pct_new || 0) || '', pct_renew: Number(a.pct_renew || 0) || '' });
   openForm('הסכם עבודה · ' + a.name, [
     { type: 'html', html: '<p class="muted" style="font-size:.8rem">הפרטים נשמרים להפקה חוזרת. התנאים הכלליים (שכר, עמלות, פרטי המעסיק) נערכים בלשונית "הסכם עבודה" במוקד המכירות.</p>' },
     { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
+    { name: 'emp_type', label: 'סוג ההעסקה', type: 'select', options: [{ v: 'payslip', t: 'שכיר — תלוש שכר' }, { v: 'invoice', t: 'עצמאי — כנגד חשבונית' }] },
     { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
     { name: 'address', label: 'כתובת העובד' },
     { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
@@ -574,6 +579,7 @@ function shOnboard() {
     { type: 'section', label: 'פרטים אישיים' },
     { name: 'name', label: 'שם מלא', required: true },
     { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
+    { name: 'emp_type', label: 'סוג ההעסקה', type: 'select', options: [{ v: 'payslip', t: 'שכיר — תלוש שכר' }, { v: 'invoice', t: 'עצמאי — כנגד חשבונית' }] },
     { name: 'phone', label: 'טלפון', dir: 'ltr' },
     { name: 'email', label: 'אימייל', type: 'email', dir: 'ltr' },
     { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
@@ -585,7 +591,7 @@ function shOnboard() {
     { type: 'section', label: 'מה לעשות עכשיו' },
     { name: 'invite', label: 'לשלוח הזמנה לכניסה למערכת (תפקיד מכירות — נדרש אימייל)', type: 'checkbox' },
     { name: 'print', label: 'להפיק הסכם עבודה מיד', type: 'checkbox' },
-  ], { start_date: today(), gender: 'm', invite: true, print: true }, async (rec) => {
+  ], { start_date: today(), gender: 'm', emp_type: 'payslip', invite: true, print: true }, async (rec) => {
     if (rec.invite && !rec.email) { toast('לשליחת הזמנה למערכת צריך אימייל — או לבטל את הסימון', true); throw new Error('email'); }
     // החלון נפתח מיד, לפני הפעולות מול השרת, כדי שלא ייחסם כחלון קופץ
     const win = rec.print ? window.open('', '_blank') : null;
@@ -600,7 +606,7 @@ function shOnboard() {
         name: rec.name, phone: rec.phone || null, email: rec.email || null, voicenter_ext: rec.voicenter_ext || null,
         profile_id: profileId, monthly_target: rec.monthly_target, pct_new: 0, pct_renew: 0, bonus_type: 'none', active: true,
       }).select().single(), 'הוספת הסוכן נכשלה');
-      const person = { gender: rec.gender, comp_mode: 'tiers', id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
+      const person = { gender: rec.gender, emp_type: rec.emp_type, comp_mode: 'tiers', id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
       const people = shGet('contract_people');
       people[agent.id] = person;
       await shSet('contract_people', people);
@@ -633,6 +639,9 @@ const SH_FEM = [
   ['המגיעה לעובד על פי דין', 'המגיעה לעובדת על פי דין'],
   ['להעסיק את העובד בתפקיד מכירות, והעובד מעוניין להיות מועסק', 'להעסיק את העובדת בתפקיד מכירות, והעובדת מעוניינת להיות מועסקת'],
   ['<b>העובד:</b>', '<b>העובדת:</b>'],
+  ['העובד יספק', 'העובדת תספק'], ['העובד מספק את השירותים כעצמאי', 'העובדת מספקת את השירותים כעצמאית'], ['העובד אחראי לבדו', 'העובדת אחראית לבדה'],
+  ['אילו הועסק העובד כשכיר, היה שכרו', 'אילו הועסקה העובדת כשכירה, היה שכרה'], ['זכויותיו יחושבו', 'זכויותיה יחושבו'],
+  ['המגיעים לו.', 'המגיעים לה.'], ['לקבל מהעובד שירותי מכירה כעצמאי, והעובד מעוניין לספק לו', 'לקבל מהעובדת שירותי מכירה כעצמאית, והעובדת מעוניינת לספק לו'], ['ישולם לעובד <b>', 'ישולם לעובדת <b>'],
   ['שהועבר לטיפול העובד', 'שהועבר לטיפול העובדת'], ['משיוכו לעובד', 'משיוכו לעובדת'],
   ['יישאר משויך לעובד', 'יישאר משויך לעובדת'], ['לא תזכה את העובד', 'לא תזכה את העובדת'], ['<div>העובד — ', '<div>העובדת — '],
 ];
@@ -652,10 +661,50 @@ function shLeadOwnershipText() {
   return `ליד שהועבר לטיפול העובד ולא היה עמו קשר מתועד במערכת (שיחה, הערה או תיעוד) במשך ${rel} ימים — ייצא אוטומטית משיוכו לעובד ויעבור למאגר הלידים הכללי, שממנו כל איש מכירות רשאי לתפוס אותו ולטפל בו כרגיל. ליד שפרסם אצל המעסיק יישאר משויך לעובד ${keep} ימים ממועד הפרסום האחרון שלו, גם אם לא היה עמו קשר בתקופה זו. עסקה שתיסגר עם ליד לאחר שיצא משיוכו ונתפס על ידי איש מכירות אחר — לא תזכה את העובד בעמלה.`;
 }
 
+/* עצמאי כנגד חשבונית: אותם סעיפי עבודה (תפקיד, עמלות, לידים, סודיות, ציוד),
+   בלי תלוש, זכויות שכיר ותקופת ניסיון; במקומם תמורה + מע״מ וסעיף מעמד עצמאי
+   (כולל השכר החלופי — שכר השכיר — אם ייקבעו יחסי עובד ומעסיק) */
+function shInvoiceSections(sec, c, p, n, blank) {
+  const by = t => (sec.find(x => x[0] === t) || [t, ''])[1];
+  const toInvoice = h => h
+    .split('בנוסף לשכר היסוד').join('בנוסף לתמורה השעתית')
+    .split('ותפורט בתלוש השכר').join('ותיכלל בחשבונית, בתוספת מע״מ כדין')
+    .split('ויפורטו בתלוש השכר').join('ויכללו בחשבונית, בתוספת מע״מ כדין')
+    .split('₪ ברוטו</b>').join('₪ בתוספת מע״מ</b>');
+  const role = by('התפקיד')
+    .replace(/העובד מועסק בתפקיד (<b>.*?<\/b>)\. תפקידו כולל/, 'העובד יספק למעסיק שירותי $1, הכוללים')
+    .replace('הקשורה לתפקיד שתוטל', 'הקשורה לשירותים שתוטל');
+  const out = [
+    ['השירותים', role],
+    ['תחילת ההתקשרות', `ההתקשרות מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.`],
+    ['היקף ודיווח שעות', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה, והדיווח ישמש בסיס לחשבונית. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
+    ['תמורה', `בעבור כל שעת עבודה ישולם לעובד <b>${n(c.hourly_invoice)} ₪ בתוספת מע״מ כדין</b>, כנגד חשבונית מס. התמורה תשולם עד ה-9 בכל חודש בעבור החודש הקודם.`],
+    ['עמלות מכירה', toInvoice(by('עמלות מכירה'))],
+    ['לידים ושיוך לקוחות', by('לידים ושיוך לקוחות')],
+    ['מעמד עצמאי', `העובד מספק את השירותים כעצמאי (עוסק מורשה או פטור), ואין בין הצדדים יחסי עובד ומעסיק. העובד אחראי לבדו לתשלום מס הכנסה, מע״מ וביטוח לאומי בגין התמורה. הצדדים מצהירים כי התמורה נקבעה בהתחשב במעמד זה: אילו הועסק העובד כשכיר, היה שכרו ${n(c.hourly)} ₪ לשעה ברוטו, וההפרש מהווה תשלום מלא ומראש בעד כל הזכויות הסוציאליות. אם ייקבע כי התקיימו בין הצדדים יחסי עובד ומעסיק — זכויותיו יחושבו לפי שכר זה, וכל סכום ששולם מעבר לו יקוזז מהסכומים המגיעים לו.`],
+    ['סודיות ומאגר הלקוחות', by('סודיות ומאגר הלקוחות')],
+    ['ציוד ומסמכים', by('ציוד ומסמכים')],
+    ['סיום ההתקשרות', 'כל צד רשאי לסיים את ההתקשרות בהודעה מוקדמת בכתב של 14 ימים. עם סיום ההתקשרות יועבר לעובד כל המגיע לו לפי הסכם זה.'],
+  ];
+  const extra = sec.find(x => x[0] === 'הוראות נוספות');
+  if (extra) out.push(extra);
+  out.push(['כללי', 'הסכם זה ממצה את ההתקשרות בין הצדדים. כל שינוי בו ייעשה בכתב ובחתימת שני הצדדים.']);
+  return out;
+}
+
+/* מינוח של הסכם שירותים: "המזמין" ו"נותן/ת השירותים" במקום "המעסיק" ו"העובד/ת" */
+const SH_CONTRACTOR = [
+  ['ליותר מעובד אחד', 'ליותר מאיש מכירות אחד'],
+  ['העובדת', 'נותנת השירותים'], ['לעובדת', 'לנותנת השירותים'],
+  ['העובד', 'נותן השירותים'], ['לעובד', 'לנותן השירותים'],
+  ['למעסיק', 'למזמין'], ['המעסיק', 'המזמין'],
+];
+function shContractor(html) { return SH_CONTRACTOR.reduce((h, [a, b]) => h.split(a).join(b), html); }
+
 function shFem(html) { return SH_FEM.reduce((h, [m, f]) => h.split(m).join(f), html); }
 
 function shContractPrint(a, p, win) {
-  const c = shGet('contract');
+  const c = shTerms();
   const employer = c.employer || (cache.settings || {}).paper_name || '@@PAPER_NAME@@';
   const blank = v => v ? esc(v) : '<span class="blank"></span>';
   // הלוגו של המופע — כתובת מלאה, כי חלון ההדפסה נפתח ריק (about:blank)
@@ -668,7 +717,7 @@ function shContractPrint(a, p, win) {
   const basis = c.basis === 'signed'
     ? 'העמלה תחושב על הזמנות פרסום חתומות שנסגרו על ידי העובד באותו חודש קלנדרי, לפני מע״מ ובניכוי הנחות. הזמנה שבוטלה או שלא נגבתה — העמלה בגינה תקוזז מהעמלות הבאות.'
     : 'העמלה תחושב על סכומים שנגבו בפועל באותו חודש קלנדרי מעסקאות שנסגרו על ידי העובד, לפני מע״מ ובניכוי הנחות, זיכויים וביטולים.';
-  const sec = [
+  let sec = [
     ['התפקיד', `העובד מועסק בתפקיד <b>${esc(c.role)}</b>. תפקידו כולל איתור ופנייה למפרסמים, מכירת שטחי פרסום ושירותים נלווים של המעסיק, תיעוד מלא של כל פנייה, שיחה ותוצאה במערכת המעסיק, קביעת פעולת המשך לכל ליד, ביצוע פולואפים, וכל משימה נוספת הקשורה לתפקיד שתוטל עליו מעת לעת.<br>העובד יפעל לפי נהלי המכירות של המעסיק, ישתמש במחירון ובהצעות המאושרים בלבד, ולא ייתן ללקוח הנחה, תנאי תשלום או התחייבות חריגה ללא אישור מראש מהמעסיק.` + (Number(c.weekly_target) ? `<br>יעד המכירות השבועי של העובד הוא <b>לפחות ${n(c.weekly_target)} ₪</b> (לפי בסיס חישוב העמלה שבסעיף העמלות). העמידה ביעד תיבחן במסגרת המשוב והמעקב השוטפים.` : '')],
     ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` תקופת הניסיון היא ${trial} מיום תחילת העבודה, ובמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
     ['היקף המשרה ושעות העבודה', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה. שעות נוספות יבוצעו רק באישור מראש של המעסיק וישולמו לפי חוק שעות עבודה ומנוחה. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
@@ -682,6 +731,9 @@ function shContractPrint(a, p, win) {
   ];
   if ((c.extra || '').trim()) sec.push(['הוראות נוספות', esc(c.extra).replace(/\n/g, '<br>')]);
   sec.push(['כללי', 'הסכם זה מהווה גם הודעה לעובד על תנאי עבודתו לפי חוק הודעה לעובד ולמועמד לעבודה (תנאי עבודה), התשס״ב-2002. ההסכם הוא אישי ואינו כפוף להסכם קיבוצי. כל שינוי בו ייעשה בכתב ובחתימת שני הצדדים. אין באמור בהסכם זה כדי לגרוע מזכות המגיעה לעובד על פי דין.']);
+
+  const inv = p.emp_type === 'invoice';
+  if (inv) sec = shInvoiceSections(sec, c, p, n, blank);
 
   const w = win || window.open('', '_blank');
   if (!w) { toast('הדפדפן חסם חלון קופץ — אפשרו חלונות קופצים לאתר ונסו שוב', true); return; }
@@ -715,7 +767,13 @@ ${sec.map(([t, b], i) => `<h3>${i + 1}. ${t}</h3><div>${b}</div>`).join('')}
 <p style="margin-top:22px">ולראיה באו הצדדים על החתום:</p>
 <div class="sign"><div>המעסיק${c.signer ? ' — ' + esc(c.signer) : ''}</div><div>העובד — ${esc(a.name)}</div></div>
 </body></html>`;
+  if (inv) doc = doc
+    .replace('<title>הסכם עבודה', '<title>הסכם התקשרות')
+    .replace('<h1>הסכם עבודה</h1>', '<h1>הסכם התקשרות למתן שירותים</h1>')
+    .replace('<br>ת.ז: ', '<br>ת.ז / ע.מ: ')
+    .replace(/<p>הואיל והמעסיק מעוניין להעסיק[^<]*<\/p>/, '<p>הואיל והמעסיק מעוניין לקבל מהעובד שירותי מכירה כעצמאי, והעובד מעוניין לספק לו שירותים אלה — הוסכם בין הצדדים כדלקמן:</p>');
   if (p.gender === 'f') doc = shFem(doc);
+  if (inv) doc = shContractor(doc);
   w.document.write(doc);
   w.document.close();
 }
