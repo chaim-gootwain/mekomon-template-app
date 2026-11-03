@@ -27,8 +27,6 @@ ${100 - Number(cache.settings.commission_split_billing || 50)}% בגבייה.
 renderTable(document.getElementById('agentsTable'), _agents, [
 { h: 'שם', f: r => `<b>${esc(r.name)}</b>` + (r.profile_id ? '' : ' <span class="pill">חיצוני</span>') + (r.active ? '' : ' <span class="pill red">לא פעיל</span>') },
 { h: 'טלפון', f: r => `<span dir="ltr">${esc(r.phone)}</span>` },
-{ h: '% לקוח חדש', f: r => r.pct_new + '%' },
-{ h: '% מתחדש', f: r => r.pct_renew + '%' },
 { h: 'יעד חודשי', f: r => money(r.monthly_target) || '—' },
 { h: 'בונוס', f: r => r.bonus_type === 'none' ? '—' : (r.bonus_type === 'fixed' ? money(r.bonus_value) : r.bonus_value + '%') },
 ], { onRow: r => agentEdit(r.id), empty: 'אין סוכנים עדיין — הוסף את הראשון' });
@@ -43,8 +41,6 @@ options: cache.profiles.filter(p => ['admin', 'sales'].includes(p.role)).map(p =
 { name: 'voicenter_ext', label: 'שלוחה (Voicenter)', dir: 'ltr' },
 { name: 'email', label: 'אימייל', dir: 'ltr' },
 { name: 'payment_details', label: 'פרטי תשלום (לסוכן חיצוני)' },
-{ name: 'pct_new', label: '% עמלה — לקוח חדש', type: 'number', required: true, default: 15 },
-{ name: 'pct_renew', label: '% עמלה — לקוח מתחדש', type: 'number', required: true, default: 7 },
 { name: 'monthly_target', label: 'יעד מכירות חודשי (₪)', type: 'number' },
 { name: 'bonus_type', label: 'סוג בונוס בעמידה ביעד', type: 'select', required: true, default: 'none',
 options: [{ v: 'none', t: 'ללא בונוס' }, { v: 'fixed', t: 'סכום קבוע' }, { v: 'percent', t: 'אחוז תוספת על העמלה' }] },
@@ -55,7 +51,8 @@ options: [{ v: 'none', t: 'ללא בונוס' }, { v: 'fixed', t: 'סכום קב
 
 function agentAdd() {
 openForm('סוכן חדש', AGENT_FIELDS(), {}, async (rec) => {
-await run(db.from('agents').insert(rec));
+// העמלה לפי מדרגות הסכם העבודה; עמלה אישית (אחוז מלקוח חדש/מתחדש) — במוקד המכירות → הסכם עבודה
+await run(db.from('agents').insert({ ...rec, pct_new: 0, pct_renew: 0 }));
 await refreshCache();
 toast('הסוכן נוסף');
 openPage('agents');

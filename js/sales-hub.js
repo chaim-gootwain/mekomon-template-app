@@ -537,17 +537,32 @@ function shContractForm(agentId) {
   const a = (cache.agents || []).find(x => x.id === agentId);
   if (!a) return;
   const people = shGet('contract_people');
-  const p = Object.assign({ start_date: today(), gender: 'm' }, people[agentId] || {});
+  const p = Object.assign({ start_date: today(), gender: 'm', comp_mode: 'tiers' }, people[agentId] || {},
+    { pct_new: Number(a.pct_new || 0) || '', pct_renew: Number(a.pct_renew || 0) || '' });
   openForm('הסכם עבודה · ' + a.name, [
     { type: 'html', html: '<p class="muted" style="font-size:.8rem">הפרטים נשמרים להפקה חוזרת. התנאים הכלליים (שכר, עמלות, פרטי המעסיק) נערכים בלשונית "הסכם עבודה" במוקד המכירות.</p>' },
     { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
     { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
     { name: 'address', label: 'כתובת העובד' },
     { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
+    { type: 'section', label: 'עמלה' },
+    { name: 'comp_mode', label: 'שיטת העמלה', type: 'select', options: [{ v: 'tiers', t: 'מדרגות ההסכם (כמו כולם)' }, { v: 'pct', t: 'אישי: אחוז מלקוח חדש / מתחדש' }] },
+    { name: 'pct_new', label: '% לקוח חדש (רק בשיטה האישית)', type: 'number' },
+    { name: 'pct_renew', label: '% לקוח מתחדש (רק בשיטה האישית)', type: 'number' },
   ], p, async (rec) => {
+    if (rec.comp_mode === 'pct' && !(Number(rec.pct_new) > 0 || Number(rec.pct_renew) > 0)) {
+      toast('בשיטה האישית יש למלא אחוז ללקוח חדש ו/או מתחדש', true); throw new Error('pct');
+    }
     // חלון ההדפסה נפתח לפני השמירה — כדי שלא ייחסם כחלון קופץ
     shContractPrint(a, rec);
-    people[agentId] = rec;
+    // האחוזים נשמרים בכרטיס הסוכן (שם המערכת קוראת אותם); במדרגות — 0
+    const pct = rec.comp_mode === 'pct'
+      ? { pct_new: Number(rec.pct_new) || 0, pct_renew: Number(rec.pct_renew) || 0 }
+      : { pct_new: 0, pct_renew: 0 };
+    await run(db.from('agents').update(pct).eq('id', agentId), 'שמירת אחוזי העמלה');
+    Object.assign(a, pct);
+    const { pct_new, pct_renew, ...person } = rec;
+    people[agentId] = person;
     await shSet('contract_people', people);
   });
 }
@@ -583,9 +598,9 @@ function shOnboard() {
       }
       const agent = await run(db.from('agents').insert({
         name: rec.name, phone: rec.phone || null, email: rec.email || null, voicenter_ext: rec.voicenter_ext || null,
-        profile_id: profileId, monthly_target: rec.monthly_target, pct_new: 15, pct_renew: 7, bonus_type: 'none', active: true,
+        profile_id: profileId, monthly_target: rec.monthly_target, pct_new: 0, pct_renew: 0, bonus_type: 'none', active: true,
       }).select().single(), 'הוספת הסוכן נכשלה');
-      const person = { gender: rec.gender, id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
+      const person = { gender: rec.gender, comp_mode: 'tiers', id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
       const people = shGet('contract_people');
       people[agent.id] = person;
       await shSet('contract_people', people);
@@ -617,8 +632,26 @@ const SH_FEM = [
   ['יועבר לעובד כל המגיע לו', 'יועבר לעובדת כל המגיע לה'], ['הודעה לעובד על תנאי עבודתו', 'הודעה לעובדת על תנאי עבודתה'],
   ['המגיעה לעובד על פי דין', 'המגיעה לעובדת על פי דין'],
   ['להעסיק את העובד בתפקיד מכירות, והעובד מעוניין להיות מועסק', 'להעסיק את העובדת בתפקיד מכירות, והעובדת מעוניינת להיות מועסקת'],
-  ['<b>העובד:</b>', '<b>העובדת:</b>'], ['<div>העובד — ', '<div>העובדת — '],
+  ['<b>העובד:</b>', '<b>העובדת:</b>'],
+  ['שהועבר לטיפול העובד', 'שהועבר לטיפול העובדת'], ['משיוכו לעובד', 'משיוכו לעובדת'],
+  ['יישאר משויך לעובד', 'יישאר משויך לעובדת'], ['לא תזכה את העובד', 'לא תזכה את העובדת'], ['<div>העובד — ', '<div>העובדת — '],
 ];
+/* עמלה אישית (אחוז מלקוח חדש / מתחדש) — לסוכן שלא במדרגות */
+function shPctCommissionText(p, a, basis, tail) {
+  const pn = Number(p.pct_new != null && p.pct_new !== '' ? p.pct_new : a.pct_new) || 0;
+  const pr = Number(p.pct_renew != null && p.pct_renew !== '' ? p.pct_renew : a.pct_renew) || 0;
+  const months = Math.max(Number((cache.settings || {}).new_customer_months || 3) || 3, 0);
+  return `בנוסף לשכר היסוד תשולם לעובד עמלה בשיעור <b>${pn}%</b> מהמכירות ללקוח חדש ובשיעור <b>${pr}%</b> מהמכירות ללקוח מתחדש. "לקוח חדש" — לקוח ב-${months} החודשים הראשונים ממועד החיוב הראשון שלו; לאחר מכן הוא לקוח מתחדש. ${basis}<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר. עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${tail} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`;
+}
+
+/* כלל השיוך — אותם ימים שבהגדרות "שחרור לידים" (lead_release_days / lead_keep_advertiser_days) */
+function shLeadOwnershipText() {
+  const s = cache.settings || {};
+  const rel = Number(s.lead_release_days) > 0 ? Number(s.lead_release_days) : 60;
+  const keep = Number(s.lead_keep_advertiser_days) > 0 ? Number(s.lead_keep_advertiser_days) : 120;
+  return `ליד שהועבר לטיפול העובד ולא היה עמו קשר מתועד במערכת (שיחה, הערה או תיעוד) במשך ${rel} ימים — ייצא אוטומטית משיוכו לעובד ויעבור למאגר הלידים הכללי, שממנו כל איש מכירות רשאי לתפוס אותו ולטפל בו כרגיל. ליד שפרסם אצל המעסיק יישאר משויך לעובד ${keep} ימים ממועד הפרסום האחרון שלו, גם אם לא היה עמו קשר בתקופה זו. עסקה שתיסגר עם ליד לאחר שיצא משיוכו ונתפס על ידי איש מכירות אחר — לא תזכה את העובד בעמלה.`;
+}
+
 function shFem(html) { return SH_FEM.reduce((h, [m, f]) => h.split(m).join(f), html); }
 
 function shContractPrint(a, p, win) {
@@ -640,7 +673,8 @@ function shContractPrint(a, p, win) {
     ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` תקופת הניסיון היא ${trial} מיום תחילת העבודה, ובמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
     ['היקף המשרה ושעות העבודה', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה. שעות נוספות יבוצעו רק באישור מראש של המעסיק וישולמו לפי חוק שעות עבודה ומנוחה. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
     ['שכר יסוד', `בעבור כל שעת עבודה ישולם לעובד שכר של <b>${n(c.hourly)} ₪ ברוטו</b>. השכר ישולם עד ה-9 בכל חודש בעבור החודש הקודם, בצירוף תלוש שכר.`],
-    ['עמלות מכירה', `בנוסף לשכר היסוד תשולם לעובד עמלה חודשית. ${mode}<ul>${shTiersText(c).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${basis}${Number(c.bonus_amount) ? `<br>בנוסף, בכל חודש שבו סך המכירות של העובד (לפי אותו בסיס חישוב) יגיע ל-${n(c.bonus_threshold)} ₪ ומעלה, ישולם לו בונוס של <b>${n(c.bonus_amount)} ₪ ברוטו</b>.` : ''}${Number(c.bonus_amount) ? '<br>העמלה והבונוס ישולמו יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות להם, ויפורטו בתלוש השכר.' : '<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר.'} עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${n(c.tail_days)} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`],
+    ['עמלות מכירה', p.comp_mode === 'pct' ? shPctCommissionText(p, a, basis, n(c.tail_days)) : `בנוסף לשכר היסוד תשולם לעובד עמלה חודשית. ${mode}<ul>${shTiersText(c).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${basis}${Number(c.bonus_amount) ? `<br>בנוסף, בכל חודש שבו סך המכירות של העובד (לפי אותו בסיס חישוב) יגיע ל-${n(c.bonus_threshold)} ₪ ומעלה, ישולם לו בונוס של <b>${n(c.bonus_amount)} ₪ ברוטו</b>.` : ''}${Number(c.bonus_amount) ? '<br>העמלה והבונוס ישולמו יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות להם, ויפורטו בתלוש השכר.' : '<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר.'} עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${n(c.tail_days)} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`],
+    ['לידים ושיוך לקוחות', shLeadOwnershipText()],
     ['זכויות סוציאליות', 'העובד יהיה זכאי לכל הזכויות על פי דין, ובכלל זה: הפרשות לפנסיה ולפיצויי פיטורים לפי צו ההרחבה לביטוח פנסיוני מקיף במשק, ימי חופשה לפי חוק חופשה שנתית, דמי מחלה לפי חוק דמי מחלה, דמי הבראה, החזר הוצאות נסיעה לעבודה וימי חג — הכול לפי הדין וצווי ההרחבה החלים, ובהתאם להיקף משרתו.'],
     ['סודיות ומאגר הלקוחות', 'מאגר הלקוחות, הלידים, המחירונים, תנאי ההתקשרות עם לקוחות וכל מידע עסקי שיגיע לעובד במסגרת עבודתו הם רכוש המעסיק וסוד מסחרי שלו. העובד ישמור עליהם בסודיות מלאה במהלך העבודה ולאחריה, לא יעתיק, לא יוריד ולא יעביר אותם לאחר, ולא ישתמש בהם אלא לצורך עבודתו אצל המעסיק. העובד ישתמש רק בחשבון האישי שניתן לו במערכת, לא ישתף סיסמאות, וישמור על פרטיות הלקוחות לפי חוק הגנת הפרטיות.'],
     ['ציוד ומסמכים', 'כל ציוד, חומר שיווקי, מסמך או הרשאת גישה שיימסרו לעובד יוחזרו למעסיק עם סיום ההעסקה, וגישתו למערכות המעסיק תיחסם.'],
