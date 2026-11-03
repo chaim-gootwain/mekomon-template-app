@@ -34,6 +34,7 @@ const SH_TABS = [
   ['routine', '◷ שגרת ניהול'],
   ['reports', '▤ דיווחים יומיים'],
   ['messages', '✉ הודעות לצוות'],
+  ['contract', '✍ הסכם עבודה'],
 ];
 
 const SH_TASKS = [
@@ -70,6 +71,14 @@ const SH_DEFAULTS = {
   checks: {},   // 'agentId-day-task' → true
   lessons: {},  // 'agentId-courseIdx' → true
   notes: {},    // agentId → טקסט משוב
+  // הסכם עבודה: תנאים כלליים (זהים לכל הסוכנים) + פרטים אישיים לכל סוכן
+  contract: {
+    employer: '', employer_id: '', employer_address: '', signer: '',
+    role: 'נציג/ת מכירות פרסום', scope: 'משרה חלקית, לפי סידור עבודה שבועי שייקבע מראש בתיאום',
+    hourly: 50, tier1_cap: 15000, tier1_pct: 10, tier2_cap: 30000, tier2_pct: 15, tier3_pct: 15,
+    tier_mode: 'graded', basis: 'collected', trial_months: 3, tail_days: 30, extra: '',
+  },
+  contract_people: {},  // agentId → { id_number, address, start_date }
 };
 
 const SH_SCHEDULE = [
@@ -208,6 +217,7 @@ ${notes[a.id] ? `<div class="muted" style="font-size:.78rem;margin-top:8px;white
 <button class="btn btn-sm btn-ghost" onclick="shGoalForm(${a.id})">יעד</button>
 <button class="btn btn-sm btn-ghost" onclick="_shAgent=${a.id};shGo('training')">תיק הכשרה</button>
 <button class="btn btn-sm btn-ghost" onclick="shCoach(${a.id})">משוב אישי</button>
+<button class="btn btn-sm btn-ghost" onclick="shContractForm(${a.id})">📄 הסכם עבודה</button>
 </div></div>`;
     }).join('') || '<div class="empty">אין סוכנים פעילים</div>'}
 </div>`;
@@ -262,6 +272,32 @@ ${_shAgent != null ? `<button class="btn btn-sm btn-ghost" onclick="shCoach(${_s
 <div class="page-head"><h2>שיטה ברורה. עבודה מסודרת.</h2><button class="btn btn-ghost" onclick="shListEdit('procedures')">✏️ עריכת הנהלים</button></div>
 <div class="card card-pad" style="margin-bottom:14px"><b>לכל ליד אחראי. לכל שיחה תיעוד. לכל המשך מועד.</b><div class="muted" style="font-size:.85rem">שלושת הכללים שמחזיקים את רצף העבודה של הצוות.</div></div>
 ${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">${esc(p.title)}</summary><p style="margin-top:8px;white-space:pre-wrap">${esc(p.body)}</p></details>`).join('')}`;
+  },
+
+  contract() {
+    const c = shGet('contract'), people = shGet('contract_people');
+    const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${k}</span><b>${v || '<span style="color:#b91c1c">חסר</span>'}</b></div>`;
+    return `
+<div class="page-head"><h2>הסכם עבודה לאנשי מכירות</h2><button class="btn btn-ghost" onclick="shContractTerms()">✏️ עריכת תנאי ההסכם</button></div>
+<div class="card card-pad" style="margin-bottom:14px;background:#fff8e6;border-color:#f3d48a"><b>⚠ נוסח לדוגמה</b><div class="muted" style="font-size:.85rem">ההסכם מבוסס על דיני העבודה בישראל ומהווה גם הודעה לעובד על תנאי העבודה. מומלץ לעבור עליו פעם אחת עם עו״ד או רו״ח לפני החתימה הראשונה.</div></div>
+<div class="grid2" style="gap:16px;align-items:start">
+<div class="card card-pad"><b>תנאים כלליים</b>
+${row('המעסיק', esc(c.employer || (cache.settings || {}).paper_name || ''))}
+${row('ח.פ / ע.מ', esc(c.employer_id))}
+${row('כתובת המעסיק', esc(c.employer_address))}
+${row('חותם בשם המעסיק', esc(c.signer))}
+${row('תפקיד', esc(c.role))}
+${row('שכר שעתי', money(c.hourly))}
+${row('עמלות', esc(shTiersText(c, true)))}
+${row('בסיס העמלה', c.basis === 'signed' ? 'הזמנות חתומות' : 'נגבה בפועל')}
+${row('תקופת ניסיון', Number(c.trial_months) ? c.trial_months + ' חודשים' : 'ללא')}
+</div>
+<div class="card card-pad"><b>הפקת הסכם לסוכן</b>
+${shAgents().map(a => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
+<div style="flex:1"><b>${esc(a.name)}</b><div class="muted" style="font-size:.78rem">${people[a.id] && people[a.id].start_date ? 'תחילת עבודה: ' + heDate(people[a.id].start_date) : 'פרטים אישיים טרם הוזנו'}</div></div>
+<button class="btn btn-sm" onclick="shContractForm(${a.id})">📄 הפקת הסכם</button></div>`).join('') || '<div class="empty">אין סוכנים פעילים</div>'}
+</div>
+</div>`;
   },
 
   routine() {
@@ -435,6 +471,126 @@ function shListEdit(key) {
     else { await run(db.from('sales_hub_store').delete().eq('key', key)); delete _shStore[key]; }
     toast('נשמר'); shRender();
   });
+}
+
+/* ---------- הסכם עבודה ---------- */
+function shTiersText(c, short) {
+  const n = v => Number(v || 0).toLocaleString('he-IL');
+  const top = c.tier3_pct === '' || c.tier3_pct == null ? c.tier2_pct : c.tier3_pct;
+  const t = [
+    `עד ${n(c.tier1_cap)} ₪ — ${Number(c.tier1_pct || 0)}%`,
+    `מעל ${n(c.tier1_cap)} ₪ ועד ${n(c.tier2_cap)} ₪ — ${Number(c.tier2_pct || 0)}%`,
+    `מעל ${n(c.tier2_cap)} ₪ — ${Number(top || 0)}%`,
+  ];
+  if (short) return t.join(' · ') + (c.tier_mode === 'whole' ? ' (על כל הסכום)' : ' (מדורג)');
+  return t;
+}
+
+function shContractTerms() {
+  const c = shGet('contract');
+  const rec0 = Object.assign({}, c, { employer: c.employer || (cache.settings || {}).paper_name || '' });
+  openForm('תנאי הסכם העבודה', [
+    { type: 'section', label: 'פרטי המעסיק' },
+    { name: 'employer', label: 'שם המעסיק (כפי שרשום)' },
+    { name: 'employer_id', label: 'ח.פ / ע.מ', dir: 'ltr' },
+    { name: 'employer_address', label: 'כתובת המעסיק' },
+    { name: 'signer', label: 'שם החותם בשם המעסיק' },
+    { type: 'section', label: 'התפקיד' },
+    { name: 'role', label: 'תואר התפקיד' },
+    { name: 'scope', label: 'היקף המשרה' },
+    { name: 'trial_months', label: 'תקופת ניסיון (חודשים, 0 = ללא)', type: 'number' },
+    { type: 'section', label: 'שכר ועמלות' },
+    { name: 'hourly', label: 'שכר שעתי ברוטו (₪)', type: 'number', required: true },
+    { name: 'tier1_cap', label: 'מדרגה 1 — עד (₪ לחודש)', type: 'number' },
+    { name: 'tier1_pct', label: 'מדרגה 1 — עמלה %', type: 'number' },
+    { name: 'tier2_cap', label: 'מדרגה 2 — עד (₪ לחודש)', type: 'number' },
+    { name: 'tier2_pct', label: 'מדרגה 2 — עמלה %', type: 'number' },
+    { name: 'tier3_pct', label: 'מעל מדרגה 2 — עמלה %', type: 'number' },
+    { name: 'tier_mode', label: 'אופן החישוב', type: 'select', options: [{ v: 'graded', t: 'מדורג — כל חלק לפי המדרגה שלו' }, { v: 'whole', t: 'על כל הסכום — לפי המדרגה שהושגה' }] },
+    { name: 'basis', label: 'בסיס העמלה', type: 'select', options: [{ v: 'collected', t: 'סכומים שנגבו בפועל' }, { v: 'signed', t: 'הזמנות חתומות' }] },
+    { name: 'tail_days', label: 'עמלה על גבייה אחרי סיום העבודה — עד כמה ימים', type: 'number' },
+    { name: 'extra', label: 'סעיפים נוספים (יודפסו כסעיף "הוראות נוספות")', type: 'textarea', rows: 4 },
+  ], rec0, async (rec) => {
+    await shSet('contract', Object.assign({}, c, rec));
+    toast('תנאי ההסכם נשמרו'); shRender();
+  });
+}
+
+function shContractForm(agentId) {
+  const a = (cache.agents || []).find(x => x.id === agentId);
+  if (!a) return;
+  const people = shGet('contract_people');
+  const p = Object.assign({ start_date: today() }, people[agentId] || {});
+  openForm('הסכם עבודה · ' + a.name, [
+    { type: 'html', html: '<p class="muted" style="font-size:.8rem">הפרטים נשמרים להפקה חוזרת. התנאים הכלליים (שכר, עמלות, פרטי המעסיק) נערכים בלשונית "הסכם עבודה" במוקד המכירות.</p>' },
+    { name: 'id_number', label: 'ת.ז של העובד', dir: 'ltr' },
+    { name: 'address', label: 'כתובת העובד' },
+    { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
+  ], p, async (rec) => {
+    // חלון ההדפסה נפתח לפני השמירה — כדי שלא ייחסם כחלון קופץ
+    shContractPrint(a, rec);
+    people[agentId] = rec;
+    await shSet('contract_people', people);
+  });
+}
+
+function shContractPrint(a, p) {
+  const c = shGet('contract');
+  const employer = c.employer || (cache.settings || {}).paper_name || '@@PAPER_NAME@@';
+  const blank = v => v ? esc(v) : '<span class="blank"></span>';
+  const n = v => Number(v || 0).toLocaleString('he-IL');
+  const trial = Number(c.trial_months || 0);
+  const mode = c.tier_mode === 'whole'
+    ? 'שיעור העמלה נקבע לפי סך המכירות של החודש וחל על כל הסכום, כדלקמן:'
+    : 'העמלה מדורגת: כל חלק מסך המכירות החודשי מזכה בשיעור של המדרגה שבה הוא נמצא, כדלקמן:';
+  const basis = c.basis === 'signed'
+    ? 'העמלה תחושב על הזמנות פרסום חתומות שנסגרו על ידי העובד באותו חודש קלנדרי, לפני מע״מ ובניכוי הנחות. הזמנה שבוטלה או שלא נגבתה — העמלה בגינה תקוזז מהעמלות הבאות.'
+    : 'העמלה תחושב על סכומים שנגבו בפועל באותו חודש קלנדרי מעסקאות שנסגרו על ידי העובד, לפני מע״מ ובניכוי הנחות, זיכויים וביטולים.';
+  const sec = [
+    ['התפקיד', `העובד מועסק בתפקיד <b>${esc(c.role)}</b>. תפקידו כולל איתור ופנייה למפרסמים, מכירת שטחי פרסום ושירותים נלווים של המעסיק, תיעוד מלא של כל פנייה, שיחה ותוצאה במערכת המעסיק, קביעת פעולת המשך לכל ליד, ביצוע פולואפים, וכל משימה נוספת הקשורה לתפקיד שתוטל עליו מעת לעת.<br>העובד יפעל לפי נהלי המכירות של המעסיק, ישתמש במחירון ובהצעות המאושרים בלבד, ולא ייתן ללקוח הנחה, תנאי תשלום או התחייבות חריגה ללא אישור מראש מהמעסיק.`],
+    ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` ${trial} החודשים הראשונים הם תקופת ניסיון, שבמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
+    ['היקף המשרה ושעות העבודה', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה. שעות נוספות יבוצעו רק באישור מראש של המעסיק וישולמו לפי חוק שעות עבודה ומנוחה. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
+    ['שכר יסוד', `בעבור כל שעת עבודה ישולם לעובד שכר של <b>${n(c.hourly)} ₪ ברוטו</b>. השכר ישולם עד ה-9 בכל חודש בעבור החודש הקודם, בצירוף תלוש שכר.`],
+    ['עמלות מכירה', `בנוסף לשכר היסוד תשולם לעובד עמלה חודשית. ${mode}<ul>${shTiersText(c).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${basis}<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר. עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${n(c.tail_days)} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`],
+    ['זכויות סוציאליות', 'העובד יהיה זכאי לכל הזכויות על פי דין, ובכלל זה: הפרשות לפנסיה ולפיצויי פיטורים לפי צו ההרחבה לביטוח פנסיוני מקיף במשק, ימי חופשה לפי חוק חופשה שנתית, דמי מחלה לפי חוק דמי מחלה, דמי הבראה, החזר הוצאות נסיעה לעבודה וימי חג — הכול לפי הדין וצווי ההרחבה החלים, ובהתאם להיקף משרתו.'],
+    ['סודיות ומאגר הלקוחות', 'מאגר הלקוחות, הלידים, המחירונים, תנאי ההתקשרות עם לקוחות וכל מידע עסקי שיגיע לעובד במסגרת עבודתו הם רכוש המעסיק וסוד מסחרי שלו. העובד ישמור עליהם בסודיות מלאה במהלך העבודה ולאחריה, לא יעתיק, לא יוריד ולא יעביר אותם לאחר, ולא ישתמש בהם אלא לצורך עבודתו אצל המעסיק. העובד ישתמש רק בחשבון האישי שניתן לו במערכת, לא ישתף סיסמאות, וישמור על פרטיות הלקוחות לפי חוק הגנת הפרטיות.'],
+    ['ציוד ומסמכים', 'כל ציוד, חומר שיווקי, מסמך או הרשאת גישה שיימסרו לעובד יוחזרו למעסיק עם סיום ההעסקה, וגישתו למערכות המעסיק תיחסם.'],
+    ['סיום ההעסקה', 'כל צד רשאי לסיים את ההעסקה בהודעה מוקדמת בכתב, לפי חוק הודעה מוקדמת לפיטורים ולהתפטרות. המעסיק רשאי לוותר על עבודת העובד בתקופת ההודעה ולשלם לו את שכרו בעדה. עם סיום ההעסקה יועבר לעובד כל המגיע לו על פי דין והסכם זה.'],
+  ];
+  if ((c.extra || '').trim()) sec.push(['הוראות נוספות', esc(c.extra).replace(/\n/g, '<br>')]);
+  sec.push(['כללי', 'הסכם זה מהווה גם הודעה לעובד על תנאי עבודתו לפי חוק הודעה לעובד ולמועמד לעבודה (תנאי עבודה), התשס״ב-2002. ההסכם הוא אישי ואינו כפוף להסכם קיבוצי. כל שינוי בו ייעשה בכתב ובחתימת שני הצדדים. אין באמור בהסכם זה כדי לגרוע מזכות המגיעה לעובד על פי דין.']);
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('הדפדפן חסם חלון קופץ — אפשרו חלונות קופצים לאתר ונסו שוב', true); return; }
+  w.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>הסכם עבודה — ${esc(a.name)}</title>
+<style>
+body{font-family:'Segoe UI',Arial,sans-serif;max-width:760px;margin:0 auto;padding:36px 30px;color:#1c2438;font-size:14px;line-height:1.7}
+h1{color:@@COLOR_BRAND@@;font-size:22px;text-align:center;border-bottom:3px solid @@COLOR_GRAD@@;padding-bottom:8px;margin-bottom:4px}
+.sub{text-align:center;color:#64748b;margin-bottom:22px}
+.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.parties div{border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px}
+h3{font-size:15px;margin:16px 0 4px;color:@@COLOR_DARK@@}
+ul{margin:4px 0;padding-right:22px}
+.blank{display:inline-block;min-width:130px;border-bottom:1px solid #1c2438}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px}
+.sign div{border-top:1px solid #1c2438;padding-top:6px;text-align:center}
+.toolbar{text-align:center;margin-bottom:18px}
+@media print{.toolbar{display:none}body{padding:0}}
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ הדפסה / שמירה כ-PDF</button></div>
+<h1>הסכם עבודה</h1>
+<div class="sub">שנערך ונחתם ביום ${heDate(today())}</div>
+<div class="parties">
+<div><b>המעסיק:</b> ${esc(employer)}<br>ח.פ / ע.מ: ${blank(c.employer_id)}<br>כתובת: ${blank(c.employer_address)}</div>
+<div><b>העובד:</b> ${esc(a.name)}<br>ת.ז: ${blank(p.id_number)}<br>כתובת: ${blank(p.address)}${a.phone ? '<br>טלפון: <span dir="ltr">' + esc(a.phone) + '</span>' : ''}</div>
+</div>
+<p>הואיל והמעסיק מעוניין להעסיק את העובד בתפקיד מכירות, והעובד מעוניין להיות מועסק על ידו — הוסכם בין הצדדים כדלקמן:</p>
+${sec.map(([t, b], i) => `<h3>${i + 1}. ${t}</h3><div>${b}</div>`).join('')}
+<p style="margin-top:22px">ולראיה באו הצדדים על החתום:</p>
+<div class="sign"><div>המעסיק${c.signer ? ' — ' + esc(c.signer) : ''}</div><div>העובד — ${esc(a.name)}</div></div>
+</body></html>`);
+  w.document.close();
 }
 
 async function shCopyMsg(i) {
