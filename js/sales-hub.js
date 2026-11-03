@@ -204,6 +204,7 @@ ${blockers.map(r => `<div class="muted" style="font-size:.8rem;padding:2px 0">�
     const monthly = _shReports.filter(r => String(r.report_date).slice(0, 7) === ym);
     const notes = shGet('notes');
     return `
+<div class="page-head"><h2>צוות ויעדים</h2><button class="btn" onclick="shOnboard()">＋ איש/אשת מכירות חדש/ה</button></div>
 <p class="muted" style="font-size:.85rem;margin-bottom:12px">יעדים חודשיים — אותו יעד של מסך "סוכנים". הסכומים מחושבים מהדיווחים היומיים של החודש הנוכחי.</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px">
 ${shAgents().map(a => {
@@ -279,7 +280,7 @@ ${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bot
     const c = shGet('contract'), people = shGet('contract_people');
     const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${k}</span><b>${v || '<span style="color:#b91c1c">חסר</span>'}</b></div>`;
     return `
-<div class="page-head"><h2>הסכם עבודה לאנשי מכירות</h2><button class="btn btn-ghost" onclick="shContractTerms()">✏️ עריכת תנאי ההסכם</button></div>
+<div class="page-head"><h2>הסכם עבודה לאנשי מכירות</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="shOnboard()">＋ איש/אשת מכירות חדש/ה</button><button class="btn btn-ghost" onclick="shContractTerms()">✏️ עריכת תנאי ההסכם</button></div></div>
 <div class="card card-pad" style="margin-bottom:14px;background:#fff8e6;border-color:#f3d48a"><b>⚠ נוסח לדוגמה</b><div class="muted" style="font-size:.85rem">ההסכם מבוסס על דיני העבודה בישראל ומהווה גם הודעה לעובד על תנאי העבודה. מומלץ לעבור עליו פעם אחת עם עו״ד או רו״ח לפני החתימה הראשונה.</div></div>
 <div class="grid2" style="gap:16px;align-items:start">
 <div class="card card-pad"><b>תנאים כלליים</b>
@@ -550,7 +551,55 @@ function shContractForm(agentId) {
   });
 }
 
-function shContractPrint(a, p) {
+/* קליטת איש מכירות חדש במקום אחד: הזמנה למערכת (משתמש בתפקיד מכירות),
+   רשומת סוכן, פרטי ההסכם ויעד — ואז הפקת הסכם העבודה */
+function shOnboard() {
+  openForm('איש/אשת מכירות חדש/ה', [
+    { type: 'section', label: 'פרטים אישיים' },
+    { name: 'name', label: 'שם מלא', required: true },
+    { name: 'phone', label: 'טלפון', dir: 'ltr' },
+    { name: 'email', label: 'אימייל', type: 'email', dir: 'ltr' },
+    { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
+    { name: 'address', label: 'כתובת' },
+    { type: 'section', label: 'עבודה' },
+    { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
+    { name: 'monthly_target', label: 'יעד מכירות חודשי (₪)', type: 'number' },
+    { name: 'voicenter_ext', label: 'שלוחה (Voicenter) — אם יש', dir: 'ltr' },
+    { type: 'section', label: 'מה לעשות עכשיו' },
+    { name: 'invite', label: 'לשלוח הזמנה לכניסה למערכת (תפקיד מכירות — נדרש אימייל)', type: 'checkbox' },
+    { name: 'print', label: 'להפיק הסכם עבודה מיד', type: 'checkbox' },
+  ], { start_date: today(), invite: true, print: true }, async (rec) => {
+    if (rec.invite && !rec.email) { toast('לשליחת הזמנה למערכת צריך אימייל — או לבטל את הסימון', true); throw new Error('email'); }
+    // החלון נפתח מיד, לפני הפעולות מול השרת, כדי שלא ייחסם כחלון קופץ
+    const win = rec.print ? window.open('', '_blank') : null;
+    try {
+      let profileId = null;
+      if (rec.invite) {
+        toast('שולח הזמנה...');
+        const r = await _adminUsersCall({ action: 'invite', email: rec.email, full_name: rec.name, phone: rec.phone, role: 'sales', redirectTo: location.origin + '/set-password.html' });
+        profileId = (r && r.id) || null;
+      }
+      const agent = await run(db.from('agents').insert({
+        name: rec.name, phone: rec.phone || null, email: rec.email || null, voicenter_ext: rec.voicenter_ext || null,
+        profile_id: profileId, monthly_target: rec.monthly_target, pct_new: 15, pct_renew: 7, bonus_type: 'none', active: true,
+      }).select().single(), 'הוספת הסוכן נכשלה');
+      const person = { id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
+      const people = shGet('contract_people');
+      people[agent.id] = person;
+      await shSet('contract_people', people);
+      await refreshCache();
+      if (win) shContractPrint(agent, person, win);
+      toast(rec.name + ' נוסף/ה לצוות' + (rec.invite ? ' · הזמנה נשלחה ל-' + rec.email : ''));
+      _shAgent = agent.id;
+      shRender();
+    } catch (e) {
+      if (win) win.close();
+      throw e;
+    }
+  });
+}
+
+function shContractPrint(a, p, win) {
   const c = shGet('contract');
   const employer = c.employer || (cache.settings || {}).paper_name || '@@PAPER_NAME@@';
   const blank = v => v ? esc(v) : '<span class="blank"></span>';
@@ -578,7 +627,7 @@ function shContractPrint(a, p) {
   if ((c.extra || '').trim()) sec.push(['הוראות נוספות', esc(c.extra).replace(/\n/g, '<br>')]);
   sec.push(['כללי', 'הסכם זה מהווה גם הודעה לעובד על תנאי עבודתו לפי חוק הודעה לעובד ולמועמד לעבודה (תנאי עבודה), התשס״ב-2002. ההסכם הוא אישי ואינו כפוף להסכם קיבוצי. כל שינוי בו ייעשה בכתב ובחתימת שני הצדדים. אין באמור בהסכם זה כדי לגרוע מזכות המגיעה לעובד על פי דין.']);
 
-  const w = window.open('', '_blank');
+  const w = win || window.open('', '_blank');
   if (!w) { toast('הדפדפן חסם חלון קופץ — אפשרו חלונות קופצים לאתר ונסו שוב', true); return; }
   w.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
 <title>הסכם עבודה — ${esc(a.name)}</title>
