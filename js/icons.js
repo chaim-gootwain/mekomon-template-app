@@ -28,6 +28,8 @@ const ICONS = {
 function getIcon(name, size, color) {
   if (size === undefined) size = 18;
   if (color === undefined) color = 'currentColor';
+  // sanitize: allow only safe CSS color values
+  if (typeof color !== 'string' || !/^[a-zA-Z#0-9(),%. ]+$/.test(color)) color = 'currentColor';
   var svg = ICONS[name];
   if (!svg) {
     console.warn('Icon "' + name + '" not found');
