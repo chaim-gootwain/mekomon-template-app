@@ -554,6 +554,8 @@ function shContractPrint(a, p) {
   const c = shGet('contract');
   const employer = c.employer || (cache.settings || {}).paper_name || '@@PAPER_NAME@@';
   const blank = v => v ? esc(v) : '<span class="blank"></span>';
+  // הלוגו של המופע — כתובת מלאה, כי חלון ההדפסה נפתח ריק (about:blank)
+  const logo = new URL('img/logo.png', location.href).href;
   const n = v => Number(v || 0).toLocaleString('he-IL');
   const trial = shTrialText(c);
   const mode = c.tier_mode === 'whole'
@@ -583,6 +585,7 @@ function shContractPrint(a, p) {
 <style>
 body{font-family:'Segoe UI',Arial,sans-serif;max-width:760px;margin:0 auto;padding:36px 30px;color:#1c2438;font-size:14px;line-height:1.7}
 h1{color:@@COLOR_BRAND@@;font-size:22px;text-align:center;border-bottom:3px solid @@COLOR_GRAD@@;padding-bottom:8px;margin-bottom:4px}
+.logo{text-align:center;margin-bottom:6px}.logo img{height:90px}
 .sub{text-align:center;color:#64748b;margin-bottom:22px}
 .parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
 .parties div{border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px}
@@ -595,6 +598,7 @@ ul{margin:4px 0;padding-right:22px}
 @media print{.toolbar{display:none}body{padding:0}}
 </style></head><body>
 <div class="toolbar"><button onclick="window.print()">🖨️ הדפסה / שמירה כ-PDF</button></div>
+<div class="logo"><img src="${logo}" alt="${esc(employer)}" onerror="this.parentNode.remove()"></div>
 <h1>הסכם עבודה</h1>
 <div class="sub">שנערך ונחתם ביום ${heDate(today())}</div>
 <div class="parties">
