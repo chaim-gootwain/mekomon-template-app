@@ -26,7 +26,7 @@ const ICONS = {
 };
 
 function getIcon(name, size, color) {
-  if (size === undefined) size = 18;
+  size = (typeof size === 'number' && isFinite(size)) ? Math.abs(Math.round(size)) : 18;
   if (color === undefined) color = 'currentColor';
   // sanitize: allow only safe CSS color values
   if (typeof color !== 'string' || !/^[a-zA-Z#0-9(),%. ]+$/.test(color)) color = 'currentColor';
