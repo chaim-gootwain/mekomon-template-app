@@ -537,10 +537,11 @@ function shContractForm(agentId) {
   const a = (cache.agents || []).find(x => x.id === agentId);
   if (!a) return;
   const people = shGet('contract_people');
-  const p = Object.assign({ start_date: today() }, people[agentId] || {});
+  const p = Object.assign({ start_date: today(), gender: 'm' }, people[agentId] || {});
   openForm('הסכם עבודה · ' + a.name, [
     { type: 'html', html: '<p class="muted" style="font-size:.8rem">הפרטים נשמרים להפקה חוזרת. התנאים הכלליים (שכר, עמלות, פרטי המעסיק) נערכים בלשונית "הסכם עבודה" במוקד המכירות.</p>' },
-    { name: 'id_number', label: 'ת.ז של העובד', dir: 'ltr' },
+    { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
+    { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
     { name: 'address', label: 'כתובת העובד' },
     { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
   ], p, async (rec) => {
@@ -557,6 +558,7 @@ function shOnboard() {
   openForm('איש/אשת מכירות חדש/ה', [
     { type: 'section', label: 'פרטים אישיים' },
     { name: 'name', label: 'שם מלא', required: true },
+    { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
     { name: 'phone', label: 'טלפון', dir: 'ltr' },
     { name: 'email', label: 'אימייל', type: 'email', dir: 'ltr' },
     { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
@@ -568,7 +570,7 @@ function shOnboard() {
     { type: 'section', label: 'מה לעשות עכשיו' },
     { name: 'invite', label: 'לשלוח הזמנה לכניסה למערכת (תפקיד מכירות — נדרש אימייל)', type: 'checkbox' },
     { name: 'print', label: 'להפיק הסכם עבודה מיד', type: 'checkbox' },
-  ], { start_date: today(), invite: true, print: true }, async (rec) => {
+  ], { start_date: today(), gender: 'm', invite: true, print: true }, async (rec) => {
     if (rec.invite && !rec.email) { toast('לשליחת הזמנה למערכת צריך אימייל — או לבטל את הסימון', true); throw new Error('email'); }
     // החלון נפתח מיד, לפני הפעולות מול השרת, כדי שלא ייחסם כחלון קופץ
     const win = rec.print ? window.open('', '_blank') : null;
@@ -583,7 +585,7 @@ function shOnboard() {
         name: rec.name, phone: rec.phone || null, email: rec.email || null, voicenter_ext: rec.voicenter_ext || null,
         profile_id: profileId, monthly_target: rec.monthly_target, pct_new: 15, pct_renew: 7, bonus_type: 'none', active: true,
       }).select().single(), 'הוספת הסוכן נכשלה');
-      const person = { id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
+      const person = { gender: rec.gender, id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
       const people = shGet('contract_people');
       people[agent.id] = person;
       await shSet('contract_people', people);
@@ -598,6 +600,26 @@ function shOnboard() {
     }
   });
 }
+
+const SH_FEM = [
+  ['העובד מועסק', 'העובדת מועסקת'], ['תפקידו כולל', 'תפקידה כולל'], ['שתוטל עליו', 'שתוטל עליה'],
+  ['העובד יפעל', 'העובדת תפעל'], [', ישתמש במחירון', ', תשתמש במחירון'], ['ולא ייתן ללקוח', 'ולא תיתן ללקוח'],
+  ['השבועי של העובד', 'השבועי של העובדת'], ['העסקת העובד', 'העסקת העובדת'],
+  ['העובד ידווח על שעות עבודתו', 'העובדת תדווח על שעות עבודתה'], ['ימסור העובד', 'תמסור העובדת'],
+  ['ישולם לעובד שכר', 'ישולם לעובדת שכר'], ['תשולם לעובד עמלה', 'תשולם לעובדת עמלה'],
+  ['על ידי העובד', 'על ידי העובדת'], ['המכירות של העובד', 'המכירות של העובדת'], ['ישולם לו בונוס', 'ישולם לה בונוס'],
+  ['העובד יהיה זכאי', 'העובדת תהיה זכאית'], ['משרתו', 'משרתה'],
+  ['שיגיע לעובד במסגרת עבודתו', 'שיגיע לעובדת במסגרת עבודתה'], ['העובד ישמור', 'העובדת תשמור'],
+  ['לא יעתיק, לא יוריד ולא יעביר', 'לא תעתיק, לא תוריד ולא תעביר'], ['ולא ישתמש בהם', 'ולא תשתמש בהם'],
+  ['לצורך עבודתו', 'לצורך עבודתה'], ['העובד ישתמש רק בחשבון האישי שניתן לו', 'העובדת תשתמש רק בחשבון האישי שניתן לה'],
+  ['לא ישתף סיסמאות, וישמור', 'לא תשתף סיסמאות, ותשמור'], ['שיימסרו לעובד', 'שיימסרו לעובדת'], ['וגישתו', 'וגישתה'],
+  ['עבודת העובד', 'עבודת העובדת'], ['ולשלם לו את שכרו', 'ולשלם לה את שכרה'],
+  ['יועבר לעובד כל המגיע לו', 'יועבר לעובדת כל המגיע לה'], ['הודעה לעובד על תנאי עבודתו', 'הודעה לעובדת על תנאי עבודתה'],
+  ['המגיעה לעובד על פי דין', 'המגיעה לעובדת על פי דין'],
+  ['להעסיק את העובד בתפקיד מכירות, והעובד מעוניין להיות מועסק', 'להעסיק את העובדת בתפקיד מכירות, והעובדת מעוניינת להיות מועסקת'],
+  ['<b>העובד:</b>', '<b>העובדת:</b>'], ['<div>העובד — ', '<div>העובדת — '],
+];
+function shFem(html) { return SH_FEM.reduce((h, [m, f]) => h.split(m).join(f), html); }
 
 function shContractPrint(a, p, win) {
   const c = shGet('contract');
@@ -629,7 +651,7 @@ function shContractPrint(a, p, win) {
 
   const w = win || window.open('', '_blank');
   if (!w) { toast('הדפדפן חסם חלון קופץ — אפשרו חלונות קופצים לאתר ונסו שוב', true); return; }
-  w.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+  let doc = `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
 <title>הסכם עבודה — ${esc(a.name)}</title>
 <style>
 body{font-family:'Segoe UI',Arial,sans-serif;max-width:760px;margin:0 auto;padding:36px 30px;color:#1c2438;font-size:14px;line-height:1.7}
@@ -658,7 +680,9 @@ ul{margin:4px 0;padding-right:22px}
 ${sec.map(([t, b], i) => `<h3>${i + 1}. ${t}</h3><div>${b}</div>`).join('')}
 <p style="margin-top:22px">ולראיה באו הצדדים על החתום:</p>
 <div class="sign"><div>המעסיק${c.signer ? ' — ' + esc(c.signer) : ''}</div><div>העובד — ${esc(a.name)}</div></div>
-</body></html>`);
+</body></html>`;
+  if (p.gender === 'f') doc = shFem(doc);
+  w.document.write(doc);
   w.document.close();
 }
 
