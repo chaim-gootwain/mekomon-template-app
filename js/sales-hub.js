@@ -77,7 +77,7 @@ const SH_DEFAULTS = {
     role: 'נציג/ת מכירות פרסום', scope: 'משרה חלקית, לפי סידור עבודה שבועי שייקבע מראש בתיאום',
     hourly: 43, hourly_invoice: 50, tier1_cap: 15000, tier1_pct: 10, tier2_cap: 30000, tier2_pct: 14, tier3_pct: 17,
     bonus_threshold: 30000, bonus_amount: 500,
-    tier_mode: 'graded', basis: 'collected', trial_months: 3, trial_unit: 'months', weekly_target: 5000, tail_days: 30, extra: '',  // trial_months = אורך תקופת הניסיון ביחידות trial_unit
+    tier_mode: 'graded', basis: 'collected', trial_months: 3, trial_unit: 'months', weekly_target: 5000, tail_days: 30, pay_day: 9, notice_days: 14, extra: '',  // trial_months = אורך תקופת הניסיון ביחידות trial_unit
   },
   contract_people: {},  // agentId → { id_number, address, start_date }
 };
@@ -296,6 +296,8 @@ ${row('בונוס חודשי', Number(c.bonus_amount) ? money(c.bonus_amount) + 
 ${row('בסיס העמלה', c.basis === 'signed' ? 'הזמנות חתומות' : 'נגבה בפועל')}
 ${row('יעד מכירות שבועי', Number(c.weekly_target) ? 'לפחות ' + money(c.weekly_target) : 'ללא')}
 ${row('תקופת ניסיון', shTrialText(c) || 'ללא')}
+${row('תשלום שכר / תמורה', 'עד ה-' + Number(c.pay_day) + ' בחודש')}
+${row('הודעה מוקדמת — עצמאי', Number(c.notice_days) + ' ימים')}
 </div>
 <div class="card card-pad"><b>הפקת הסכם לסוכן</b>
 ${shAgents().map(a => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
@@ -530,6 +532,8 @@ function shContractTerms() {
     { name: 'bonus_threshold', label: 'בונוס — רף מכירות חודשי (₪)', type: 'number' },
     { name: 'bonus_amount', label: 'בונוס — סכום (₪, 0 = ללא)', type: 'number' },
     { name: 'tail_days', label: 'עמלה על גבייה אחרי סיום העבודה — עד כמה ימים', type: 'number' },
+    { name: 'pay_day', label: 'תשלום השכר / התמורה — עד יום בחודש (לשכיר לכל המאוחר ה-9, לפי חוק)', type: 'number', required: true },
+    { name: 'notice_days', label: 'הודעה מוקדמת לסיום — עצמאי (ימים)', type: 'number', required: true },
     { name: 'extra', label: 'סעיפים נוספים (יודפסו כסעיף "הוראות נוספות")', type: 'textarea', rows: 4 },
   ], rec0, async (rec) => {
     await shSet('contract', Object.assign({}, c, rec));
@@ -678,13 +682,13 @@ function shInvoiceSections(sec, c, p, n, blank) {
     ['השירותים', role],
     ['תחילת ההתקשרות', `ההתקשרות מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.`],
     ['היקף ודיווח שעות', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה, והדיווח ישמש בסיס לחשבונית. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
-    ['תמורה', `בעבור כל שעת עבודה ישולם לעובד <b>${n(c.hourly_invoice)} ₪ בתוספת מע״מ כדין</b>, כנגד חשבונית מס. התמורה תשולם עד ה-9 בכל חודש בעבור החודש הקודם.`],
+    ['תמורה', `בעבור כל שעת עבודה ישולם לעובד <b>${n(c.hourly_invoice)} ₪ בתוספת מע״מ כדין</b>, כנגד חשבונית מס. התמורה תשולם עד ה-${Number(c.pay_day)} בכל חודש בעבור החודש הקודם.`],
     ['עמלות מכירה', toInvoice(by('עמלות מכירה'))],
     ['לידים ושיוך לקוחות', by('לידים ושיוך לקוחות')],
     ['מעמד עצמאי', `העובד מספק את השירותים כעצמאי (עוסק מורשה או פטור), ואין בין הצדדים יחסי עובד ומעסיק. העובד אחראי לבדו לתשלום מס הכנסה, מע״מ וביטוח לאומי בגין התמורה. הצדדים מצהירים כי התמורה נקבעה בהתחשב במעמד זה: אילו הועסק העובד כשכיר, היה שכרו ${n(c.hourly)} ₪ לשעה ברוטו, וההפרש מהווה תשלום מלא ומראש בעד כל הזכויות הסוציאליות. אם ייקבע כי התקיימו בין הצדדים יחסי עובד ומעסיק — זכויותיו יחושבו לפי שכר זה, וכל סכום ששולם מעבר לו יקוזז מהסכומים המגיעים לו.`],
     ['סודיות ומאגר הלקוחות', by('סודיות ומאגר הלקוחות')],
     ['ציוד ומסמכים', by('ציוד ומסמכים')],
-    ['סיום ההתקשרות', 'כל צד רשאי לסיים את ההתקשרות בהודעה מוקדמת בכתב של 14 ימים. עם סיום ההתקשרות יועבר לעובד כל המגיע לו לפי הסכם זה.'],
+    ['סיום ההתקשרות', `כל צד רשאי לסיים את ההתקשרות בהודעה מוקדמת בכתב של ${Number(c.notice_days)} ימים. עם סיום ההתקשרות יועבר לעובד כל המגיע לו לפי הסכם זה.`],
   ];
   const extra = sec.find(x => x[0] === 'הוראות נוספות');
   if (extra) out.push(extra);
@@ -721,7 +725,7 @@ function shContractPrint(a, p, win) {
     ['התפקיד', `העובד מועסק בתפקיד <b>${esc(c.role)}</b>. תפקידו כולל איתור ופנייה למפרסמים, מכירת שטחי פרסום ושירותים נלווים של המעסיק, תיעוד מלא של כל פנייה, שיחה ותוצאה במערכת המעסיק, קביעת פעולת המשך לכל ליד, ביצוע פולואפים, וכל משימה נוספת הקשורה לתפקיד שתוטל עליו מעת לעת.<br>העובד יפעל לפי נהלי המכירות של המעסיק, ישתמש במחירון ובהצעות המאושרים בלבד, ולא ייתן ללקוח הנחה, תנאי תשלום או התחייבות חריגה ללא אישור מראש מהמעסיק.` + (Number(c.weekly_target) ? `<br>יעד המכירות השבועי של העובד הוא <b>לפחות ${n(c.weekly_target)} ₪</b> (לפי בסיס חישוב העמלה שבסעיף העמלות). העמידה ביעד תיבחן במסגרת המשוב והמעקב השוטפים.` : '')],
     ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` תקופת הניסיון היא ${trial} מיום תחילת העבודה, ובמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
     ['היקף המשרה ושעות העבודה', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה. שעות נוספות יבוצעו רק באישור מראש של המעסיק וישולמו לפי חוק שעות עבודה ומנוחה. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
-    ['שכר יסוד', `בעבור כל שעת עבודה ישולם לעובד שכר של <b>${n(c.hourly)} ₪ ברוטו</b>. השכר ישולם עד ה-9 בכל חודש בעבור החודש הקודם, בצירוף תלוש שכר.`],
+    ['שכר יסוד', `בעבור כל שעת עבודה ישולם לעובד שכר של <b>${n(c.hourly)} ₪ ברוטו</b>. השכר ישולם עד ה-${Math.min(Number(c.pay_day) || 9, 9)} בכל חודש בעבור החודש הקודם, בצירוף תלוש שכר.`],
     ['עמלות מכירה', p.comp_mode === 'pct' ? shPctCommissionText(p, a, basis, n(c.tail_days)) : `בנוסף לשכר היסוד תשולם לעובד עמלה חודשית. ${mode}<ul>${shTiersText(c).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${basis}${Number(c.bonus_amount) ? `<br>בנוסף, בכל חודש שבו סך המכירות של העובד (לפי אותו בסיס חישוב) יגיע ל-${n(c.bonus_threshold)} ₪ ומעלה, ישולם לו בונוס של <b>${n(c.bonus_amount)} ₪ ברוטו</b>.` : ''}${Number(c.bonus_amount) ? '<br>העמלה והבונוס ישולמו יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות להם, ויפורטו בתלוש השכר.' : '<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר.'} עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${n(c.tail_days)} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`],
     ['לידים ושיוך לקוחות', shLeadOwnershipText()],
     ['זכויות סוציאליות', 'העובד יהיה זכאי לכל הזכויות על פי דין, ובכלל זה: הפרשות לפנסיה ולפיצויי פיטורים לפי צו ההרחבה לביטוח פנסיוני מקיף במשק, ימי חופשה לפי חוק חופשה שנתית, דמי מחלה לפי חוק דמי מחלה, דמי הבראה, החזר הוצאות נסיעה לעבודה וימי חג — הכול לפי הדין וצווי ההרחבה החלים, ובהתאם להיקף משרתו.'],
@@ -752,9 +756,12 @@ ul{margin:4px 0;padding-right:22px}
 .sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px}
 .sign div{border-top:1px solid #1c2438;padding-top:6px;text-align:center}
 .toolbar{text-align:center;margin-bottom:18px}
+.pg{width:100%;border-collapse:collapse}.pg td{padding:0}
+.bsd{text-align:right;font-size:12px;padding-bottom:10px}
 @media print{.toolbar{display:none}body{padding:0}}
 </style></head><body>
 <div class="toolbar"><button onclick="window.print()">🖨️ הדפסה / שמירה כ-PDF</button></div>
+<table class="pg"><thead><tr><td><div class="bsd">בס"ד</div></td></tr></thead><tbody><tr><td>
 <div class="logo"><img src="${logo}" alt="${esc(employer)}" onerror="this.parentNode.remove()"></div>
 <h1>הסכם עבודה</h1>
 <div class="sub">שנערך ונחתם ביום ${heDate(today())}</div>
@@ -766,6 +773,7 @@ ul{margin:4px 0;padding-right:22px}
 ${sec.map(([t, b], i) => `<h3>${i + 1}. ${t}</h3><div>${b}</div>`).join('')}
 <p style="margin-top:22px">ולראיה באו הצדדים על החתום:</p>
 <div class="sign"><div>המעסיק${c.signer ? ' — ' + esc(c.signer) : ''}</div><div>העובד — ${esc(a.name)}</div></div>
+</td></tr></tbody></table>
 </body></html>`;
   if (inv) doc = doc
     .replace('<title>הסכם עבודה', '<title>הסכם התקשרות')
