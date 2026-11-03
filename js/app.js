@@ -292,9 +292,9 @@ ${lists}`;
 }
 };
 
-function stat(num, label, cls = '') { return `<div class="stat ${cls}"><div class="num">${num}</div><div class="lbl">${label}</div></div>`; }
+function stat(num, label, cls = '') { return `<div class="stat animate-fade-in ${cls}"><div class="num">${num}</div><div class="lbl">${label}</div></div>`; }
 function dashList(title, items, emptyText) {
-return `<div class="card card-pad"><b>${title}</b><ul class="dash-list" style="margin-top:8px">
+return `<div class="card card-pad animate-fade-in"><b>${title}</b><ul class="dash-list" style="margin-top:8px">
 ${items.length ? items.join('') : `<li class="muted">${emptyText}</li>`}</ul></div>`;
 }
 

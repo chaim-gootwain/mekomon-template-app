@@ -38,9 +38,9 @@ a { color: var(--brand); }
 /* ---------- כפתורים ---------- */
 .btn {
 display: inline-flex; align-items: center; gap: 6px;
-background: var(--brand); color: #fff; border: none; border-radius: 8px;
+background: var(--brand); color: #fff; border: none; border-radius: var(--radius-md, 8px);
 padding: 9px 18px; font-size: 0.95rem; font-weight: 500;
-transition: background .15s;
+transition: background var(--transition-fast, 150ms ease), box-shadow var(--transition-fast, 150ms ease), transform var(--transition-fast, 150ms ease), opacity var(--transition-fast, 150ms ease);
 }
 .btn:hover { background: var(--brand-dark); }
 .btn:disabled { opacity: .5; cursor: default; }
@@ -127,7 +127,7 @@ border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.12); max-height: 380px;
 .content { padding: 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
 
 /* ---------- כרטיסים וטבלאות ---------- */
-.card { background: var(--card); border-radius: 12px; box-shadow: 0 1px 4px rgba(16,42,67,.07); overflow: hidden; }
+.card { background: var(--card); border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-sm, 0 1px 4px rgba(16,42,67,.07)); overflow: hidden; transition: box-shadow var(--transition-normal, 250ms ease), transform var(--transition-fast, 150ms ease); }
 .card + .card { margin-top: 18px; }
 .card-pad { padding: 20px; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -179,7 +179,7 @@ background: #eef2f6; color: var(--muted); white-space: nowrap; }
 
 /* ---------- דשבורד ---------- */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 20px; }
-.stat { background: var(--card); border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(16,42,67,.07);
+.stat { background: var(--card); border-radius: var(--radius-lg, 12px); padding: 18px 20px; box-shadow: var(--shadow-sm, 0 1px 4px rgba(16,42,67,.07));
 border-right: 4px solid var(--brand); }
 .stat.gold { border-right-color: var(--accent); }
 .stat.red { border-right-color: var(--danger); }
