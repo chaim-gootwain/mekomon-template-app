@@ -76,7 +76,7 @@ jobs:
         run: |
           cd tpl
           # פורס את כל הפונקציות שבתבנית ל-Supabase של המופע. verify_jwt מ-config.toml.
-          supabase functions deploy --project-ref "$PROJECT_REF"
+          supabase functions deploy --project-ref "$PROJECT_REF" --yes
 
       - name: Done
         run: echo "✅ נפרסו כל ה-Edge Functions מהתבנית ל-${{ vars.SUPABASE_PROJECT_REF }}"

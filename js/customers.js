@@ -61,7 +61,7 @@ function _importTerms(v) { const x = String(v || '').replace(/\s/g, ''); if (/60
 
 Pages.customers = {
 render: async (el) => {
-_customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
+_customers = await custLoadAll();
 const canWrite = ['admin', 'sales'].includes(profile.role);
 el.innerHTML = `
 <div class="page-head">
@@ -250,7 +250,7 @@ if (typeof onDone === 'function') await onDone(data);
 async function customerEdit(id) {
 // כשהכרטיס נפתח שלא מדף הלקוחות המטמון עשוי להיות ריק — נטען מהמסד במקום לקרוס
 let c = (_customers || []).find(x => x.id === id);
-if (!c) c = (await run(db.from('customers').select('*').eq('id', id).limit(1)))[0];
+if (!c) c = await custLoad(id);
 if (!c) { toast('הלקוח לא נמצא', true); return; }
 document.getElementById('viewBack').classList.remove('open');
 openForm('עריכת לקוח — ' + c.name, CUSTOMER_FIELDS, c, async (rec) => {
@@ -267,7 +267,7 @@ openPage('customers');
 async function openCustomerCard(id) {
 _ccEnsureCss();
 let c = _customers.find(x => x.id === id);
-if (!c) c = await run(db.from('customers').select('*').eq('id', id).single());
+if (!c) c = await custLoad(id, { required: true });
 const canWrite = ['admin', 'sales'].includes(profile.role);
 const canMoney = ['admin', 'sales'].includes(profile.role);
 
@@ -418,7 +418,7 @@ ${contracts.filter(ct => Array.isArray(ct.payment_plan) && ct.payment_plan.lengt
 </div>
 <div id="ccInvoices"></div>
 <div style="margin:16px 0 6px"><b>כרטסת (חיובים ותשלומים)</b></div>
-${_custLedgerHtml(charges, payments)}
+${_custLedgerHtml(charges, payments, ads)}
 </div>` : ''}
 <div id="ccContacts" class="cc-tab hidden">${typeof custContactsRender === 'function' ? custContactsRender(c) : ''}</div>
 <div id="ccTimeline" class="cc-tab hidden">${timelineHtml(notes)}</div>
@@ -711,7 +711,7 @@ async function customersImportCommit() {
 async function portalTokenReset(id) {
 if (!confirm('לחדש את הקישור? הקישור הישן יפסיק לעבוד מיידית.')) return;
 await run(db.rpc('reset_portal_token', { p_customer_id: id }));
-_customers = await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t));
+_customers = await custLoadAll();
 await refreshCache();
 toast('קישור חדש הונפק');
 openCustomerCard(id);
@@ -796,8 +796,32 @@ document.addEventListener('click', e => { if (!e.target.closest('.cc-mwrap')) cc
 /* כרטסת מאוחדת: חיובים + תשלומים כרונולוגית עם יתרה רצה.
    מנהל: כפתור ✕ על חיוב פתוח — ביטול חיוב כפול (למשל: הפרסומים נרשמו
    כחוב וגם החשבונית שהופקה נרשמה כחוב על אותו כסף). */
-function _custLedgerHtml(charges, payments) {
+/* חשד לחיוב כפול: חיוב מודעה פתוח (נוצר בפרסום) לגיליון שכבר הופקה עליו חשבונית
+   ללקוח הזה ("… — גיליון 310"). קורה כשהמודעה נקלטה אחרי ההפקה ולא שויכה למסמך.
+   מחזיר מפה chargeId -> מס' המסמך החשוד. */
+function _custDupAdCharges(live, ads) {
+  const out = {};
+  const docIssues = []; // [{inv, nums:Set}]
+  live.forEach(c => {
+    if (!/מחשבונית/.test(c.notes || '') || !(Number(c.amount) > 0)) return;
+    const m = String(c.description || '').match(/גיליון\s*([\d,\s]+)/);
+    if (m) docIssues.push({ inv: c.invoice_number || '', nums: new Set(m[1].split(/[,\s]+/).filter(Boolean)) });
+  });
+  if (!docIssues.length) return out;
+  live.forEach(c => {
+    if (!c.ad_id || !['pending', 'invoiced', 'partial', 'overdue'].includes(c.status)) return;
+    const ad = (ads || []).find(a => a.id === c.ad_id);
+    const iss = ad && (cache.issues || []).find(i => i.id === ad.issue_id);
+    if (!iss) return;
+    const hit = docIssues.find(d => d.nums.has(String(iss.issue_number)));
+    if (hit) out[c.id] = hit.inv || '—';
+  });
+  return out;
+}
+
+function _custLedgerHtml(charges, payments, ads) {
   const live = (charges || []).filter(c => !['cancelled', 'lost'].includes(c.status));
+  const dupOf = _custDupAdCharges(live, ads);
   const rows = [];
   live.forEach(c => rows.push({ date: c.issued_date, type: 'charge', desc: c.description || 'חיוב', amount: Number(c.amount) || 0, inv: c.invoice_number, status: c.status, id: c.id, cid: c.customer_id }));
   (payments || []).forEach(p => rows.push({ date: p.paid_date, type: 'pay', desc: 'תשלום' + (PAY_METHODS[p.method] ? ' · ' + PAY_METHODS[p.method] : '') + (p.notes ? ' · ' + p.notes : ''), amount: Number(p.amount) || 0 }));
@@ -810,7 +834,7 @@ function _custLedgerHtml(charges, payments) {
     const openCharge = r.type === 'charge' && ['pending', 'invoiced', 'partial', 'overdue'].includes(r.status);
     return `<tr>
       <td style="white-space:nowrap">${heDate(r.date)}</td>
-      <td>${esc(r.desc)}${r.inv ? ` <span class="muted" dir="ltr" style="font-size:.78rem">#${esc(r.inv)}</span>` : ''}${r.type === 'charge' && r.status ? ' ' + pill('charge', r.status) : ''}</td>
+      <td>${esc(r.desc)}${r.inv ? ` <span class="muted" dir="ltr" style="font-size:.78rem">#${esc(r.inv)}</span>` : ''}${r.type === 'charge' && r.status ? ' ' + pill('charge', r.status) : ''}${r.type === 'charge' && dupOf[r.id] ? ` <span class="pill red" title="למודעה הזו כבר הופקה חשבונית לאותו גיליון — כנראה חיוב כפול. אם כן, בטל אותו ב-✕">⚠ ייתכן כפול — כבר בחשבונית #${esc(dupOf[r.id])}</span>` : ''}</td>
       <td style="color:#b91c1c">${r.type === 'charge' ? money(r.amount) : ''}</td>
       <td style="color:#15803d">${r.type === 'pay' ? money(r.amount) : ''}</td>
       <td><b style="color:${bal > 0.001 ? '#b91c1c' : '#15803d'}">${money(bal)}</b></td>

@@ -156,6 +156,21 @@ async function applyInvoiceToLedger(body, doc) {
         issued_date: _iDate, due_date: _icDue(cust.payment_terms), status: 'invoiced',
         invoice_number: docNum || null, agent_id: cust.agent_id || null, notes: 'סונכרן מחשבונית' + tag,
       });
+      // חיובי "מודעה: …" פתוחים של המודעות שבמסמך (נוצרו בפרסום, לפני ההפקה) —
+      // החשבונית מחליפה אותם; בלי זה המודעה נספרת פעמיים בחוב. רק חיוב בלי תשלומים.
+      const _adIds = (body.ad_ids || []).map(Number).filter(n => n > 0);
+      if (_adIds.length) {
+        try {
+          const _adCh = (await db.from('charges').select('id,notes').eq('customer_id', cid).in('ad_id', _adIds).eq('status', 'pending')).data || [];
+          for (const r of _adCh) {
+            const _p = (await db.from('payments').select('id').eq('charge_id', r.id).limit(1)).data || [];
+            if (_p.length) continue;
+            await db.from('charges').update({
+              status: 'cancelled', notes: ((r.notes || '') + ' · הוחלף ב' + heKind + (docNum ? ' ' + docNum : '')).trim(),
+            }).eq('id', r.id);
+          }
+        } catch (e) { console.error('ad-charge-replace', e); }
+      }
       return { created: 'charge', amount: total };
     }
 

@@ -37,7 +37,7 @@ function _csPayMethod(m) {
 
 /* אוסף נתוני כרטסת ללקוח — יומן חובה/זכות כרונולוגי עם יתרה רצה */
 async function _csGather(customerId) {
-  const cust = await run(db.from('customers').select('*').eq('id', customerId).single());
+  const cust = await custLoad(customerId, { required: true });
   const charges = await run(db.from('charges').select('*')
     .eq('customer_id', customerId).order('issued_date', { ascending: true }));
   let pays = [];

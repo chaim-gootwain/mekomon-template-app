@@ -321,7 +321,7 @@ async function dealPayInvoice(contractId, seq) {
   try { await addInteraction('customer', ct.customer_id, `תשלום ${money(amt)} לחוזה (תשלום #${seq}) — הופקה חשבונית מס קבלה`); } catch (e) { }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === ct.customer_id))
     || (cache.customers || []).find(x => x.id === ct.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', ct.customer_id).limit(1)))[0];
+    || await custLoad(ct.customer_id);
   if (!cust) { toast('לקוח לא נמצא', true); return; }
   if (typeof invOpenModal === 'function') {
     await invOpenModal(cust, 'invoice_receipt', true, { lines: [{ details: 'תשלום עבור חבילת פרסום — ' + (nameOf('priceList', ct.price_item_id) || '') + ' (תשלום #' + seq + ')', amount: 1, price: amt }], vatInc: false });

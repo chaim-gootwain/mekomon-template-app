@@ -63,6 +63,28 @@ location.reload();
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
 const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
+/* portal_token הוא מפתח הכניסה של הלקוח לפורטל — מי שמחזיק אותו מגיש מודעות בשם הלקוח.
+   רק מנהל ואנשי מכירות צריכים אותו (קישור הפורטל בכרטיס הלקוח); לשאר התפקידים מוסרים
+   אותו משורות שנטענו עם select('*'), כדי שלא יישב בזיכרון הדפדפן ולא יוצג בשום מקום */
+const custCanPortal = () => ['admin', 'sales'].includes(profile.role);
+function custSafe(rows) {
+if (custCanPortal() || !rows) return rows;
+(Array.isArray(rows) ? rows : [rows]).forEach(r => { if (r) delete r.portal_token; });
+return rows;
+}
+
+/* טעינת לקוח מלא — המקום היחיד שקורא את כל עמודות customers. כל כלל על נתוני לקוח
+   (מי רואה את portal_token, ובעתיד רשימת עמודות מפורשת במקום '*') נכתב כאן בלבד.
+   שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
+   custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
+async function custLoadAll() {
+return custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
+}
+async function custLoad(id, { required = false } = {}) {
+const q = db.from('customers').select('*').eq('id', id);
+return custSafe(required ? await run(q.single()) : (await run(q.limit(1)))[0]);
+}
+
 async function refreshCache() {
 const role = profile.role;
 const jobs = [
@@ -75,8 +97,10 @@ if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
 // nameOf ובדיקות הכפילויות פשוט לא ראו את סוף הרשימה
 // status/status_reason/fixed_discount חייבים להיות כאן: שער החסימה וההנחה
 // הקבועה קוראים מהמטמון, ושורה בלי העמודות האלה נראית כמו "אין סטטוס/אין הנחה"
-const _custCols = 'id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
-const _custColsOld = 'id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms';
+// portal_token נטען רק למנהל ולמכירות (ר' custSafe)
+const _tok = custCanPortal() ? 'portal_token,' : '';
+const _custCols = 'id,name,agent_id,phone,email,whatsapp,' + _tok + 'business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
+const _custColsOld = 'id,name,agent_id,phone,email,' + _tok + 'business_id,invoice_name,order_doc_type,payment_terms';
 const _pageCust = async (cols) => {
   const all = [];
   for (let f = 0; f < 50000; f += 1000) {

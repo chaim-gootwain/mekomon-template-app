@@ -1,0 +1,183 @@
+/* ==========================================
+   Animations & Micro-interactions — מקומון
+   ========================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes skeleton {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ---- Utility Classes ---- */
+
+.animate-fade-in {
+  animation: fadeIn var(--transition-normal, 250ms ease) both;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight var(--transition-normal, 250ms ease) both;
+}
+
+/* Staggered animations for lists */
+.animate-fade-in:nth-child(1) { animation-delay:   0ms; }
+.animate-fade-in:nth-child(2) { animation-delay:  40ms; }
+.animate-fade-in:nth-child(3) { animation-delay:  80ms; }
+.animate-fade-in:nth-child(4) { animation-delay: 120ms; }
+.animate-fade-in:nth-child(5) { animation-delay: 160ms; }
+.animate-fade-in:nth-child(6) { animation-delay: 200ms; }
+
+/* ---- Skeleton Loading ---- */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-secondary, #f0f0f0) 25%,
+    var(--color-bg-tertiary,  #e0e0e0) 50%,
+    var(--color-bg-secondary, #f0f0f0) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm, 6px);
+  color: transparent !important;
+}
+
+.skeleton * {
+  visibility: hidden;
+}
+
+/* ---- Card Hover Effects ---- */
+
+.card {
+  transition: box-shadow var(--transition-normal, 250ms ease),
+              transform   var(--transition-fast,   150ms ease) !important;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.12)) !important;
+  transform: translateY(-2px);
+}
+
+/* ---- Stat Cards ---- */
+
+.stat,
+.stat-card,
+[class*="stat-box"],
+[class*="kpi"] {
+  transition: box-shadow var(--transition-normal, 250ms ease),
+              transform   var(--transition-fast,   150ms ease);
+}
+
+.stat:hover,
+.stat-card:hover,
+[class*="stat-box"]:hover,
+[class*="kpi"]:hover {
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.12));
+  transform: translateY(-2px);
+}
+
+/* ---- Button Transitions ---- */
+
+.btn,
+button,
+[class*="btn-"] {
+  transition: background-color var(--transition-fast, 150ms ease),
+              box-shadow       var(--transition-fast, 150ms ease),
+              transform        var(--transition-fast, 150ms ease),
+              opacity          var(--transition-fast, 150ms ease) !important;
+}
+
+.btn:active,
+button:active {
+  transform: scale(0.97);
+}
+
+/* ---- Pill/Badge ---- */
+
+.pill,
+.badge,
+[class*="pill-"],
+[class*="badge-"] {
+  border-radius: var(--radius-full, 9999px);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.08));
+  transition: box-shadow var(--transition-fast, 150ms ease);
+}
+
+/* ---- Links & Clickable ---- */
+
+a {
+  transition: color   var(--transition-fast, 150ms ease),
+              opacity var(--transition-fast, 150ms ease);
+}
+
+/* ---- Spinner ---- */
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+/* ---- Focus ring (accessibility) ---- */
+
+:focus-visible {
+  outline: 2px solid var(--color-brand, var(--brand, #2563eb));
+  outline-offset: 2px;
+}
+
+/* ---- Reduced motion ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
