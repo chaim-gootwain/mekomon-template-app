@@ -36,7 +36,6 @@ const NAV = [
 { id: 'attendance', title: 'נוכחות', icon: '⏱️', roles: ['admin', 'sales', 'editor', 'graphics', 'committee'], group: 'ניהול' },
 { id: 'agents', title: 'סוכנים', icon: '👤', roles: ['admin'], group: 'ניהול' },
 { id: 'agent-perf', title: 'ביצועי סוכנים', icon: '📈', roles: ['admin'], group: 'ניהול' },
-{ id: 'pricing', title: 'מחירון', icon: '🏷️', roles: ['admin'], group: 'ניהול' },
 { id: 'users', title: 'משתמשים', icon: '👥', roles: ['admin'], group: 'ניהול' },
 { id: 'settings', title: 'הגדרות', icon: '⚙️', roles: ['admin'], group: 'ניהול' },
 ];
