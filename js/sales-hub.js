@@ -30,10 +30,8 @@ const SH_TABS = [
   ['team', '♧ צוות ויעדים'],
   ['training', '▥ קליטה והכשרה'],
   ['courses', '▷ קורסים'],
-  ['procedures', '☷ נהלים וכללים'],
-  ['routine', '◷ שגרת ניהול'],
+  ['resources', '☷ חומרי עזר'],
   ['reports', '▤ דיווחים יומיים'],
-  ['messages', '✉ הודעות לצוות'],
   ['contract', '✍ הסכם עבודה'],
 ];
 
@@ -269,13 +267,6 @@ ${_shAgent != null ? `<label style="display:flex;gap:8px;align-items:center;marg
 ${_shAgent != null ? `<button class="btn btn-sm btn-ghost" onclick="shCoach(${_shAgent})">תיעוד תובנות ויישום</button>` : ''}</div>`;
   },
 
-  procedures() {
-    return `
-<div class="page-head"><h2>שיטה ברורה. עבודה מסודרת.</h2><button class="btn btn-ghost" onclick="shListEdit('procedures')">✏️ עריכת הנהלים</button></div>
-<div class="card card-pad" style="margin-bottom:14px"><b>לכל ליד אחראי. לכל שיחה תיעוד. לכל המשך מועד.</b><div class="muted" style="font-size:.85rem">שלושת הכללים שמחזיקים את רצף העבודה של הצוות.</div></div>
-${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">${esc(p.title)}</summary><p style="margin-top:8px;white-space:pre-wrap">${esc(p.body)}</p></details>`).join('')}`;
-  },
-
   contract() {
     const c = shTerms(), people = shGet('contract_people');
     const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${k}</span><b>${v || '<span style="color:#b91c1c">חסר</span>'}</b></div>`;
@@ -307,11 +298,25 @@ ${shAgents().map(a => `<div style="display:flex;gap:10px;align-items:center;padd
 </div>`;
   },
 
-  routine() {
+  resources() {
     const week = [['יום ראשון', 'זריקת אנרגיה', '30 דקות · הצלחות ויעדים'], ['יום שני', 'אימון פתיחת שיחה', '15 דקות · אבחון צורך'], ['יום שלישי', 'בקרת אמצע שבוע', '20 דקות · פערים וחסמים'], ['יום רביעי', 'התנגדויות ופולואפ', '20 דקות · מקרים אמיתיים'], ['יום חמישי', 'סיכום ותכנון', '25 דקות · למידה ויעדים']];
     const sunday = [['ניצחונות והצלחות', 5], ['זריקת אנרגיה וסיפור לקוח', 5], ['יעד מול ביצוע', 7], ['תרגול מיומנות אחת', 8], ['התחייבות אישית לשבוע', 5]];
     const anchors = [['פתיחת משמרת', 'נוכחות, הודעת בוקר ויעד'], ['אמצע יום', 'פעילות, פער ועזרה נדרשת'], ['סיום משמרת', 'דוח תוצאות ותכנון מחר'], ['משוב אישי', '15 דקות לכל סוכן בשבוע']];
     return `
+<div class="page-head"><h2>חומרי עזר</h2></div>
+
+<details open class="card card-pad" style="margin-bottom:12px">
+<summary style="cursor:pointer;font-weight:700;font-size:1.05rem">☷ נהלים וכללים</summary>
+<div style="margin-top:12px">
+<div class="page-head" style="margin:0 0 8px"><span class="muted" style="font-size:.85rem">שיטה ברורה. עבודה מסודרת.</span><button class="btn btn-sm btn-ghost" onclick="shListEdit('procedures')">✏️ עריכה</button></div>
+<div class="card card-pad" style="margin-bottom:8px"><b>לכל ליד אחראי. לכל שיחה תיעוד. לכל המשך מועד.</b><div class="muted" style="font-size:.85rem">שלושת הכללים שמחזיקים את רצף העבודה של הצוות.</div></div>
+${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">${esc(p.title)}</summary><p style="margin-top:8px;white-space:pre-wrap">${esc(p.body)}</p></details>`).join('')}
+</div>
+</details>
+
+<details class="card card-pad" style="margin-bottom:12px">
+<summary style="cursor:pointer;font-weight:700;font-size:1.05rem">◷ שגרת ניהול</summary>
+<div style="margin-top:12px">
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:16px">
 ${week.map(w => `<div class="card card-pad"><div class="muted" style="font-size:.78rem">${w[0]}</div><b>${w[1]}</b><div class="muted" style="font-size:.78rem">${w[2]}</div></div>`).join('')}
 </div>
@@ -320,9 +325,20 @@ ${week.map(w => `<div class="card card-pad"><div class="muted" style="font-size:
 ${sunday.map(s => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line)"><span>${s[0]}</span><span class="muted">${s[1]} דקות</span></div>`).join('')}</div>
 <div class="card card-pad"><b>העוגנים היומיים</b>
 ${anchors.map(s => `<div style="padding:7px 0;border-top:1px solid var(--line)"><b>${s[0]}</b><div class="muted" style="font-size:.8rem">${s[1]}</div></div>`).join('')}
-<div style="display:flex;gap:6px;margin-top:10px"><button class="btn btn-sm btn-ghost" onclick="shGo('messages')">לתבניות ההודעות</button><button class="btn btn-sm btn-ghost" onclick="shGo('reports')">דוחות הצוות</button></div></div>
+</div></div>
+<p class="muted" style="font-size:.8rem;margin-top:12px">המסגרת לדוגמה היא ראשון עד חמישי, 09:00–17:00. שעות והפסקות מותאמות לעבודה בפועל.</p>
 </div>
-<p class="muted" style="font-size:.8rem;margin-top:12px">המסגרת לדוגמה היא ראשון עד חמישי, 09:00–17:00. שעות והפסקות מותאמות לעבודה בפועל.</p>`;
+</details>
+
+<details class="card card-pad" style="margin-bottom:12px">
+<summary style="cursor:pointer;font-weight:700;font-size:1.05rem">✉ הודעות לצוות</summary>
+<div style="margin-top:12px">
+<div class="page-head" style="margin:0 0 8px"><span class="muted" style="font-size:.85rem">תבניות מוכנות להעתקה. משלימים יעדים ונתונים לפני שליחה.</span><button class="btn btn-sm btn-ghost" onclick="shListEdit('messages')">✏️ עריכה</button></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+${shGet('messages').map((m, i) => `<div class="card card-pad"><b>${esc(m.title)}</b><pre style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;margin:8px 0">${esc(m.body)}</pre><button class="btn btn-sm" onclick="shCopyMsg(${i})">העתקת ההודעה</button></div>`).join('')}
+</div>
+</div>
+</details>`;
   },
 
   reports() {
@@ -332,14 +348,6 @@ ${anchors.map(s => `<div style="padding:7px 0;border-top:1px solid var(--line)">
 <div class="card" id="shReportsTable"></div>`;
   },
 
-  messages() {
-    return `
-<div class="page-head"><h2>מילים שמניעות את הצוות</h2><button class="btn btn-ghost" onclick="shListEdit('messages')">✏️ עריכת התבניות</button></div>
-<p class="muted" style="font-size:.85rem;margin-bottom:12px">תבניות מוכנות להעתקה. משלימים יעדים ונתונים לפני שליחה.</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
-${shGet('messages').map((m, i) => `<div class="card card-pad"><b>${esc(m.title)}</b><pre style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;margin:8px 0">${esc(m.body)}</pre><button class="btn btn-sm" onclick="shCopyMsg(${i})">העתקת ההודעה</button></div>`).join('')}
-</div>`;
-  },
 };
 
 function shSortedReports() {
