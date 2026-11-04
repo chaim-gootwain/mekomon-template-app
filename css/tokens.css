@@ -1,0 +1,73 @@
+/* ==========================================
+   Design Tokens — מקומון  · סגנון קארבון
+   ========================================== */
+:root {
+  /* ---- Colors - Brand (aliases from style.css) ---- */
+  /* הצבעים המקוריים מוגדרים ב-style.css; כאן רק כינויים סמנטיים */
+  --color-brand:        var(--brand);        /* צבע ראשי */
+  --color-brand-dark:   var(--brand-dark);   /* כותרות, תפריט */
+  --color-brand-light:  var(--brand-light);  /* רקע בגוון מותג */
+  --color-accent:       var(--accent);       /* הדגשות / אדום לוגו */
+  --color-bg:           var(--bg);           /* רקע כללי */
+  --color-bg-secondary: #edf0f7;             /* רקע משני */
+  --color-bg-tertiary:  #dde3ef;             /* רקע שלישוני (skeleton) */
+  --color-card:         var(--card);         /* רקע כרטיסים */
+  --color-ink:          var(--ink);          /* טקסט ראשי */
+  --color-muted:        var(--muted);        /* טקסט משני */
+  --color-line:         var(--line);         /* קווי הפרדה */
+  --color-danger:       var(--danger);       /* אדום */
+  --color-ok:           var(--ok);           /* ירוק */
+  --color-warn:         var(--warn);         /* כתום */
+
+  /* ---- Carbon Design Tokens ---- */
+  --carbon-bg:          #F4F5F7;   /* רקע ראשי — אפור-קר בהיר */
+  --carbon-sidebar:     #1A1D2E;   /* sidebar — כחול-כהה כמעט שחור */
+  --carbon-primary:     #2563EB;   /* כחול-חשמל ראשי */
+  --carbon-primary-dk:  #1D4ED8;   /* כחול כהה (hover) */
+  --carbon-primary-lt:  #EFF6FF;   /* רקע בגוון כחול בהיר */
+  --carbon-card:        #FFFFFF;   /* רקע כרטיסים */
+  --carbon-ink:         #1A1D2E;   /* טקסט ראשי */
+  --carbon-muted:       #64748B;   /* טקסט משני */
+  --carbon-line:        #E2E8F0;   /* קווי הפרדה */
+
+  /* ---- KPI accent colors — border ייחודי לכל קוביה ---- */
+  --kpi-1: #2563EB;   /* כחול-חשמל */
+  --kpi-2: #7C3AED;   /* סגול */
+  --kpi-3: #16A34A;   /* ירוק */
+  --kpi-4: #EA580C;   /* כתום */
+
+  /* ---- Shadows ---- */
+  --shadow-sm: 0 1px 4px rgba(26,29,46,0.07);
+  --shadow-md: 0 4px 16px rgba(26,29,46,0.10);
+  --shadow-lg: 0 8px 28px rgba(26,29,46,0.14);
+  --shadow-xl: 0 16px 48px rgba(26,29,46,0.18);
+
+  /* ---- Transitions ---- */
+  --transition-fast:   150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow:   400ms ease;
+
+  /* ---- Border radius ---- */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   12px;   /* קארבון: 12px לכרטיסים */
+  --radius-xl:   20px;
+  --radius-full: 9999px;
+
+  /* ---- Spacing scale ---- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ---- Z-index scale ---- */
+  --z-base:     1;
+  --z-dropdown: 100;
+  --z-modal:    200;
+  --z-toast:    300;
+}

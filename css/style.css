@@ -38,9 +38,9 @@ a { color: var(--brand); }
 /* ---------- כפתורים ---------- */
 .btn {
 display: inline-flex; align-items: center; gap: 6px;
-background: var(--brand); color: #fff; border: none; border-radius: 8px;
+background: var(--brand); color: #fff; border: none; border-radius: var(--radius-md, 8px);
 padding: 9px 18px; font-size: 0.95rem; font-weight: 500;
-transition: background .15s;
+transition: background var(--transition-fast, 150ms ease), box-shadow var(--transition-fast, 150ms ease), transform var(--transition-fast, 150ms ease), opacity var(--transition-fast, 150ms ease);
 }
 .btn:hover { background: var(--brand-dark); }
 .btn:disabled { opacity: .5; cursor: default; }
@@ -127,7 +127,7 @@ border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.12); max-height: 380px;
 .content { padding: 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
 
 /* ---------- כרטיסים וטבלאות ---------- */
-.card { background: var(--card); border-radius: 12px; box-shadow: 0 1px 4px rgba(16,42,67,.07); overflow: hidden; }
+.card { background: var(--card); border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-sm, 0 1px 4px rgba(16,42,67,.07)); overflow: hidden; transition: box-shadow var(--transition-normal, 250ms ease), transform var(--transition-fast, 150ms ease); }
 .card + .card { margin-top: 18px; }
 .card-pad { padding: 20px; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -179,7 +179,7 @@ background: #eef2f6; color: var(--muted); white-space: nowrap; }
 
 /* ---------- דשבורד ---------- */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 20px; }
-.stat { background: var(--card); border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(16,42,67,.07);
+.stat { background: var(--card); border-radius: var(--radius-lg, 12px); padding: 18px 20px; box-shadow: var(--shadow-sm, 0 1px 4px rgba(16,42,67,.07));
 border-right: 4px solid var(--brand); }
 .stat.gold { border-right-color: var(--accent); }
 .stat.red { border-right-color: var(--danger); }
@@ -379,3 +379,184 @@ padding-top: 6px; border-top: 1px solid rgba(255,255,255,.12);
 .notif-sub { font-size: .78rem; color: var(--muted); margin-top: 1px; }
 .notif-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 0 34px; }
 .notif-empty { padding: 26px 14px; text-align: center; color: var(--muted); }
+
+/* ============================================================
+   CARBON OVERRIDES — סגנון קארבון (לבן + כחול-חשמל + מינימל)
+   ============================================================ */
+
+/* גופן Inter מ-Google Fonts נטען ב-index.html */
+body {
+  font-family: 'Inter', 'Heebo', 'Segoe UI', 'Arial Hebrew', Arial, sans-serif;
+  background: var(--carbon-bg, #F4F5F7);
+}
+
+/* ---- Sidebar כהה ---- */
+.sidebar {
+  background: var(--carbon-sidebar, #1A1D2E);
+  position: relative;
+}
+
+/* פס כחול בצד שמאל של ה-sidebar */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #2563EB, #60A5FA);
+  pointer-events: none;
+}
+
+/* לינקים ב-sidebar */
+.sidebar nav button {
+  color: rgba(255,255,255,0.65);
+}
+.sidebar nav button:hover {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+.sidebar nav button.active {
+  background: rgba(37,99,235,0.25);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* שם + כינוי קבוצה */
+.sidebar nav button.nav-group {
+  color: rgba(255,255,255,0.4);
+  font-size: .72rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+/* תיבת משתמש */
+.sidebar .user-box { border-top: 1px solid rgba(255,255,255,0.08); }
+.sidebar .user-box .name { color: #fff; }
+.sidebar .user-box .role { color: rgba(96,165,250,0.8); }
+.sidebar .user-box .actions button {
+  background: rgba(255,255,255,0.08);
+}
+.sidebar .user-box .actions button:hover {
+  background: rgba(255,255,255,0.18);
+}
+
+/* ---- Header / Topbar לבן נקי ---- */
+.topbar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--carbon-line, #E2E8F0);
+  box-shadow: 0 1px 4px rgba(26,29,46,0.06);
+}
+
+/* ---- רקע ראשי ---- */
+.main {
+  background: var(--carbon-bg, #F4F5F7);
+}
+
+/* ---- כרטיסים — לבן עם border-radius 12px וצל עדין ---- */
+.card {
+  background: #ffffff;
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-sm, 0 1px 4px rgba(26,29,46,0.07));
+  border: 1px solid var(--carbon-line, #E2E8F0);
+}
+
+/* ---- קוביות KPI — border תחתון/צדדי צבעוני לכל קוביה ---- */
+.stat {
+  background: #ffffff;
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-sm, 0 1px 4px rgba(26,29,46,0.07));
+  border: 1px solid var(--carbon-line, #E2E8F0);
+  border-right: 4px solid var(--brand, #2563EB);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.stat:hover {
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(26,29,46,0.10));
+  transform: translateY(-2px);
+}
+
+/* KPI #1 — כחול */
+.stats .stat:nth-child(1) { border-right-color: var(--kpi-1, #2563EB); }
+/* KPI #2 — סגול */
+.stats .stat:nth-child(2) { border-right-color: var(--kpi-2, #7C3AED); }
+/* KPI #3 — ירוק */
+.stats .stat:nth-child(3) { border-right-color: var(--kpi-3, #16A34A); }
+/* KPI #4 — כתום */
+.stats .stat:nth-child(4) { border-right-color: var(--kpi-4, #EA580C); }
+
+/* gold/red overrides — שמור על compatibility */
+.stat.gold { border-right-color: var(--kpi-4, #EA580C); }
+.stat.red  { border-right-color: #EF4444; }
+
+/* מספר ה-KPI */
+.stat .num {
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--carbon-ink, #1A1D2E);
+  letter-spacing: -0.5px;
+}
+
+/* תווית ה-KPI */
+.stat .lbl {
+  font-size: .82rem;
+  color: var(--carbon-muted, #64748B);
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+/* ---- badge / pill נקיים ---- */
+.pill {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+/* ---- כפתור ראשי — כחול-חשמל ---- */
+.btn {
+  background: var(--carbon-primary, #2563EB);
+}
+.btn:hover {
+  background: var(--carbon-primary-dk, #1D4ED8);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--carbon-primary, #2563EB);
+  border-color: var(--carbon-primary, #2563EB);
+}
+.btn-ghost:hover {
+  background: var(--carbon-primary-lt, #EFF6FF);
+}
+
+/* ---- לשוניות ---- */
+.tabs button.active {
+  color: var(--carbon-primary, #2563EB);
+  border-bottom-color: var(--carbon-primary, #2563EB);
+}
+
+/* ---- progress bars ---- */
+.progress > div {
+  background: var(--carbon-primary, #2563EB);
+}
+
+/* ---- ציר זמן ---- */
+.timeline li::before {
+  background: var(--carbon-primary, #2563EB);
+}
+
+/* ---- toast ---- */
+.toast {
+  background: var(--carbon-sidebar, #1A1D2E);
+}
+
+/* ---- KPI כרטיס לקוח (cc-kpi) ---- */
+.cc-kpi {
+  background: #fff;
+  border: 1px solid var(--carbon-line, #E2E8F0);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- brand שם + לוגו ---- */
+.sidebar .brand {
+  color: #fff;
+}
+.sidebar .brand small {
+  color: rgba(255,255,255,0.5);
+}
