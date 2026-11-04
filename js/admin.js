@@ -256,6 +256,12 @@ ${typeof autoLayoutCard === 'function' ? autoLayoutCard() : ''}
 ${typeof printLayoutCard === 'function' ? printLayoutCard() : ''}
 
 <div class="card card-pad">
+<b>🏷️ מחירון</b>
+<p class="muted" style="font-size:.82rem">עריכת מחיר הפרסומים. השינויים משפיעים על מודעות והצעות מחיר חדשות בלבד.</p>
+<button class="btn btn-sm btn-ghost" style="margin-top:8px" onclick="openPage('pricing')">פתיחת המחירון ←</button>
+</div>
+
+<div class="card card-pad">
 <b>יומן פעילות אחרון</b>
 <div id="activityLog" style="margin-top:8px"><div class="empty">טוען...</div></div>
 </div>`;
