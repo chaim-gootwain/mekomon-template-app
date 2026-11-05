@@ -21,7 +21,11 @@ PDF אחד של כל הגיליון. לא כותב שום דבר למסד.
   קובץ קל לשליחה במייל/וואטסאפ — לא לדפוס.
 - קובץ מודעה של כמה עמודים: עמוד 1 → המודעה שהקובץ עליה, והשאר → המודעות
   הבאות של אותו לקוח בגיליון שאין להן קובץ (pibChainAds).
+- כפולה: מודעת עמוד מלא שהקובץ שלה ברוחב שני עמודים + מודעה של אותו לקוח
+  בלי קובץ בעמוד השני בכפולה (2|3, 4|5...) — הקובץ מתפרס על שניהם.
 - עמודי כתבות ("📰 עמודי כתבות"): PDF אחד עם כמה עמודים סגורים מהגרפיקאית.
+  אם בעימוד יש עמודים שמסומנים לכתבות (מודעה בלי קובץ עם "כתבות" בכותרת/בגודל),
+  הקובץ נכנס רק אליהם; אחרת — לעמודים בלי מודעות.
   נשמר לגיליון (issues-archive: editorial/issue_<id>.pdf) ובהרכבה נכנס לפי
   העימוד: עמוד 1 בקובץ → העמוד הראשון בגיליון שאין בו מודעות, עמוד 2 → הבא,
   וכן הלאה. עמוד כזה נכנס כמו שהוא — בלי עמוד אב ובלי טקסט משתנה.
@@ -203,13 +207,53 @@ function pibMasterLeftovers(strings) {
 /* עמודי כתבות לפי העימוד: עמודי הגיליון בלי מודעות (adPages) מקבלים לפי הסדר
    את עמודי קובץ הכתבות (n עמודים). מחזיר { map: {עמוד גיליון: אינדקס בקובץ},
    empty: [עמודים פנויים שלא קיבלו עמוד], extra: עמודים בקובץ שלא נכנסו } */
-function pibEditorialMap(pages, adPages, n) {
+function pibEditorialMap(pages, adPages, n, onlyPages) {
+  // onlyPages: עמודי "כתבות" שסומנו בעימוד (מודעת כתבות בלי קובץ) — אם יש, רק אליהם
   const free = [];
-  for (let p = 1; p <= pages; p++) if (!adPages.has(p)) free.push(p);
+  if (onlyPages && onlyPages.length) free.push(...[...onlyPages].sort((a, b) => a - b));
+  else for (let p = 1; p <= pages; p++) if (!adPages.has(p)) free.push(p);
   const map = {};
   free.slice(0, n).forEach((p, i) => { map[p] = i; });
   return { map, empty: free.slice(n), extra: Math.max(0, n - free.length) };
 }
+/* מודעה שמסמנת מקום לכתבות: "כתבות" בכותרת או בשם הגודל במחירון */
+function pibIsArticleAd(a, priceList) {
+  const item = (priceList || []).find(x => x.id === a.price_item_id);
+  return /כתב/.test(String(a.title || '') + ' ' + String((item && item.name) || ''));
+}
+/* עמודי כתבות בעימוד: עמודים שכל המודעות בהם הן מקום-לכתבות בלי קובץ */
+function pibArticlePages(ads, isArticleNoFile) {
+  const by = {};
+  ads.forEach(a => { (by[a.page_number] = by[a.page_number] || []).push(a); });
+  return Object.keys(by).map(Number).filter(p => by[p].every(isArticleNoFile)).sort((a, b) => a - b);
+}
+
+/* כפולה: עיתון עברי נפתח מימין — עמוד זוגי הוא הימני בכפולה, והאי-זוגי שאחריו
+   השמאלי (2|3, 4|5 ...). השער והעמוד האחרון בודדים. מחזיר את העמוד השני בכפולה */
+function pibSpreadPartner(p, pages) {
+  const q = p % 2 === 0 ? p + 1 : p - 1;
+  return q >= 2 && q <= pages ? q : null;
+}
+/* קובץ ביחס של כפולה (רוחב ≈ פעמיים העמוד) */
+function pibIsSpreadAspect(aspect, pageAspect) { return aspect > 0 && aspect / (2 * pageAspect) > 0.8 && aspect / (2 * pageAspect) < 1.25; }
+
+/* בדיקת עמוד האב. items = [{str, x, y, page}] מ-pdf.js.
+   stale: "גיליון N" שאינו הגיליון הנוכחי — טקסט צרוב שלא מתעדכן.
+   dupes: אותו טקסט פעמיים באותו מקום — שכבות כפולות בעמוד האב */
+function pibMasterIssues(items, issueNumber) {
+  const stale = new Set(), seen = {}, dupes = new Set();
+  (items || []).forEach(it => {
+    const t = String(it.str || '').trim();
+    if (!t) return;
+    const m = t.match(/גיליון\s*(\d+)|(\d+)\s*גיליון/);
+    const n = m && Number(m[1] || m[2]);
+    if (n && String(n) !== String(issueNumber)) stale.add('גיליון ' + n);
+    const k = it.page + '|' + t + '|' + Math.round(it.x) + '|' + Math.round(it.y);
+    if (seen[k]) dupes.add(t); else seen[k] = 1;
+  });
+  return { stale: [...stale], dupes: [...dupes] };
+}
+
 function _pibEditorialPath(issueId) { return `editorial/issue_${issueId}.pdf`; }
 
 /* קובץ הכתבות של הגיליון: bytes, או null אם לא הועלה. שגיאה אחרת — נזרקת
@@ -372,16 +416,24 @@ async function fpBuildPrintPdf(proof) {
     const masterBytes = new Uint8Array(await mres.data.arrayBuffer());
     const masterDoc = await PDFLib.PDFDocument.load(masterBytes, { ignoreEncryption: true });
     // בדיקת טקסט ישן בעמוד האב (pdf.js, אם זמין) — רק כשהמערכת כותבת שדות בעצמה
-    if ((cfg.fields || []).length && typeof _pvEnsurePdfJs === 'function') {
+    // בדיקת עמוד האב — תמיד: טקסט צרוב של גיליון אחר, שכבות כפולות, טקסט משתנה ישן
+    const fieldsTxt = (cfg.fields || []).map(f => f.text || '').join(' ');
+    if (typeof _pvEnsurePdfJs === 'function') {
       try {
         await _pvEnsurePdfJs();
         const md = await window.pdfjsLib.getDocument({ data: masterBytes.slice(), isEvalSupported: false }).promise;
-        const strs = [];
-        for (let k = 1; k <= md.numPages; k++) (await (await md.getPage(k)).getTextContent()).items.forEach(it => strs.push(it.str));
-        const left = pibMasterLeftovers(strs);
-        if (left.length) W('block', `עמוד האב מכיל טקסט משתנה ישן (${left.slice(0, 3).join(' · ')}) — הוא יודפס מתחת לטקסט החדש. יש להעלות עמוד אב נקי בהגדרות`);
+        const items = [];
+        for (let k = 1; k <= md.numPages; k++) (await (await md.getPage(k)).getTextContent()).items.forEach(it => items.push({ str: it.str, x: it.transform[4], y: it.transform[5], page: k }));
+        const mi = pibMasterIssues(items, issue.issue_number);
+        if (mi.stale.length) W('block', `עמוד האב כתוב בו "${mi.stale.join(', ')}" — זה לא גיליון ${issue.issue_number}. הטקסט צרוב בעמוד האב ויודפס בכל עמוד. יש להעלות עמוד אב נקי (בלי מספר גיליון ותאריך) ולהגדיר שדות טקסט בהגדרות`);
+        if (mi.dupes.length) W('block', `בעמוד האב יש שכבות כפולות — "${mi.dupes.slice(0, 3).join('", "')}" מופיע יותר מפעם אחת באותו מקום (כמה עמודי אב אחד על השני). יש לבקש מהגרפיקאית לייצא עמוד אב נקי`);
+        const left = (cfg.fields || []).length ? [...new Set(pibMasterLeftovers(items.map(i => i.str)))] : [];
+        if (left.length && !mi.stale.length) W('block', `עמוד האב מכיל טקסט משתנה ישן (${left.slice(0, 3).join(' · ')}) — הוא יודפס מתחת לטקסט החדש. יש להעלות עמוד אב נקי בהגדרות`);
       } catch (e) { console.warn('master text check', e); }
     }
+    if (masterDoc.getPageCount() > 2) W('note', `לעמוד האב ${masterDoc.getPageCount()} עמודים — נלקחים רק שני הראשונים (זוגי ואי-זוגי)`);
+    if (!/\{issue\}/.test(fieldsTxt) || !/\{(date|hebdate)\}/.test(fieldsTxt))
+      W('note', 'מספר הגיליון ו/או התאריך לא נכתבים על ידי המערכת (אין שדה {issue}/{date} בהגדרות) — אם הם מופיעים בעמוד האב, הם לא יתעדכנו מגיליון לגיליון');
 
     const out = await PDFLib.PDFDocument.create();
     out.registerFontkit(fontkit);
@@ -446,11 +498,24 @@ async function fpBuildPrintPdf(proof) {
     const pageCounts = {};
     Object.keys(pdfSrc).forEach(id => { pageCounts[id] = pdfSrc[id].getPageCount(); });
     const chain = pibChainAds(ads, pageCounts, new Set(ads.filter(a => fileFor(a.id)).map(a => a.id)));
-    for (const a of noFile) {
-      const c = chain.assign[a.id];
-      if (c) loaded[a.id] = pdfItem(pdfSrc[c.from], c.idx);
-      else W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — אין קובץ`);
+    const unitsOf = a => (typeof alItemUnits === 'function') ? alItemUnits(a.price_item_id, U, sizeMap, cache.priceList || []).units : cellsPerPage;
+    const isFullPage = a => pibCellsFor(unitsOf(a), U, cellsPerPage).cells === cellsPerPage;
+    for (const a of noFile) { const c = chain.assign[a.id]; if (c) loaded[a.id] = pdfItem(pdfSrc[c.from], c.idx); }
+    // כפולה: מודעת עמוד מלא שהקובץ שלה ביחס של כפולה, ובעמוד השני בכפולה יש מודעה של
+    // אותו לקוח בלי קובץ — הקובץ מתפרס על שני העמודים (חצי ימני לזוגי, שמאלי לאי-זוגי)
+    const spread = {};
+    for (const a of ads) {
+      const L = loaded[a.id];
+      if (!L || chain.assign[a.id] || spread[a.id] || L.rot || pibAdTurn(a.layout_orient, a.page_number) || !isFullPage(a)) continue;
+      if (!pibIsSpreadAspect(L.aspect, trimW / trimH)) continue;
+      const q = pibSpreadPartner(a.page_number, pages);
+      const b = q && ads.find(x => x.page_number === q && x.customer_id === a.customer_id && !loaded[x.id] && isFullPage(x));
+      if (!b) { W('note', `עמ' ${a.page_number}: ${_adLabel(a)} — הקובץ ביחס של כפולה. כדי שיתפרס על שני עמודים, שבצו מודעת עמוד מלא של אותו לקוח (בלי קובץ) בעמוד ${q || 'הצמוד'}`); continue; }
+      loaded[b.id] = L;
+      spread[a.id] = { L, side: a.page_number % 2 === 0 ? 'right' : 'left' };
+      spread[b.id] = { L, side: b.page_number % 2 === 0 ? 'right' : 'left' };
     }
+    const missing = noFile.filter(a => !loaded[a.id]);
     Object.keys(chain.leftover).forEach(id => {
       const a = ads.find(x => String(x.id) === String(id));
       W('note', `עמ' ${a.page_number}: ${_adLabel(a)} — לקובץ ${pageCounts[id]} עמודים, ${chain.leftover[id]} אחרונים לא נכנסו (אין עוד מודעות של הלקוח בלי קובץ בעמודים הבאים)`);
@@ -463,11 +528,14 @@ async function fpBuildPrintPdf(proof) {
     if (edBytes) {
       try {
         edDoc = await PDFLib.PDFDocument.load(edBytes, { ignoreEncryption: true });
-        edMap = pibEditorialMap(pages, new Set(ads.map(a => a.page_number)), edDoc.getPageCount());
-        if (edMap.extra) W('block', `קובץ הכתבות: ${edMap.extra} עמודים אחרונים לא נכנסו — אין מספיק עמודים בלי מודעות בעימוד`);
-        if (edMap.empty.length) W('note', `קובץ הכתבות קצר מהעימוד — עמודים בלי מודעות שנשארו ריקים: ${edMap.empty.join(', ')}`);
+        const artPages = pibArticlePages(ads, a => !loaded[a.id] && pibIsArticleAd(a, cache.priceList));
+        edMap = pibEditorialMap(pages, new Set(ads.map(a => a.page_number)), edDoc.getPageCount(), artPages);
+        const where = artPages.length ? 'עמודי הכתבות בעימוד' : 'עמודים בלי מודעות';
+        if (edMap.extra) W('block', `קובץ הכתבות: ${edMap.extra} עמודים אחרונים לא נכנסו — אין מספיק ${where}`);
+        if (edMap.empty.length) W('note', `קובץ הכתבות קצר מהעימוד — ${where} שנשארו ריקים: ${edMap.empty.join(', ')}`);
       } catch (e) { W('block', `קובץ הכתבות לא נטען (${e.message || e})`); }
     }
+    missing.filter(a => edMap.map[a.page_number] == null).forEach(a => W('block', `עמ' ${a.page_number}: ${_adLabel(a)} — אין קובץ`));
     // אותו קובץ ביותר ממודעה אחת (לפי תוכן הקובץ, לא לפי שם)
     Object.values(byHash).filter(l => l.length > 1).forEach(l =>
       W('note', `אותו קובץ מופיע ${l.length} פעמים: ${l.map(a => `עמ' ${a.page_number} (${_adLabel(a)})`).join(', ')}`));
@@ -497,7 +565,16 @@ async function fpBuildPrintPdf(proof) {
       }
       const onPage = ads.filter(a => a.page_number === p);
       if (!onPage.length) W('block', `עמ' ${p}: ריק`);
-      const items = onPage.map(a => {
+      const sp = onPage.length === 1 && spread[onPage[0].id];
+      if (sp) { // חצי כפולה: הקובץ ברוחב שני עמודים, חציו מחוץ לדף (נחתך בגבול הדף)
+        const L = sp.L, t = L.srcTrim;
+        const ew = L.kind === 'pdf' ? t.width : L.emb.width, eh = L.kind === 'pdf' ? t.height : L.emb.height;
+        const k = Math.max(2 * trim.width / ew, trim.height / eh), dw = ew * k, dh = eh * k;
+        const x = sp.side === 'right' ? trim.x + trim.width - dw : trim.x, y = trim.y + (trim.height - dh) / 2;
+        if (L.kind === 'pdf') page.drawPage(await out.embedPage(L.emb.sp, { left: t.x, bottom: t.y, right: t.x + t.width, top: t.y + t.height }), { x, y, width: dw, height: dh });
+        else page.drawImage(L.emb, { x, y, width: dw, height: dh });
+      }
+      const items = sp ? [] : onPage.map(a => {
         const u = (typeof alItemUnits === 'function') ? alItemUnits(a.price_item_id, U, sizeMap, cache.priceList || []).units : cellsPerPage;
         const c = pibCellsFor(u, U, cellsPerPage);
         if (!c.exact) W('note', `עמ' ${p}: ${_adLabel(a)} — ${u} יחידות לא מתחלקות לגריד ${g.cols}×${g.rows} (עוגל ל-${c.cells} משבצות)`);
@@ -508,7 +585,7 @@ async function fpBuildPrintPdf(proof) {
       });
       const pack = pibPackPage(g, items);
       const used = pack.placed.reduce((n, s) => n + s.w * s.h, 0);
-      if (onPage.length && used < cellsPerPage) W('note', `עמ' ${p}: מלא ${used}/${cellsPerPage} — ${cellsPerPage - used} משבצות ריקות`);
+      if (onPage.length && !sp && used < cellsPerPage) W('note', `עמ' ${p}: מלא ${used}/${cellsPerPage} — ${cellsPerPage - used} משבצות ריקות`);
       pack.unplaced.forEach(id => W('block', `עמ' ${p}: ${_adLabel(ads.find(a => a.id === id))} — אין מקום בעמוד (עמוד עמוס)`));
       for (const s of pack.placed) { // כיוון שנבחר ידנית ולא התקיים (אין צורה כזו לגודל, או שהעמוד לא אפשר)
         const o = (ads.find(a => a.id === s.id) || {}).layout_orient;
@@ -523,7 +600,7 @@ async function fpBuildPrintPdf(proof) {
         const full = s.w === g.cols && s.h === g.rows;
         if (!L) { // מלבן ממלא-מקום כדי שיהיה ברור מה חסר
           page.drawRectangle({ x: X(r.x), y: Y(r.y + r.h), width: r.w * _PIB_MM, height: r.h * _PIB_MM, color: PDFLib.cmyk(0, 0, 0, 0.08), borderColor: PDFLib.cmyk(0, 1, 1, 0), borderWidth: 1 });
-          _pibDrawText(page, 'חסר קובץ: ' + _adLabel(a), X(r.x) + 6, Y(r.y) - 14, 9, font, PDFLib.cmyk(0, 1, 1, 0));
+          _pibDrawText(page, 'חסר קובץ: ' + _adLabel(a).replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F]/gu, '').trim(), X(r.x) + 6, Y(r.y) - 14, 9, font, PDFLib.cmyk(0, 1, 1, 0));
           continue;
         }
         // מודעת עמוד מלא בגודל החיתוך → נכנסת לכל הדף כולל הגלישה
@@ -783,10 +860,12 @@ async function fpEditorialShow(localBytes) {
     const doc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
     const n = doc.getPageCount();
     const adPages = new Set(_fpAds.filter(a => a.page_number >= 1 && a.page_number <= pages).map(a => a.page_number));
-    const m = pibEditorialMap(pages, adPages, n);
+    const fk = (typeof _fpFileKinds !== 'undefined' && _fpFileKinds) || {};
+    const artPages = pibArticlePages(_fpAds.filter(a => a.page_number >= 1 && a.page_number <= pages), a => !fk[a.id] && pibIsArticleAd(a, cache.priceList));
+    const m = pibEditorialMap(pages, adPages, n, artPages);
     const rows = Object.keys(m.map).map(Number).sort((a, b) => a - b).map(p => `<li>עמוד ${m.map[p] + 1} בקובץ ← עמוד ${p} בגיליון</li>`).join('');
     modal.innerHTML = `<h3>📰 עמודי כתבות — גיליון ${esc(issue.issue_number)}</h3>
-<p>בקובץ ${n} עמודים · בעימוד ${pages - adPages.size} עמודים בלי מודעות.</p>
+<p>בקובץ ${n} עמודים · ${artPages.length ? `בעימוד ${artPages.length} עמודי כתבות (${artPages.join(', ')})` : `בעימוד ${pages - adPages.size} עמודים בלי מודעות`}.</p>
 <ul style="margin:4px 18px;max-height:35vh;overflow:auto;font-size:.86rem">${rows || '<li>אין עמודים פנויים</li>'}</ul>
 ${m.extra ? `<p style="color:#b91c1c;font-size:.84rem">🔴 ${m.extra} עמודים אחרונים בקובץ לא ייכנסו — אין מספיק עמודים בלי מודעות</p>` : ''}
 ${m.empty.length ? `<p style="color:#92400e;font-size:.84rem">🟡 עמודים בלי מודעות שיישארו ריקים: ${m.empty.join(', ')}</p>` : ''}
@@ -876,5 +955,5 @@ async function printLayoutSave() {
 
 /* חשיפת הלוגיקה הטהורה לבדיקות node (לא פעיל בדפדפן) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds, pibZipName };
+  module.exports = { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds, pibZipName, pibIsArticleAd, pibArticlePages, pibSpreadPartner, pibIsSpreadAspect, pibMasterIssues };
 }

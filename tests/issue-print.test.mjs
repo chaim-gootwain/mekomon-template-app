@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import assert from 'assert';
 const require = createRequire(import.meta.url);
 global.Pages = {}; global.window = {}; global.cache = { settings: {} };
-const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds, pibZipName } = require('../js/issue-print.js');
+const { pibBidiRuns, pibHebNum, pibMasterLeftovers, pibCellsFor, pibPackPage, pibSlotRect, pibGrid, pibPageSet, pibFieldText, pibEditorialMap, pibNormRot, pibJpegRotation, pibRotPlace, pibOutwardRot, pibAdTurn, pibChainAds, pibZipName, pibIsArticleAd, pibArticlePages, pibSpreadPartner, pibIsSpreadAspect, pibMasterIssues } = require('../js/issue-print.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -167,6 +167,31 @@ t('zip: שם קובץ לפי עמוד, סיומת מקורית, בלי כפיל�
   assert.strictEqual(pibZipName({ page_number: 5, title: 'פיצה/בורקס' }, 'a.PDF', used), 'עמ_05_פיצה_בורקס.PDF');
   assert.strictEqual(pibZipName({ page_number: 5, title: 'פיצה/בורקס' }, 'b.PDF', used), 'עמ_05_פיצה_בורקס_2.PDF');
   assert.strictEqual(pibZipName({ page_number: null, title: 'ירקן' }, 'x.jpg', used), 'לא_משובצת_ירקן.jpg');
+});
+
+/* ---------- עמוד אב, כפולות, עמודי כתבות ---------- */
+t('master: טקסט של גיליון אחר ושכבות כפולות', () => {
+  const it = (str, x, y, page = 1) => ({ str, x, y, page });
+  const r = pibMasterIssues([it('גיליון 306', 10, 5), it('05.10.26', 40, 5), it('גיליון 306', 10.2, 5.1), it('להצעת פרסום', 200, 5)], 311);
+  assert.deepStrictEqual(r.stale, ['גיליון 306']);
+  assert.deepStrictEqual(r.dupes, ['גיליון 306']);
+  assert.deepStrictEqual(pibMasterIssues([it('גיליון 311', 1, 1), it('גיליון 311', 1, 1, 2)], 311), { stale: [], dupes: [] });
+});
+t('spread: בן הזוג בכפולה וזיהוי יחס', () => {
+  assert.deepStrictEqual([1, 2, 3, 36, 37, 48].map(p => pibSpreadPartner(p, 48)), [null, 3, 2, 37, 36, null]);
+  assert.strictEqual(pibIsSpreadAspect(2 * 0.69, 0.69), true);
+  assert.strictEqual(pibIsSpreadAspect(0.69, 0.69), false);
+  assert.strictEqual(pibIsSpreadAspect(3.2, 0.69), false);
+});
+t('article pages: רק עמודים שכל המודעות בהם מקום-לכתבות בלי קובץ', () => {
+  const pl = [{ id: 5, name: 'כתבות' }, { id: 6, name: 'עמוד מלא' }];
+  const ads = [{ id: 1, page_number: 27, title: 'כתבות' }, { id: 2, page_number: 28, price_item_id: 5 }, { id: 3, page_number: 29, title: 'כתבות' },
+    { id: 4, page_number: 29, title: 'פיצה', price_item_id: 6 }, { id: 7, page_number: 30, title: 'כתבות' }];
+  const noFile = new Set([1, 2, 3, 4]);
+  assert.strictEqual(pibIsArticleAd(ads[1], pl), true);
+  assert.deepStrictEqual(pibArticlePages(ads, a => noFile.has(a.id) && pibIsArticleAd(a, pl)), [27, 28]);
+  // קובץ כתבות של 3 עמודים: רק לעמודי הכתבות, לא לעמוד ריק 13
+  assert.deepStrictEqual(pibEditorialMap(48, new Set([27, 28, 29, 30]), 3, [27, 28]), { map: { 27: 0, 28: 1 }, empty: [], extra: 1 });
 });
 
 console.log(`\n${passed} בדיקות עברו`);
