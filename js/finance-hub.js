@@ -26,9 +26,6 @@ Pages.finhub = {
     const isAdmin = profile.role === 'admin';
     el.innerHTML = `<div class="page-head"><h2>💰 מרכז כספים</h2>
       <div class="actions">
-        <button class="btn btn-ghost btn-sm" onclick="openPage('billing')">גבייה</button>
-        ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openPage('cashflow')">תזרים</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="openPage('reports')">דו״חות</button>
         <button class="btn btn-ghost btn-sm" onclick="invReconcileOpen()">🔗 השלמת חוב מחשבוניות</button>
       </div></div>
       <div id="fhBody"><div class="empty">טוען נתונים כספיים...</div></div>`;
