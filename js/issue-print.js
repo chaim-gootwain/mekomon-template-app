@@ -248,6 +248,9 @@ function pibMasterIssues(items, issueNumber) {
     const m = t.match(/גיליון\s*(\d+)|(\d+)\s*גיליון/);
     const n = m && Number(m[1] || m[2]);
     if (n && String(n) !== String(issueNumber)) stale.add('גיליון ' + n);
+    // רק מילים ומספרים (2+ אותיות/ספרות). סמלים — כמו דגלונים שבנויים משני סימנים
+    // זהים בצבעים שונים אחד על השני — הם עיצוב, לא שכבה כפולה
+    if ((t.match(/[\u0590-\u05FFA-Za-z0-9]/g) || []).length < 2) return;
     const k = it.page + '|' + t + '|' + Math.round(it.x) + '|' + Math.round(it.y);
     if (seen[k]) dupes.add(t); else seen[k] = 1;
   });
