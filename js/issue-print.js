@@ -476,9 +476,7 @@ async function fpBuildPrintPdf(proof) {
       const f = fileFor(a.id);
       if (!f) { noFile.push(a); continue; }
       try {
-        const r = await db.storage.from('ad-files').download(f.storage_path);
-        if (r.error) throw r.error;
-        const bytes = new Uint8Array(await r.data.arrayBuffer());
+        const bytes = await _pibAdFileBytes(f.storage_path);
         const kind = _pibKind(bytes);
         const hash = await _pibHash(bytes);
         (byHash[hash] = byHash[hash] || []).push(a);
@@ -713,6 +711,36 @@ async function _pibHash(bytes) {
   } catch (e) { return bytes.length + ':' + bytes[0] + bytes[bytes.length - 1]; }
 }
 
+/* ==================== הורדת קובץ מודעה ==================== */
+/* מודעה שהיא תמונה (JPG/PNG): אם במופע יש פונקציית שרת ad-image-pdf (Netlify),
+   השרת עוטף את התמונה כמו שהיא בקובץ PDF של עמוד אחד, והדפדפן מוריד את ה-PDF.
+   בקשת המופע: מסנן אינטרנט (אתרוג) מחליף תמונות בגרסה מפוקסלת בדרך לדפדפן,
+   ואז התמונה המפוקסלת נכנסת לקובץ הדפוס. ה-JPEG נשמר בתוך ה-PDF בלי דחיסה מחדש.
+   במופע בלי הפונקציה (404) — הורדה ישירה כמו קודם. */
+let _pibWrapOff = false;
+async function _pibAdFileBytes(path) {
+  if (!_pibWrapOff && /\.(jpe?g|png)$/i.test(path)) {
+    try {
+      const { data: s } = await db.auth.getSession();
+      const r = await fetch('/.netlify/functions/ad-image-pdf', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + ((s && s.session && s.session.access_token) || '') },
+        body: JSON.stringify({ path }),
+      });
+      if (r.status === 404) _pibWrapOff = true;
+      else if (r.ok) {
+        const j = await r.json();
+        if (j.ok && j.path) {
+          const w = await db.storage.from('ad-files').download(j.path);
+          if (!w.error && w.data) return new Uint8Array(await w.data.arrayBuffer());
+        }
+      }
+    } catch (e) { console.warn('ad-image-pdf', e); }
+  }
+  const r = await db.storage.from('ad-files').download(path);
+  if (r.error) throw r.error;
+  return new Uint8Array(await r.data.arrayBuffer());
+}
+
 /* ==================== הורדת כל קבצי המודעות של הגיליון ==================== */
 /* כל קובץ כמו שהועלה (בלי הקטנה/המרה), ב-ZIP אחד. שם הקובץ מתחיל במספר העמוד
    כדי שיסתדר לפי העימוד; מודעה שלא שובצה — "לא_משובצת". קובץ עיצוב קודם,
@@ -806,9 +834,12 @@ async function fpDownloadAllAdsZip() {
   const entries = [], errs = [];
   let done = 0, mb = 0;
   await _pibPool(list, 4, async (it, k) => {
-    const { data, error } = await db.storage.from('ad-files').download(it.path);
-    if (error || !data) errs.push(_adLabel(it.ad));
-    else { const u8 = new Uint8Array(await data.arrayBuffer()); entries[k] = { name: it.name, data: u8 }; mb += u8.length / 1048576; }
+    try {
+      const u8 = await _pibAdFileBytes(it.path);
+      // תמונה שנעטפה ב-PDF בשרת — השם מקבל סיומת .pdf
+      const name = _pibKind(u8) === 'pdf' && !/\.pdf$/i.test(it.name) ? it.name.replace(/\.[A-Za-z0-9]{1,6}$/, '') + '.pdf' : it.name;
+      entries[k] = { name, data: u8 }; mb += u8.length / 1048576;
+    } catch (e) { errs.push(_adLabel(it.ad)); }
     modal.innerHTML = `${head}<p>מוריד ${++done}/${list.length} · ${mb.toFixed(0)}MB...</p>`;
   });
   const ok = entries.filter(Boolean);
