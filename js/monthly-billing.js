@@ -106,6 +106,26 @@ function _mbDocDate(ym) {
 let _mbCtx = null; // הקשר לרשימת האישור החודשית: {ym, issMap, ads, done}
 let _mbKind = null; // סוג המסמך שנבחר בתצוגה המקדימה החודשית
 let _mbClipsSent = new Set(); // מעקב: למי כבר נשלחו גזירי החודש (למניעת כפילות בפיצול קטגוריות)
+/* פירוט מקוצר בחשבונית החודשית: לכל גיליון — "גיליון X — תאריך" ואחריה "פרסום (עמודים)" */
+function ipoMonthlyLines(ads, issMap) {
+  const byIss = {};
+  ads.forEach(a => { (byIss[a.issue_id] = byIss[a.issue_id] || []).push(a); });
+  const ids = Object.keys(byIss).sort((x, y) => (Number((issMap[x] || {}).issue_number) || 0) - (Number((issMap[y] || {}).issue_number) || 0));
+  const out = [];
+  ids.forEach(id => {
+    const ln = ipoLine(byIss[id]);
+    if (!ln.length) return;
+    out.push(_ibHdrLine(issMap[id] || { issue_number: '' }), ...ln);
+  });
+  return out;
+}
+/* שורת פריט אחת למודעה בחשבונית החודשית */
+function _mbLine(a, issMap) {
+  const iss = issMap[a.issue_id] || {};
+  const sz = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || '';
+  const lbl = (typeof _ibLabel === 'function') ? _ibLabel : (t => t || 'מודעה');
+  return { details: lbl(a.title) + (sz ? ' · ' + sz : '') + ' — גיליון ' + iss.issue_number + (a.page_number ? ' — עמוד ' + a.page_number : ''), amount: 1, price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) };
+}
 
 /* אילו טרנזקציות חודשיות כבר הופקו — נבדק מול כל סוגי המסמכים, כי הסוג
    הוא חלק מה-transaction_id ובדיקה לפי סוג אחד מפספסת הפקה קודמת בסוג
@@ -135,13 +155,6 @@ function _mbSuppTxn(ym, cid, kind, cat, ads) {
   const ids = ads.map(a => a.id).sort((a, b) => a - b);
   return ('emu-monthly-' + ym + '-cust' + cid + '-x' + ids[0] + 'n' + ids.length + '-' + kk + (cc ? '-' + cc : '')).slice(0, 45);
 }
-/* שורת פריט אחת למודעה בחשבונית החודשית */
-function _mbLine(a, issMap) {
-  const iss = issMap[a.issue_id] || {};
-  const sz = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || '';
-  const lbl = (typeof _ibLabel === 'function') ? _ibLabel : (t => t || 'מודעה');
-  return { details: lbl(a.title) + (sz ? ' · ' + sz : '') + ' — גיליון ' + iss.issue_number + (a.page_number ? ' — עמוד ' + a.page_number : ''), amount: 1, price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) };
-}
 
 /* הפקת חשבוניות חודשיות לחודש (YYYY-MM) — הפקה מרוכזת (משמש כגיבוי; הכפתור מפנה לאישור פרטני) */
 async function monthlyBillingRun(ym) {
@@ -156,8 +169,8 @@ async function monthlyBillingRun(ym) {
   const issMap = {}; issues.forEach(i => issMap[i.id] = i);
   const ads = await run(db.from('ads').select('*').in('issue_id', issues.map(i => i.id)).in('customer_id', monthly).not('status', 'in', '("cancelled","rejected")'));
   const lbl = (typeof _ibLabel === 'function') ? _ibLabel : (t => t || 'מודעה');
-  const done = await _mbDoneSet(ym); // לא מפיקים שוב למי שכבר הופק — בכל סוג מסמך
   const docDate = _mbDocDate(ym); // תאריך המסמך = סוף החודש (ואם שבת — יומיים קודם)
+  const done = await _mbDoneSet(ym); // לא מפיקים שוב למי שכבר הופק — בכל סוג מסמך
   let count = 0;
   const mkLine = a => { const iss = issMap[a.issue_id] || {}; const sz = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || ''; return { details: lbl(a.title) + (sz ? ' · ' + sz : '') + ' — גיליון ' + iss.issue_number + (a.page_number ? ' — עמוד ' + a.page_number : ''), amount: 1, price: Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) }; };
   for (const cid of monthly) {
@@ -171,7 +184,7 @@ async function monthlyBillingRun(ym) {
       ? { regular: cAds.filter(a => ecCatOfAd(a.id) === 'regular'), social: cAds.filter(a => ecCatOfAd(a.id) === 'social') }
       : { regular: cAds };
     for (const gk of Object.keys(groups)) {
-      const lines = isPagesOnlyCustomer(cid) ? ipoLine(groups[gk]) : groups[gk].map(mkLine).filter(it => it.price > 0);
+      const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(groups[gk], issMap) : groups[gk].map(mkLine).filter(it => it.price > 0);
       if (!lines.length) continue;
       if (_mbIsDone(done, ym, cid, isCenter ? gk : '')) continue; // כבר חויב החודש
       const isSocial = gk === 'social';
@@ -326,7 +339,7 @@ async function monthlyBillingPreviewOne(ym, cid, gk) {
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
   const cAds = ctx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk) && _mbBillable(a));
-  const lines = isPagesOnlyCustomer(cid) ? ipoLine(cAds) : cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
+  const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(cAds, ctx.issMap) : cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const total = lines.reduce((s, it) => s + it.amount * it.price, 0);
   const _supp = _mbIsDone(ctx.done, ym, cid, isCenter ? gk : '');
@@ -339,7 +352,7 @@ async function monthlyBillingPreviewOne(ym, cid, gk) {
     ${_supp ? `<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:.85rem">➕ <b>חיוב השלמה</b> — ללקוח כבר הופקה חשבונית חודשית ל-${ym}. כאן רק המודעות שנוספו אחריה ועוד לא חויבו.</div>` : ''}
     <div class="table-wrap" style="margin-top:8px"><table class="data">
       <thead><tr><th>פירוט</th><th>מחיר</th></tr></thead><tbody>
-      ${lines.map(it => `<tr><td>${esc(it.details)}</td><td>${money(it.price)}</td></tr>`).join('')}
+      ${lines.map(it => `<tr><td>${esc(it.details)}</td><td>${it.price ? money(it.price) : ''}</td></tr>`).join('')}
     </tbody></table></div>
     <div class="inv-total" style="margin-top:10px;font-weight:800">סה"כ (לפני מע"מ): ${money(total)}</div>
     <div class="field" style="margin-top:12px"><label>סוג מסמך</label>
@@ -360,7 +373,7 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
   const cAds = _mbCtx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk) && _mbBillable(a));
-  const lines = isPagesOnlyCustomer(cid) ? ipoLine(cAds) : cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
+  const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(cAds, _mbCtx.issMap) : cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const isSocial = gk === 'social';
   const docKind = _mbKind || (cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma');
@@ -381,23 +394,41 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
   const txn = _supp ? _mbSuppTxn(ym, cid, docKind, isCenter ? gk : '', cAds) : _mbTxn(ym, cid, docKind, isCenter ? gk : '');
   document.getElementById('viewBack').classList.remove('open');
-  await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: (_supp ? 'חיוב השלמה ' : 'חיוב חודשי ') + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
-  if (_supp) { await monthlyBillingReview(ym); return; } // הגזירים החודשיים כבר נשלחו בהפקה החודשית
-  // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד, גם בפיצול קטגוריות)
+  const _doc = await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: (_supp ? 'חיוב השלמה ' : 'חיוב חודשי ') + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
+  if (_supp) { await monthlyBillingReview(ym); return; } // מייל/גזירי החודש כבר נשלחו בהפקה החודשית
   try {
-    const _key = cid + '|' + ym;
-    const _allAds = (_mbCtx && _mbCtx.ads || []).filter(a => a.customer_id === cid);
-    const _issueIds = [...new Set(_allAds.map(a => a.issue_id))];
-    if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_key)) {
-      _mbClipsSent.add(_key);
-      toast('מכין גזירי החודש...');
-      const _r = await adProofSendMonth(cid, _issueIds, ym);
-      if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
-      else if (_r && _r.downloaded && !_r.email) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
-      else if (_r && _r.downloaded) toast('⚠️ שליחת המייל נכשלה' + (_r.emailError ? ' — ' + _r.emailError : '') + ' — הורדתי לך את גזירי החודש', true);
-      else toast('גזירי החודש מוכנים');
+    if (isCenter) {
+      const _catHe = isSocial ? 'חברתי כלכלי' : 'כללי';
+      const _to = (typeof ecEmailOf === 'function') ? ecEmailOf(gk) : '';
+      const _catAds = cAds.map(a => a.id);
+      const _issueIds = [...new Set(cAds.map(a => a.issue_id))];
+      const _catKey = cid + '|' + ym + '|' + gk;
+      if (!(_doc && _doc.ok)) { /* הפקה נכשלה — לא שולחים מייל */ }
+      else if (!_to) {
+        toast('⚠️ קטגוריה ' + _catHe + ': לא הוגדר מייל — החשבונית הופקה אך לא נשלח מייל', true);
+      } else if (_issueIds.length && !_mbClipsSent.has(_catKey)) {
+        _mbClipsSent.add(_catKey);
+        toast('מכין מייל לקטגוריה ' + _catHe + '...');
+        const _num = _doc.document && _doc.document.doc_number ? _doc.document.doc_number : '';
+        const _r = await adProofSendMonth(cid, _issueIds, ym, { to_email: _to, ad_ids: _catAds, category_he: _catHe, note: 'חשבונית' + (_num ? " מס' " + _num : '') + ' — קטגוריה: ' + _catHe, invoice: _doc.document ? { doc_number: _doc.document.doc_number, doc_uuid: _doc.document.doc_uuid } : null });
+        if (_r && _r.emailed) toast('✅ נשלח מייל לקטגוריה ' + _catHe);
+        else toast('ℹ️ קטגוריה ' + _catHe + ': המייל לא אושר' + (_r && _r.emailError ? ' — ' + _r.emailError : '') + ' — בדוק', true);
+      }
+    } else {
+      const _key = cid + '|' + ym;
+      const _allAds = (_mbCtx && _mbCtx.ads || []).filter(a => a.customer_id === cid);
+      const _issueIds = [...new Set(_allAds.map(a => a.issue_id))];
+      if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_key)) {
+        _mbClipsSent.add(_key);
+        toast('מכין גזירי החודש...');
+        const _r = await adProofSendMonth(cid, _issueIds, ym);
+        if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
+        else if (_r && _r.downloaded && !_r.email) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
+        else if (_r && _r.downloaded) toast('⚠️ שליחת המייל נכשלה' + (_r.emailError ? ' — ' + _r.emailError : '') + ' — הורדתי לך את גזירי החודש', true);
+        else toast('גזירי החודש מוכנים');
+      }
     }
-  } catch (e) { toast('הערה: שליחת גזירי החודש נכשלה — ' + (e && e.message || e), true); }
+  } catch (e) { toast('הערה: שליחת מייל החודש נכשלה — ' + (e && e.message || e), true); }
   await monthlyBillingReview(ym);
 }
 
@@ -427,12 +458,13 @@ async function issueBillingSetMonthly(issueId, customerId) {
             div.innerHTML = `<span><b>אופן חיוב:</b> ${on ? '<span class="pill amber">חודשי — חשבונית אחת בסוף החודש</span>' : 'לפי גיליון'}</span>
               <button id="mbToggle" class="btn btn-sm ${on ? 'btn-ghost' : ''}" onclick="toggleMonthlyBilling(${id})">${on ? 'בטל חיוב חודשי' : '🔁 הפוך לחיוב חודשי'}</button>`;
             modal.appendChild(div);
-            const po = isPagesOnlyCustomer(id);
-            const div2 = document.createElement('div');
-            div2.style.cssText = div.style.cssText;
-            div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
-              <button class="btn btn-sm ${po ? 'btn-ghost' : ''}" onclick="togglePagesOnlyInvoice(${id})">${po ? 'חזרה לפירוט מלא' : '🧾 פירוט מקוצר'}</button>`;
-            modal.appendChild(div2);
+            if (isPagesOnlyCustomer(id)) {
+              const div2 = document.createElement('div');
+              div2.style.cssText = div.style.cssText;
+              div2.innerHTML = `<span><b>פירוט בחשבונית:</b> <span class="pill amber">מקוצר — "גיליון X — תאריך" + "פרסום (עמודים)"</span></span>
+                <span class="muted" style="font-size:.8rem">קבוע ללקוח זה</span>`;
+              modal.appendChild(div2);
+            }
           }
         }
       } catch (e) { console.error('monthly-billing', e); }
