@@ -73,9 +73,15 @@ if (custCanPortal() || !rows) return rows;
 return rows;
 }
 
-/* טעינת לקוח מלא — המקום היחיד שקורא את כל עמודות customers. כל כלל על נתוני לקוח
-   (מי רואה את portal_token, ובעתיד רשימת עמודות מפורשת במקום '*') נכתב כאן בלבד.
-   שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
+/* שליפת portal_token דרך RPC מאובטח — מחזיר null לתפקידים שלא מורשים */
+async function custPortalToken(id) {
+if (!custCanPortal()) return null;
+const { data, error } = await db.rpc('get_customer_portal_token', { p_customer_id: id });
+if (error) { console.error('custPortalToken', error); return null; }
+return data || null;
+}
+
+/* טעינת לקוח מלא. שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
    custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
 async function custLoadAll() {
 return custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
@@ -97,10 +103,9 @@ if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
 // nameOf ובדיקות הכפילויות פשוט לא ראו את סוף הרשימה
 // status/status_reason/fixed_discount חייבים להיות כאן: שער החסימה וההנחה
 // הקבועה קוראים מהמטמון, ושורה בלי העמודות האלה נראית כמו "אין סטטוס/אין הנחה"
-// portal_token נטען רק למנהל ולמכירות (ר' custSafe)
-const _tok = custCanPortal() ? 'portal_token,' : '';
-const _custCols = 'id,name,agent_id,phone,email,whatsapp,' + _tok + 'business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
-const _custColsOld = 'id,name,agent_id,phone,email,' + _tok + 'business_id,invoice_name,order_doc_type,payment_terms';
+// portal_token אינו נגיש ב-SELECT הישיר — נשלף דרך RPC get_customer_portal_token בלבד (ר' custPortalToken)
+const _custCols = 'id,name,agent_id,phone,email,whatsapp,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
+const _custColsOld = 'id,name,agent_id,phone,email,business_id,invoice_name,order_doc_type,payment_terms';
 const _pageCust = async (cols) => {
   const all = [];
   for (let f = 0; f < 50000; f += 1000) {

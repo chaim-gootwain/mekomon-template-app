@@ -275,12 +275,13 @@ const canWrite = ['admin', 'sales'].includes(profile.role);
 const canMoney = ['admin', 'sales'].includes(profile.role);
 
 // כל הנתונים הקשורים נטענים במקביל
-const [ads, contracts, charges, payments, notes] = await Promise.all([
+const [ads, contracts, charges, payments, notes, _portalToken] = await Promise.all([
 run(db.from('ads').select('*').eq('customer_id', id).order('created_at', { ascending: false }).limit(300)),
 canMoney ? run(db.from('contracts').select('*').eq('customer_id', id).order('created_at', { ascending: false })) : [],
 canMoney ? runAll((f, t) => db.from('charges').select('*').eq('customer_id', id).order('issued_date', { ascending: false }).order('id').range(f, t)) : [],
 canMoney ? runAll((f, t) => db.from('payments').select('*').eq('customer_id', id).order('paid_date', { ascending: false }).order('id').range(f, t)) : [],
 loadTimeline('customer', id),
+custPortalToken(id),
 ]);
 
 const totalCharged = charges.filter(x => !['cancelled', 'lost'].includes(x.status)).reduce((s, x) => s + Number(x.amount), 0);
@@ -301,7 +302,7 @@ const creditLimit = Number(c.credit_limit) || 0;
 const overLimit = creditLimit > 0 && debt > creditLimit;
 const st = CUSTOMER_STATUS[c.status];
 
-const portalUrl = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '') + '/portal/?t=' + c.portal_token;
+const portalUrl = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '') + '/portal/?t=' + (_portalToken || '');
 
 const modal = document.getElementById('viewModal');
 modal.innerHTML = `
@@ -383,11 +384,13 @@ ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-
 <button class="cc-tbtn cc-danger" data-tip="סגירה" aria-label="סגירה" onclick="document.getElementById('viewBack').classList.remove('open')">${_ccIco('x')}</button>
 </div>
 <div id="ccPortalBox" class="hidden" style="margin-top:8px">
-<div style="display:flex;gap:8px">
+${_portalToken
+  ? `<div style="display:flex;gap:8px">
 <input readonly value="${esc(portalUrl)}" dir="ltr" style="font-size:.78rem" onclick="this.select()">
 <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('${esc(portalUrl)}').then(()=>toast('הקישור הועתק'))">העתקה</button>
 <button class="btn btn-sm btn-danger-ghost" onclick="portalTokenReset(${id})">חידוש קישור</button>
-</div>
+</div>`
+  : `<p style="color:var(--danger);font-size:.86rem;margin:4px 0">שגיאה בטעינת קישור הפורטל - נסה לרענן</p>`}
 </div>` : `<div class="m-actions"><button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button></div>`}
 
 <div class="tabs" style="margin-top:16px">

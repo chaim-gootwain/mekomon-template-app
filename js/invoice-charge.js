@@ -106,10 +106,11 @@ async function applyInvoiceToLedger(body, doc) {
             .ilike('notes', '%#doc:' + body.credit_ref + '%')).data || [];
           _origCharges = _cand.filter(r => _icHasDocTag(r.notes, body.credit_ref));
           for (const r of _origCharges) {
-            await db.from('charges').update({
+            const { error: _ce } = await db.from('charges').update({
               status: 'cancelled',
               notes: (r.notes || '') + ' · בוטל בזיכוי' + (docNum ? ' ' + docNum : '') + tag,
             }).eq('id', r.id);
+            if (_ce) throw _ce;
           }
         } catch (e) { console.error('credit-cancel-orig', e); }
       }
@@ -165,9 +166,10 @@ async function applyInvoiceToLedger(body, doc) {
           for (const r of _adCh) {
             const _p = (await db.from('payments').select('id').eq('charge_id', r.id).limit(1)).data || [];
             if (_p.length) continue;
-            await db.from('charges').update({
+            const { error: _ace } = await db.from('charges').update({
               status: 'cancelled', notes: ((r.notes || '') + ' · הוחלף ב' + heKind + (docNum ? ' ' + docNum : '')).trim(),
             }).eq('id', r.id);
+            if (_ace) throw _ace;
           }
         } catch (e) { console.error('ad-charge-replace', e); }
       }
@@ -190,8 +192,10 @@ async function applyInvoiceToLedger(body, doc) {
     if (targetIds.length) withBal.sort((a, b) => (targetIds.includes(a.id) ? 0 : 1) - (targetIds.includes(b.id) ? 0 : 1));
     const plan = _icPlanSettlement(withBal, total);
     for (const a of plan.allocs) {
-      await db.from('payments').insert({ charge_id: a.id, customer_id: cid, amount: a.applied, method: _icPayMethod(), paid_date: _pDate, notes: 'תשלום מחשבונית' + tag, created_by: (typeof profile !== 'undefined' ? profile.id : null) });
-      await db.from('charges').update({ status: a.newStatus }).eq('id', a.id);
+      const { error: _pe } = await db.from('payments').insert({ charge_id: a.id, customer_id: cid, amount: a.applied, method: _icPayMethod(), paid_date: _pDate, notes: 'תשלום מחשבונית' + tag, created_by: (typeof profile !== 'undefined' ? profile.id : null) });
+      if (_pe) throw _pe;
+      const { error: _ue } = await db.from('charges').update({ status: a.newStatus }).eq('id', a.id);
+      if (_ue) throw _ue;
     }
     if (plan.leftover > 0.001) {
       // אין חוב פתוח מתאים — מכירה ישירה ששולמה (נטו 0)
