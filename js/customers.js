@@ -81,22 +81,25 @@ ${profile.role === 'admin' ? `<button class="btn btn-ghost" onclick="customerMer
 <option value="">כל הסוכנים</option>
 ${cache.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
 </select>
-<select id="custCrmFilter" onchange="customersDraw()">
-<option value="">כל סטטוסי ה-CRM</option>
-<option value="prospect">מתעניינים</option>
-<option value="active">פעילים</option>
-<option value="past">לקוחות בעבר</option>
-</select>
 <select id="custStatusFilter" onchange="customersDraw()">
 <option value="">כל הסטטוסים</option>
 <option value="active">פעילים</option>
 <option value="frozen">מוקפאים</option>
 <option value="blacklist">רשימה שחורה</option>
 </select>
+<button class="btn btn-sm btn-ghost" onclick="document.getElementById('custMoreFilters').classList.toggle('hidden')">פילטרים נוספים ▾</button>
+<span id="custMoreFilters" class="hidden" style="display:contents">
+<select id="custCrmFilter" onchange="customersDraw()">
+<option value="">כל סטטוסי ה-CRM</option>
+<option value="prospect">מתעניינים</option>
+<option value="active">פעילים</option>
+<option value="past">לקוחות בעבר</option>
+</select>
 <select id="custTagFilter" onchange="customersDraw()">
 <option value="">כל התגיות</option>
 ${(typeof custAllTags==='function'?custAllTags():[]).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
 </select>
+</span>
 </div>
 <div id="custBulkBar" class="hidden"></div>
 <div class="card" id="custTable"></div>`;
