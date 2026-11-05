@@ -76,7 +76,8 @@ return rows;
 /* שליפת portal_token דרך RPC מאובטח — מחזיר null לתפקידים שלא מורשים */
 async function custPortalToken(id) {
 if (!custCanPortal()) return null;
-const { data } = await db.rpc('get_customer_portal_token', { p_customer_id: id });
+const { data, error } = await db.rpc('get_customer_portal_token', { p_customer_id: id });
+if (error) { console.error('custPortalToken', error); return null; }
 return data || null;
 }
 

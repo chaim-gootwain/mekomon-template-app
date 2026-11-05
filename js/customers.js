@@ -384,11 +384,13 @@ ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-
 <button class="cc-tbtn cc-danger" data-tip="סגירה" aria-label="סגירה" onclick="document.getElementById('viewBack').classList.remove('open')">${_ccIco('x')}</button>
 </div>
 <div id="ccPortalBox" class="hidden" style="margin-top:8px">
-<div style="display:flex;gap:8px">
+${_portalToken
+  ? `<div style="display:flex;gap:8px">
 <input readonly value="${esc(portalUrl)}" dir="ltr" style="font-size:.78rem" onclick="this.select()">
 <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('${esc(portalUrl)}').then(()=>toast('הקישור הועתק'))">העתקה</button>
 <button class="btn btn-sm btn-danger-ghost" onclick="portalTokenReset(${id})">חידוש קישור</button>
-</div>
+</div>`
+  : `<p style="color:var(--danger);font-size:.86rem;margin:4px 0">שגיאה בטעינת קישור הפורטל - נסה לרענן</p>`}
 </div>` : `<div class="m-actions"><button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button></div>`}
 
 <div class="tabs" style="margin-top:16px">
