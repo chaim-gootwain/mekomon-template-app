@@ -176,6 +176,8 @@ t('master: טקסט של גיליון אחר ושכבות כפולות', () => {
   assert.deepStrictEqual(r.stale, ['גיליון 306']);
   assert.deepStrictEqual(r.dupes, ['גיליון 306']);
   assert.deepStrictEqual(pibMasterIssues([it('גיליון 311', 1, 1), it('גיליון 311', 1, 1, 2)], 311), { stale: [], dupes: [] });
+  // סמלים (דגלונים בגופן סמלים, אזור פרטי) שחוזרים באותו מקום — לא שכבה כפולה
+  assert.deepStrictEqual(pibMasterIssues([it('\uF021', 5, 5), it('\uF021', 5, 5), it('!', 9, 9), it('!', 9, 9)], 311).dupes, []);
 });
 t('spread: בן הזוג בכפולה וזיהוי יחס', () => {
   assert.deepStrictEqual([1, 2, 3, 36, 37, 48].map(p => pibSpreadPartner(p, 48)), [null, 3, 2, 37, 36, null]);
