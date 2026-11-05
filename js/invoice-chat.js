@@ -593,7 +593,7 @@ async function invChatApprove() {
     return;
   }
   if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
-  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
   // סימון המודעות "חויבו" + הפקה על חוזה שלם (למשל מהתראת עסקת סוכן) — "חויב מראש".
   // הקישור נשמר על המסמך, כדי שביטולו יחזיר את המודעות לשלב הקודם
   let icIssuesNote = '';
@@ -869,7 +869,7 @@ async function invChatPayApprove() {
   // סימון חשבון העסקה כסגור (העמודה אולי לא קיימת עדיין → best effort)
   try { await db.from('documents').update({ settled_at: new Date().toISOString(), settled_by_doc: doc.doc_number ? String(doc.doc_number) : null }).eq('id', p.docId); } catch (e) { }
   if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: doc.doc_number ? String(doc.doc_number) : null, icount_doc_url: doc.pdf_url || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
-  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
   document.getElementById('icCard-' + _icState.reqId)?.remove();
   icSayOk('✅ הופקה <b>חשבונית מס קבלה</b> ל<b>' + esc(f.customer_name || '') + '</b>' +
     (doc.doc_number ? ' · מספר <b dir="ltr">' + esc(String(doc.doc_number)) + '</b>' : '') +
@@ -1126,7 +1126,7 @@ async function invChatNewDealApprove() {
       }
       docNum = doc.doc_number; pdfUrl = doc.pdf_url;
       if (_icState.reqId) db.from('invoice_requests').update({ status: 'issued', icount_doc_number: docNum ? String(docNum) : null, icount_doc_url: pdfUrl || null, final_fields: body, error_message: null }).eq('id', _icState.reqId).then(() => { });
-      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
       // העסקה חויבה מראש: הדגל על החוזה + סימון המודעות שנוצרו כ"חויבו"
       // (דרך invLinkAdsToDoc — הקישור נשמר על המסמך, וביטולו מחזיר את החוזה והמודעות)
       if (contractId && typeof invLinkAdsToDoc === 'function') { try { await invLinkAdsToDoc(doc, [], contractId); } catch (e) { console.error('mark prepaid', e); } }

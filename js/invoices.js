@@ -598,7 +598,7 @@ async function invCall(body) {
     }
     if (data && data.ok) {
       toast('✅ הופק מסמך ' + (data.document && data.document.doc_number ? data.document.doc_number : '') + ' — ה-PDF יהיה מוכן בעוד רגע');
-      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); } }
+      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
       // מסמך תשלום המשויך למסמך מקור (parent) — מסמנים את המקור כסגור,
       // כדי ש"לקוח שילם" בצ'אט לא יציע אותו שוב (קבלה כפולה). עד עכשיו
       // רק הצ'אט סימן settled_at; הפקה מכרטיס הלקוח השאירה אותו "פתוח".
