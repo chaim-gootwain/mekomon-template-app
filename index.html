@@ -103,10 +103,11 @@ onkeydown="if(event.key==='Enter')doAuth()"></div>
 <!-- ===== מסך 3: ממתין לאישור מנהל ===== -->
 <div id="pendingScreen" class="center-screen hidden">
 <div class="auth-card" style="text-align:center">
-<div class="paper-name">ממתין לאישור</div>
-<p class="paper-sub" style="margin-top:12px">
+<div class="paper-name" id="pendingTitle">ממתין לאישור</div>
+<p class="paper-sub" id="pendingMsg" style="margin-top:12px">
 החשבון נוצר בהצלחה.<br>מנהל המערכת צריך לאשר אותך ולהקצות תפקיד לפני הכניסה.
 </p>
+<p class="muted" id="pendingWho" style="font-size:.8rem;margin-top:8px" dir="ltr"></p>
 <button class="btn btn-ghost" onclick="logout()">התנתקות</button>
 </div>
 </div>

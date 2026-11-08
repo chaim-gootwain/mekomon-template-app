@@ -59,7 +59,7 @@ document.getElementById('authErr').textContent = 'שגיאה בטעינת פרו
 return;
 }
 profile = data;
-if (profile.role === 'pending' || !profile.active) { show('pendingScreen'); return; }
+if (profile.role === 'pending' || !profile.active) { showPendingScreen(); return; }
 if (profile.role === 'committee') { // לוועדה ממשק ממוקד משלה
 buildShell(); show('app'); await refreshCache(); await updateClockButton(); openPage('committee'); return;
 }
@@ -115,14 +115,18 @@ errEl.textContent = '';
 if (!email || pass.length < 8) { errEl.textContent = 'נא להזין אימייל וסיסמה (8 תווים לפחות)'; return; }
 const errMap = {
 'Invalid login credentials': 'אימייל או סיסמה שגויים',
-'User already registered': 'משתמש עם אימייל זה כבר רשום',
+'User already registered': 'האימייל הזה כבר רשום במערכת — לחץ/י "כניסה", או הירשם/י עם אימייל אחר',
 'Email not confirmed': 'יש לאמת את האימייל לפני הכניסה',
 };
 if (signupMode) {
 const name = document.getElementById('authName').value.trim();
 if (!name) { errEl.textContent = 'נא למלא שם מלא'; return; }
-const { error } = await db.auth.signUp({ email, password: pass, options: { data: { full_name: name } } });
+const { data: su, error } = await db.auth.signUp({ email, password: pass, options: { data: { full_name: name } } });
 if (error) { errEl.textContent = errMap[error.message] || error.message; return; }
+/* כשאימות מייל פעיל, Supabase לא מחזיר שגיאה על מייל קיים — רק משתמש בלי identities */
+if (su && su.user && Array.isArray(su.user.identities) && su.user.identities.length === 0) {
+errEl.textContent = errMap['User already registered']; return;
+}
 } else {
 const { error } = await db.auth.signInWithPassword({ email, password: pass });
 if (error) { errEl.textContent = errMap[error.message] || error.message; return; }
@@ -131,6 +135,17 @@ const { data } = await db.auth.getSession();
 session = data.session;
 if (session) await afterLogin();
 else errEl.textContent = 'נשלח מייל אימות — אשר אותו והתחבר';
+}
+
+/* מסך חסימה: נרשם חדש שממתין לתפקיד, או משתמש קיים שהושבת — הודעה שונה לכל מצב */
+function showPendingScreen() {
+const disabled = profile.role !== 'pending' && !profile.active;
+document.getElementById('pendingTitle').textContent = disabled ? 'החשבון מושבת' : 'ממתין לאישור';
+document.getElementById('pendingMsg').innerHTML = disabled
+? 'החשבון הזה הושבת על ידי מנהל המערכת.<br>אם זה לא החשבון שלך — התנתק/י והירשם/י עם האימייל האישי שלך.'
+: 'החשבון נוצר בהצלחה.<br>מנהל המערכת צריך לאשר אותך ולהקצות תפקיד לפני הכניסה.';
+document.getElementById('pendingWho').textContent = 'מחובר/ת כ: ' + ((session && session.user && session.user.email) || '');
+show('pendingScreen');
 }
 
 async function logout() { await db.auth.signOut(); location.reload(); }
