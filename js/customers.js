@@ -210,6 +210,8 @@ if (n && inv) { inv.value = n.value; toast('הועתק שם הלקוח'); }
 
 function customerAdd() {
 openForm('לקוח חדש', CUSTOMER_FIELDS, {}, async (rec) => {
+// סוכן אחר (שם זהה / טלפון) — חסימה לסוכן, אישור למנהל
+await crossAgentGuard(rec, 'לקוח');
 if (rec.phone) {
 const dups = await run(db.rpc('check_duplicate_phone', { p_phone: rec.phone }));
 if (dups.length && !confirm(`הטלפון כבר קיים אצל "${dups[0].name}". להוסיף בכל זאת?`)) return;
@@ -231,6 +233,8 @@ openPage('customers');
 function customerCreateFull(preName, onDone) {
 const seed = preName ? { name: String(preName).trim() } : {};
 openForm('לקוח חדש', CUSTOMER_FIELDS, seed, async (rec) => {
+// סוכן אחר (שם זהה / טלפון) — חסימה לסוכן, אישור למנהל
+await crossAgentGuard(rec, 'לקוח');
 if (rec.phone) {
 const dups = await run(db.rpc('check_duplicate_phone', { p_phone: rec.phone }));
 if (dups.length && !confirm(`הטלפון כבר קיים אצל "${dups[0].name}". להוסיף בכל זאת?`)) return;
