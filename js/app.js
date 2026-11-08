@@ -122,10 +122,11 @@ if (signupMode) {
 const name = document.getElementById('authName').value.trim();
 if (!name) { errEl.textContent = 'נא למלא שם מלא'; return; }
 const { data: su, error } = await db.auth.signUp({ email, password: pass, options: { data: { full_name: name } } });
+if (error && error.message === 'User already registered') { showEmailTaken(errEl); return; }
 if (error) { errEl.textContent = errMap[error.message] || error.message; return; }
 /* כשאימות מייל פעיל, Supabase לא מחזיר שגיאה על מייל קיים — רק משתמש בלי identities */
 if (su && su.user && Array.isArray(su.user.identities) && su.user.identities.length === 0) {
-errEl.textContent = errMap['User already registered']; return;
+showEmailTaken(errEl); return;
 }
 } else {
 const { error } = await db.auth.signInWithPassword({ email, password: pass });
@@ -146,6 +147,14 @@ document.getElementById('pendingMsg').innerHTML = disabled
 : 'החשבון נוצר בהצלחה.<br>מנהל המערכת צריך לאשר אותך ולהקצות תפקיד לפני הכניסה.';
 document.getElementById('pendingWho').textContent = 'מחובר/ת כ: ' + ((session && session.user && session.user.email) || '');
 show('pendingScreen');
+}
+
+/* מייל שכבר רשום בהרשמה — הודעה עם קיצור דרך לכניסה ולשכחתי סיסמה (המייל כבר בשדה) */
+function showEmailTaken(errEl) {
+errEl.innerHTML = 'האימייל הזה כבר רשום במערכת.<br>'
++ '<a onclick="toggleAuthMode()" style="cursor:pointer;text-decoration:underline">לכניסה</a> · '
++ '<a onclick="forgotPw()" style="cursor:pointer;text-decoration:underline">שכחתי סיסמה</a>'
++ '<br><span class="muted" style="font-size:.8rem">אם זה לא המייל שלך — הירשם/י עם האימייל האישי שלך.</span>';
 }
 
 async function logout() { await db.auth.signOut(); location.reload(); }
