@@ -333,6 +333,47 @@ async function similarNamesFinder(names, leads) {
     return out;
   };
 }
+/* שם זהה (אותן מילים, בלי בע"מ/חברת וכו') ללקוח או לליד של סוכן אחר.
+   מחזיר { kind, name, agent } של ההתאמה הראשונה, או null. */
+function _sameNameWords(a, b) {
+  const x = leadNameWords(a), y = new Set(leadNameWords(b));
+  return x.length > 0 && x.length === y.size && x.every(w => y.has(w));
+}
+async function otherAgentSameName(name) {
+  const words = leadNameWords(name);
+  if (!words.length) return null;
+  const me = myAgentId();
+  const myName = me ? (cache.agents.find(a => a.id === me) || {}).name : null;
+  const custs = await customersMatchingWords(words);
+  const c = custs.find(x => _sameNameWords(x.name, name) && (!myName || x.agent !== myName));
+  if (c) return { kind: 'לקוח', name: c.name, agent: c.agent || 'ללא סוכן' };
+  try {
+    const longest = words.slice().sort((p, q) => q.length - p.length)[0];
+    const { data } = await db.from('leads').select('name,agent_id,status').ilike('name', '%' + longest + '%').limit(100);
+    const l = (data || []).find(x => !['won', 'lost'].includes(x.status) && x.agent_id !== me && _sameNameWords(x.name, name));
+    if (l) return { kind: 'ליד', name: l.name, agent: l.agent_id ? ((cache.agents.find(a => a.id === l.agent_id) || {}).name || 'סוכן אחר') : 'מאגר ללא שיוך' };
+  } catch (e) { /* בלי לידים — רק בדיקת לקוחות */ }
+  return null;
+}
+/* שער כפילות מול סוכן אחר (שם זהה / טלפון): סוכן — חסימה; מנהל — אישור.
+   זורק שגיאה כשנחסם (הטופס נשאר פתוח). */
+async function crossAgentGuard(rec, what) {
+  if (rec.phone) {
+    const dups = await run(db.rpc('check_duplicate_phone', { p_phone: rec.phone }));
+    const d = (dups || []).find(x => !x.mine && !x.unassigned);
+    if (d) {
+      const kind = d.kind === 'lead' ? 'ליד' : 'לקוח';
+      if (isSales()) { showOops(`אופססס! 🤚<br>הטלפון כבר נמצא אצל סוכן אחר (${kind} "${esc(d.name)}").<br><b>לא ניתן להזין את ה${what}.</b>`); throw new Error('duplicate-other'); }
+      if (!confirm(`שים לב: הטלפון כבר קיים אצל ${kind} "${d.name}" של סוכן אחר.\nלהמשיך בכל זאת?`)) throw new Error('duplicate-other-cancel');
+    }
+  }
+  const n = await otherAgentSameName(rec.name);
+  if (n) {
+    if (isSales()) { showOops(`אופססס! 🤚<br>${n.kind} בשם "${esc(n.name)}" כבר קיים אצל ${esc(n.agent)}.<br><b>לא ניתן להזין את ה${what}.</b> אם זה עסק אחר — פנה למנהל.`); throw new Error('duplicate-name-other'); }
+    if (!confirm(`שים לב: ${n.kind} בשם "${n.name}" כבר קיים אצל ${n.agent}.\nלהמשיך בכל זאת?`)) throw new Error('duplicate-name-cancel');
+  }
+  return true;
+}
 async function leadSimilarNames(name) { return (await similarNamesFinder([name]))(name); }
 
 function leadQuickAdd() {
@@ -381,6 +422,8 @@ function leadQuickAdd() {
         }
       }
     }
+    /* שם זהה ללקוח/ליד של סוכן אחר — חסימה לסוכן (גם בטלפון אחר / בלי טלפון) */
+    await crossAgentGuard({ name: rec.name }, 'ליד');
     /* שם דומה (טלפון שונה) — התראה בלבד, ההחלטה אצל הסוכן */
     const similar = await leadSimilarNames(rec.name);
     if (similar.length && !confirm(
