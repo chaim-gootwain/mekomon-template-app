@@ -139,6 +139,20 @@ const r = cache[list].find(x => x.id === id);
 return r ? (field === 'issue' ? 'גיליון ' + r.issue_number : r[field]) : '';
 }
 
+/* אפשרויות <option> לסינון לפי סוכן: רק סוכנים פעילים.
+   סוכן לא פעיל מוצג (בקבוצה נפרדת בתחתית) רק אם עדיין משויכות אליו רשומות
+   (keepIds) או שהוא הבחירה הנוכחית — כדי שאפשר יהיה לראות ולהעביר את מה שנשאר אצלו. */
+function agentFilterOptions(selected = '', keepIds = []) {
+const keep = new Set((keepIds || []).filter(x => x != null).map(String));
+const sel = String(selected ?? '');
+const opt = a => `<option value="${a.id}" ${String(a.id) === sel ? 'selected' : ''}>${esc(a.name)}</option>`;
+const all = cache.agents || [];
+const active = all.filter(a => a.active !== false);
+const inactive = all.filter(a => a.active === false && (keep.has(String(a.id)) || String(a.id) === sel));
+return active.map(opt).join('') +
+(inactive.length ? `<optgroup label="לא פעילים">${inactive.map(opt).join('')}</optgroup>` : '');
+}
+
 /* ---------- 3. תרגומים וקבועים ---------- */
 const ROLE_NAMES = { admin: 'מנהל', sales: 'מכירות', editor: 'עורך', graphics: 'גרפיקה', committee: 'ועדה', pending: 'ממתין לאישור' };
 
