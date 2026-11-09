@@ -8,6 +8,7 @@ agents.js — מודול סוכנים (מנהל בלבד)
 'use strict';
 
 let _agents = [];
+let _agentsShowInactive = false; // סוכנים לא פעילים מוסתרים כברירת מחדל
 
 Pages.agents = {
 render: async (el) => {
@@ -15,7 +16,10 @@ _agents = await run(db.from('agents').select('*').order('name'));
 el.innerHTML = `
 <div class="page-head">
 <h2>סוכנים ועמלות</h2>
+<div class="actions">
+${_agents.some(a => a.active === false) ? `<button class="btn btn-ghost btn-sm" onclick="agentsToggleInactive()">${_agentsShowInactive ? 'הסתר לא פעילים' : 'הצג לא פעילים (' + _agents.filter(a => a.active === false).length + ')'}</button>` : ''}
 <button class="btn" onclick="agentAdd()">+ סוכן חדש</button>
+</div>
 </div>
 <p class="muted" style="margin-bottom:12px;font-size:.85rem">
 פיצול העמלה (חיוב/גבייה) מוגדר במסך ההגדרות — כרגע:
@@ -24,14 +28,16 @@ ${100 - Number(cache.settings.commission_split_billing || 50)}% בגבייה.
 תקופת "לקוח חדש": ${cache.settings.new_customer_months || 3} חודשים.
 </p>
 <div class="card" id="agentsTable"></div>`;
-renderTable(document.getElementById('agentsTable'), _agents, [
-{ h: 'שם', f: r => `<b>${esc(r.name)}</b>` + (r.profile_id ? '' : ' <span class="pill">חיצוני</span>') + (r.active ? '' : ' <span class="pill red">לא פעיל</span>') },
+renderTable(document.getElementById('agentsTable'), _agentsShowInactive ? _agents : _agents.filter(a => a.active !== false), [
+{ h: 'שם', f: r => `<b>${esc(r.name)}</b>` + (r.profile_id ? '' : ' <span class="pill">חיצוני</span>') + (r.active !== false ? '' : ' <span class="pill red">לא פעיל</span>') },
 { h: 'טלפון', f: r => `<span dir="ltr">${esc(r.phone)}</span>` },
 { h: 'יעד חודשי', f: r => money(r.monthly_target) || '—' },
 { h: 'בונוס', f: r => r.bonus_type === 'none' ? '—' : (r.bonus_type === 'fixed' ? money(r.bonus_value) : r.bonus_value + '%') },
 ], { onRow: r => agentEdit(r.id), empty: 'אין סוכנים עדיין — הוסף את הראשון' });
 }
 };
+
+function agentsToggleInactive() { _agentsShowInactive = !_agentsShowInactive; openPage('agents'); }
 
 const AGENT_FIELDS = () => [
 { name: 'name', label: 'שם הסוכן', required: true },
