@@ -433,8 +433,11 @@ async function invCredit(docId) {
   if (!d) return;
   const num = String(d.doc_number || '').trim();
   // חשבון עסקה אינו מסמך מס — ביטול פנימי בלבד (בלי חשבונית זיכוי שמזכה מע"מ)
+  // מה יקרה למודעות — מוצג בחלון האישור, לפני שמשהו משתנה
+  let _adsNote = ''; try { _adsNote = await invDocAdsPreview(d); } catch (e) { }
+  _adsNote = _adsNote ? '\n\n' + _adsNote : '';
   if (d.doc_kind === 'proforma') {
-    if (!confirm('לבטל את חשבון העסקה ' + num + '?\n(ביטול פנימי בלבד — לא מופקת חשבונית זיכוי, כי חשבון עסקה אינו מסמך מס)')) return;
+    if (!confirm('לבטל את חשבון העסקה ' + num + '?\n(ביטול פנימי בלבד — לא מופקת חשבונית זיכוי, כי חשבון עסקה אינו מסמך מס)' + _adsNote)) return;
     try {
       const { data: chs } = await db.from('charges').select('id,notes').eq('customer_id', d.customer_id).ilike('notes', '%#doc:' + num + '%').in('status', ['pending', 'invoiced', 'partial', 'overdue']);
       // התאמה מדויקת — שביטול מסמך 123 לא יבטל בטעות את החוב של מסמך 1234
@@ -449,7 +452,7 @@ async function invCredit(docId) {
     return;
   }
   // מסמכי מס (חשבונית מס / מס-קבלה / קבלה) — חשבונית זיכוי (330) כדין, מזכה מע"מ
-  if (!confirm('לבטל את "' + (DOC_KIND_HE[d.doc_kind] || d.doc_kind) + ' ' + num + '" ע"י הפקת חשבונית זיכוי?')) return;
+  if (!confirm('לבטל את "' + (DOC_KIND_HE[d.doc_kind] || d.doc_kind) + ' ' + num + '" ע"י הפקת חשבונית זיכוי?' + _adsNote)) return;
   const parentUuid = (d.raw && d.raw.doc_uuid) || d.doc_uuid || null;
   const body = {
     // transaction_id נגזר מהמסמך המקורי — זיכוי שני לאותו מסמך מזוהה ככפילות
@@ -508,6 +511,29 @@ async function invLinkAdsToDoc(doc, adIds, contractId) {
     if (typeof _fpAds !== 'undefined' && Array.isArray(_fpAds)) _fpAds.forEach(a => { if (ids.has(a.id) && a.deal_stage !== 'paid') a.deal_stage = 'invoiced'; });
   }
   if (contractId) await markContractPrepaid(contractId);
+}
+
+/* תצוגה מקדימה לחלון אישור הביטול: מה invRevertDocAds תעשה למודעות — בלי לשנות כלום.
+   אותם תנאים בדיוק כמו בפונקציה עצמה. */
+async function invDocAdsPreview(d) {
+  if (!d) return '';
+  if (d.settled_at) return '📌 המודעות לא ישתנו — המסמך כבר נסגר במסמך תשלום שנשאר בתוקף, והמודעות נשארות מחויבות.';
+  const links = d.ad_links;
+  if (links && typeof links === 'object') {
+    const ads = Array.isArray(links.ads) ? links.ads : [];
+    let n = 0;
+    if (ads.length) {
+      const { data: cur } = await db.from('ads').select('id,deal_stage').in('id', ads.map(a => a.id));
+      n = (cur || []).filter(a => a.deal_stage === 'invoiced').length;
+    }
+    const parts = [];
+    if (n) parts.push('📌 ' + n + ' מודעות יחזרו לשלב שלפני החשבונית (לא חויבו).');
+    else if (ads.length) parts.push('📌 המודעות לא ישתנו — המודעות של המסמך כבר שולמו או ששונו ידנית.');
+    else parts.push('📌 למסמך לא משויכות מודעות — שום מודעה לא תשתנה.');
+    if (links.contract && links.contract.id && links.contract.prev_prepaid === false) parts.push('📌 החוזה יחזור למצב "לא חויב מראש".');
+    return parts.join('\n');
+  }
+  return '📌 מסמך ישן — לא נשמר בו אילו מודעות חויבו. אם יימצאו מודעות מתאימות, תישאל עליהן בנפרד.';
 }
 
 /* ביטול מסמך → החזרת המודעות לשלב שהיה להן לפני ההפקה. מחזיר מס' מודעות ששוחזרו. */
