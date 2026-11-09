@@ -79,7 +79,7 @@ ${profile.role === 'admin' ? `<button class="btn btn-ghost" onclick="customerMer
 <input id="custSearch" placeholder="חיפוש שם / טלפון / תחום..." oninput="customersDraw()" style="min-width:220px">
 <select id="custAgentFilter" onchange="customersDraw()">
 <option value="">כל הסוכנים</option>
-${cache.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+${agentFilterOptions('', _customers.map(c => c.agent_id))}
 </select>
 <select id="custStatusFilter" onchange="customersDraw()">
 <option value="">כל הסטטוסים</option>

@@ -56,7 +56,7 @@ Pages.leads = {
       ? `<select id="leadAgentFilter" onchange="leadsDraw()">
            <option value="">כל הסוכנים</option>
            <option value="__none__">— ללא שיוך (מאגר) —</option>
-           ${cache.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+           ${agentFilterOptions('', _leads.map(l => l.agent_id))}
          </select>`
       : `<select id="leadScope" onchange="leadsDraw()">
            <option value="mine">הלידים שלי</option>

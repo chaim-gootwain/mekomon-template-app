@@ -149,7 +149,7 @@ Pages['agent-perf'] = {
   <div class="actions" style="flex-wrap:wrap;gap:6px">
     <select onchange="apSetAgent(this.value)" style="width:auto">
       <option value="">כל הסוכנים</option>
-      ${cache.agents.map(a => `<option value="${a.id}" ${String(a.id) === String(_apAgent) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
+      ${agentFilterOptions(_apAgent)}
     </select>
     <div class="tabs" style="margin:0">
       ${[['today', 'היום'], ['week', 'השבוע'], ['month', 'החודש'], ['custom', 'טווח']].map(([v, t]) =>
