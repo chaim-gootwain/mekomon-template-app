@@ -63,15 +63,7 @@ location.reload();
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
 const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
-/* portal_token הוא מפתח הכניסה של הלקוח לפורטל — מי שמחזיק אותו מגיש מודעות בשם הלקוח.
-   רק מנהל ואנשי מכירות צריכים אותו (קישור הפורטל בכרטיס הלקוח); לשאר התפקידים מוסרים
-   אותו משורות שנטענו עם select('*'), כדי שלא יישב בזיכרון הדפדפן ולא יוצג בשום מקום */
-const custCanPortal = () => ['admin', 'sales'].includes(profile.role);
-function custSafe(rows) {
-if (custCanPortal() || !rows) return rows;
-(Array.isArray(rows) ? rows : [rows]).forEach(r => { if (r) delete r.portal_token; });
-return rows;
-}
+const custCanPortal = () => ['admin', 'manager', 'sales'].includes(profile.role);
 
 /* שליפת portal_token דרך RPC מאובטח — מחזיר null לתפקידים שלא מורשים */
 async function custPortalToken(id) {
@@ -81,14 +73,17 @@ if (error) { console.error('custPortalToken', error); return null; }
 return data || null;
 }
 
+/* כל עמודות הלקוח חוץ מ-portal_token (נשלף דרך custPortalToken בלבד) */
+const _custAllCols = 'id,name,agent_id,phone,email,whatsapp,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount,became_customer_at,city,field,contact_person,contacts,credit_limit,crm_status,notes,tags,mailing_list,created_at,updated_at';
+
 /* טעינת לקוח מלא. שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
    custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
 async function custLoadAll() {
-return custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
+return await runAll((f, t) => db.from('customers').select(_custAllCols).order('name').order('id').range(f, t));
 }
 async function custLoad(id, { required = false } = {}) {
-const q = db.from('customers').select('*').eq('id', id);
-return custSafe(required ? await run(q.single()) : (await run(q.limit(1)))[0]);
+const q = db.from('customers').select(_custAllCols).eq('id', id);
+return required ? await run(q.single()) : (await run(q.limit(1)))[0];
 }
 
 async function refreshCache() {
@@ -298,8 +293,9 @@ clearTimeout(el._suggestTimer);
 el._suggestTimer = setTimeout(async () => {
 const suggestions = await f.getSuggestions(el.value.trim());
 suggestDiv.innerHTML = suggestions.length
-? `<div style="padding:8px;background:#f5f5f5;border-radius:4px;border-left:3px solid #d35400">` +
-  suggestions.slice(0, 5).map(s => `<div style="padding:4px 0;cursor:pointer" data-val="${esc(s)}">${esc(s)}</div>`).join('') +
+? `<div style="padding:8px;background:#fff7ed;border-radius:4px;border-inline-start:3px solid #d35400;font-size:0.85rem">` +
+  `<div style="font-weight:600;color:#9a3412;margin-bottom:4px">⚠️ שם דומה קיים במערכת</div>` +
+  suggestions.slice(0, 5).map(s => `<div style="padding:4px 0;cursor:pointer" data-val="${esc(s)}" color:#7c2d12">${esc(s)}</div>`).join('') +
   `</div>`
 : '';
 }, 300);
