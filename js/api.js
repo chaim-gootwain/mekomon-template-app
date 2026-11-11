@@ -292,14 +292,23 @@ setTimeout(() => {
 fields.filter(f => f.type === 'text-suggestions').forEach(f => {
 const el = document.getElementById('f_' + f.name);
 if (el && f.getSuggestions) {
-el.addEventListener('input', async () => {
 const suggestDiv = document.getElementById('f_' + f.name + '_suggestions');
+el.addEventListener('input', () => {
+clearTimeout(el._suggestTimer);
+el._suggestTimer = setTimeout(async () => {
 const suggestions = await f.getSuggestions(el.value.trim());
 suggestDiv.innerHTML = suggestions.length
 ? `<div style="padding:8px;background:#f5f5f5;border-radius:4px;border-left:3px solid #d35400">` +
-  suggestions.slice(0, 5).map((s, i) => `<div style="padding:4px 0;cursor:pointer" data-idx="${i}" onclick="event.stopPropagation()">${esc(s)}</div>`).join('') +
+  suggestions.slice(0, 5).map(s => `<div style="padding:4px 0;cursor:pointer" data-val="${esc(s)}">${esc(s)}</div>`).join('') +
   `</div>`
 : '';
+}, 300);
+});
+suggestDiv.addEventListener('click', e => {
+const item = e.target.closest('[data-val]');
+if (!item) return;
+el.value = item.dataset.val;
+suggestDiv.innerHTML = '';
 });
 }
 });
