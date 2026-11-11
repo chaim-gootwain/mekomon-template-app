@@ -253,7 +253,7 @@ async function leadDrop(ev, stage) {
 function LEAD_FIELDS() {
   return [
     { type: 'section', label: 'זיהוי' },
-    { name: 'name', label: 'שם', required: true },
+    { name: 'name', label: 'שם', required: true, type: 'text-suggestions', getSuggestions: leadSimilarNames },
     { name: 'contact_person', label: 'איש קשר' },
     { name: 'contact_role', label: 'תפקיד איש הקשר' },
     { name: 'phone', label: 'טלפון', dir: 'ltr' },

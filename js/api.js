@@ -279,10 +279,31 @@ inp = `<select id="f_${f.name}">` + (f.required ? '' : `<option value="">— ל�
 _co.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.t)}</option>`).join('') + `</select>`;
 }
 }
+else if (f.type === 'text-suggestions') {
+inp = `<input id="f_${f.name}" type="text" value="${esc(v)}"${dir}>` +
+`<div id="f_${f.name}_suggestions" class="form-suggestions" style="margin-top:6px;font-size:0.9rem;color:#666"></div>`;
+}
 else inp = `<input id="f_${f.name}" type="${f.type || 'text'}" value="${esc(v)}"${dir} ${f.type === 'number' ? 'step="any" dir="ltr"' : ''}>`;
 return `<div class="field ${f.half ? 'half' : ''}"><label>${f.label}${f.required ? ' *' : ''}</label>${inp}</div>`;
 }).join('');
 document.getElementById('modalBack').classList.add('open');
+// אחרי שהHTML הוצג, הוסיף listeners לשדות text-suggestions
+setTimeout(() => {
+fields.filter(f => f.type === 'text-suggestions').forEach(f => {
+const el = document.getElementById('f_' + f.name);
+if (el && f.getSuggestions) {
+el.addEventListener('input', async () => {
+const suggestDiv = document.getElementById('f_' + f.name + '_suggestions');
+const suggestions = await f.getSuggestions(el.value.trim());
+suggestDiv.innerHTML = suggestions.length
+? `<div style="padding:8px;background:#f5f5f5;border-radius:4px;border-left:3px solid #d35400">` +
+  suggestions.slice(0, 5).map((s, i) => `<div style="padding:4px 0;cursor:pointer" data-idx="${i}" onclick="event.stopPropagation()">${esc(s)}</div>`).join('') +
+  `</div>`
+: '';
+});
+}
+});
+}, 0);
 }
 
 function closeForm() { document.getElementById('modalBack').classList.remove('open'); }
@@ -300,6 +321,7 @@ if (f.type === 'select') v = v === '' ? null : (isNaN(Number(v)) ? v : Number(v)
 if (f.type === 'customer') v = v === '' ? null : Number(v);
 if (f.type === 'date') v = v === '' ? null : v;
 if (f.type === 'time') v = v === '' ? null : v;
+if (f.type === 'text-suggestions') v = v === '' ? null : v;
 if (typeof v === 'string') v = v.trim();
 if (f.required && (v === null || v === '')) { toast('נא למלא: ' + f.label, true); return; }
 rec[f.name] = v;
