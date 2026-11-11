@@ -153,12 +153,12 @@ function _monthIssues() {
 
 async function invIssueOrder(cid) {
   if (typeof checkCustomerStatusGate === 'function') { const _okS = await checkCustomerStatusGate(cid, 'הפקת חשבונית'); if (!_okS) return; }
-  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  const c = _customers.find(x => x.id === cid) || await custLoad(cid, { required: true });
   const kind = c.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
   await invOpenModal(c, kind, false);
 }
 async function invIssuePayment(cid) {
-  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  const c = _customers.find(x => x.id === cid) || await custLoad(cid, { required: true });
   const docs = await loadCustomerDocs(cid);
   const hasTaxInvoice = docs.some(d => d.doc_kind === 'tax_invoice' && d.status !== 'failed');
   const kind = hasTaxInvoice ? 'receipt' : 'invoice_receipt';
@@ -174,7 +174,7 @@ async function invIssueReceiptFor(docId) {
   if (!parentUuid) { toast('חסר מזהה מסמך לשיוך', true); return; }
   const kind = d.doc_kind === 'tax_invoice' ? 'receipt' : 'invoice_receipt';
   if (typeof checkCustomerStatusGate === 'function') { const _ok = await checkCustomerStatusGate(d.customer_id, 'הנפקת קבלה'); if (!_ok) return; }
-  const c = _customers.find(x => x.id === d.customer_id) || await run(db.from('customers').select('*').eq('id', d.customer_id).single());
+  const c = _customers.find(x => x.id === d.customer_id) || await custLoad(d.customer_id, { required: true });
   await invOpenModal(c, kind, true, { parentUuid, amount: d.total, srcLabel: DOC_KIND_HE[d.doc_kind] || 'מסמך', srcNumber: d.doc_number });
 }
 
@@ -433,8 +433,11 @@ async function invCredit(docId) {
   if (!d) return;
   const num = String(d.doc_number || '').trim();
   // חשבון עסקה אינו מסמך מס — ביטול פנימי בלבד (בלי חשבונית זיכוי שמזכה מע"מ)
+  // מה יקרה למודעות — מוצג בחלון האישור, לפני שמשהו משתנה
+  let _adsNote = ''; try { _adsNote = await invDocAdsPreview(d); } catch (e) { }
+  _adsNote = _adsNote ? '\n\n' + _adsNote : '';
   if (d.doc_kind === 'proforma') {
-    if (!confirm('לבטל את חשבון העסקה ' + num + '?\n(ביטול פנימי בלבד — לא מופקת חשבונית זיכוי, כי חשבון עסקה אינו מסמך מס)')) return;
+    if (!confirm('לבטל את חשבון העסקה ' + num + '?\n(ביטול פנימי בלבד — לא מופקת חשבונית זיכוי, כי חשבון עסקה אינו מסמך מס)' + _adsNote)) return;
     try {
       const { data: chs } = await db.from('charges').select('id,notes').eq('customer_id', d.customer_id).ilike('notes', '%#doc:' + num + '%').in('status', ['pending', 'invoiced', 'partial', 'overdue']);
       // התאמה מדויקת — שביטול מסמך 123 לא יבטל בטעות את החוב של מסמך 1234
@@ -449,7 +452,7 @@ async function invCredit(docId) {
     return;
   }
   // מסמכי מס (חשבונית מס / מס-קבלה / קבלה) — חשבונית זיכוי (330) כדין, מזכה מע"מ
-  if (!confirm('לבטל את "' + (DOC_KIND_HE[d.doc_kind] || d.doc_kind) + ' ' + num + '" ע"י הפקת חשבונית זיכוי?')) return;
+  if (!confirm('לבטל את "' + (DOC_KIND_HE[d.doc_kind] || d.doc_kind) + ' ' + num + '" ע"י הפקת חשבונית זיכוי?' + _adsNote)) return;
   const parentUuid = (d.raw && d.raw.doc_uuid) || d.doc_uuid || null;
   const body = {
     // transaction_id נגזר מהמסמך המקורי — זיכוי שני לאותו מסמך מזוהה ככפילות
@@ -502,8 +505,35 @@ async function invLinkAdsToDoc(doc, adIds, contractId) {
     if (contractId) links.contract = { id: contractId, prev_prepaid: contractPrev };
     try { await db.from('documents').update({ ad_links: links }).eq('id', doc.id); } catch (e) { /* עמודת ad_links אולי לא קיימת במופע — לא חוסם */ }
   }
-  if (ids.size) await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', [...ids]).or('deal_stage.is.null,deal_stage.neq.paid');
+  if (ids.size) {
+    await db.from('ads').update({ deal_stage: 'invoiced' }).in('id', [...ids]).or('deal_stage.is.null,deal_stage.neq.paid');
+    // עדכון הפלטפלן הפתוח (מודעות בזיכרון) — אחרת עריכה שם מחזירה את הערך הישן
+    if (typeof _fpAds !== 'undefined' && Array.isArray(_fpAds)) _fpAds.forEach(a => { if (ids.has(a.id) && a.deal_stage !== 'paid') a.deal_stage = 'invoiced'; });
+  }
   if (contractId) await markContractPrepaid(contractId);
+}
+
+/* תצוגה מקדימה לחלון אישור הביטול: מה invRevertDocAds תעשה למודעות — בלי לשנות כלום.
+   אותם תנאים בדיוק כמו בפונקציה עצמה. */
+async function invDocAdsPreview(d) {
+  if (!d) return '';
+  if (d.settled_at) return '📌 המודעות לא ישתנו — המסמך כבר נסגר במסמך תשלום שנשאר בתוקף, והמודעות נשארות מחויבות.';
+  const links = d.ad_links;
+  if (links && typeof links === 'object') {
+    const ads = Array.isArray(links.ads) ? links.ads : [];
+    let n = 0;
+    if (ads.length) {
+      const { data: cur } = await db.from('ads').select('id,deal_stage').in('id', ads.map(a => a.id));
+      n = (cur || []).filter(a => a.deal_stage === 'invoiced').length;
+    }
+    const parts = [];
+    if (n) parts.push('📌 ' + n + ' מודעות יחזרו לשלב שלפני החשבונית (לא חויבו).');
+    else if (ads.length) parts.push('📌 המודעות לא ישתנו — המודעות של המסמך כבר שולמו או ששונו ידנית.');
+    else parts.push('📌 למסמך לא משויכות מודעות — שום מודעה לא תשתנה.');
+    if (links.contract && links.contract.id && links.contract.prev_prepaid === false) parts.push('📌 החוזה יחזור למצב "לא חויב מראש".');
+    return parts.join('\n');
+  }
+  return '📌 מסמך ישן — לא נשמר בו אילו מודעות חויבו. אם יימצאו מודעות מתאימות, תישאל עליהן בנפרד.';
 }
 
 /* ביטול מסמך → החזרת המודעות לשלב שהיה להן לפני ההפקה. מחזיר מס' מודעות ששוחזרו. */
@@ -594,7 +624,7 @@ async function invCall(body) {
     }
     if (data && data.ok) {
       toast('✅ הופק מסמך ' + (data.document && data.document.doc_number ? data.document.doc_number : '') + ' — ה-PDF יהיה מוכן בעוד רגע');
-      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); } }
+      if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
       // מסמך תשלום המשויך למסמך מקור (parent) — מסמנים את המקור כסגור,
       // כדי ש"לקוח שילם" בצ'אט לא יציע אותו שוב (קבלה כפולה). עד עכשיו
       // רק הצ'אט סימן settled_at; הפקה מכרטיס הלקוח השאירה אותו "פתוח".
@@ -661,7 +691,7 @@ async function invIssueReceiptDirect(cid) {
     const _okS = await checkCustomerStatusGate(cid, 'הפקת חשבונית מס קבלה');
     if (!_okS) return;
   }
-  const c = _customers.find(x => x.id === cid) || await run(db.from('customers').select('*').eq('id', cid).single());
+  const c = _customers.find(x => x.id === cid) || await custLoad(cid, { required: true });
   await invOpenModal(c, 'invoice_receipt', true);
 }
 
@@ -724,7 +754,7 @@ async function invIssueFromAd(adId) {
   if (!a) { toast('מודעה לא נמצאה', true); return; }
   const cust = (typeof _customers !== 'undefined' && (_customers || []).find(x => x.id === a.customer_id))
     || ((typeof cache !== 'undefined' && cache.customers) || []).find(x => x.id === a.customer_id)
-    || (await run(db.from('customers').select('*').eq('id', a.customer_id).limit(1)))[0];
+    || await custLoad(a.customer_id);
   let label = 'מודעה בודדת';
   if (a.contract_id) {
     const _ct = (await run(db.from('contracts').select('id,price_item_id,total_inserts').eq('id', a.contract_id).limit(1)))[0];

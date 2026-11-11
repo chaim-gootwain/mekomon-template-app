@@ -63,6 +63,34 @@ location.reload();
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
 const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
+/* portal_token הוא מפתח הכניסה של הלקוח לפורטל — מי שמחזיק אותו מגיש מודעות בשם הלקוח.
+   רק מנהל ואנשי מכירות צריכים אותו (קישור הפורטל בכרטיס הלקוח); לשאר התפקידים מוסרים
+   אותו משורות שנטענו עם select('*'), כדי שלא יישב בזיכרון הדפדפן ולא יוצג בשום מקום */
+const custCanPortal = () => ['admin', 'sales'].includes(profile.role);
+function custSafe(rows) {
+if (custCanPortal() || !rows) return rows;
+(Array.isArray(rows) ? rows : [rows]).forEach(r => { if (r) delete r.portal_token; });
+return rows;
+}
+
+/* שליפת portal_token דרך RPC מאובטח — מחזיר null לתפקידים שלא מורשים */
+async function custPortalToken(id) {
+if (!custCanPortal()) return null;
+const { data, error } = await db.rpc('get_customer_portal_token', { p_customer_id: id });
+if (error) { console.error('custPortalToken', error); return null; }
+return data || null;
+}
+
+/* טעינת לקוח מלא. שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
+   custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
+async function custLoadAll() {
+return custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
+}
+async function custLoad(id, { required = false } = {}) {
+const q = db.from('customers').select('*').eq('id', id);
+return custSafe(required ? await run(q.single()) : (await run(q.limit(1)))[0]);
+}
+
 async function refreshCache() {
 const role = profile.role;
 const jobs = [
@@ -75,8 +103,9 @@ if (['admin', 'sales', 'editor', 'graphics'].includes(role)) {
 // nameOf ובדיקות הכפילויות פשוט לא ראו את סוף הרשימה
 // status/status_reason/fixed_discount חייבים להיות כאן: שער החסימה וההנחה
 // הקבועה קוראים מהמטמון, ושורה בלי העמודות האלה נראית כמו "אין סטטוס/אין הנחה"
-const _custCols = 'id,name,agent_id,phone,email,whatsapp,portal_token,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
-const _custColsOld = 'id,name,agent_id,phone,email,portal_token,business_id,invoice_name,order_doc_type,payment_terms';
+// portal_token אינו נגיש ב-SELECT הישיר — נשלף דרך RPC get_customer_portal_token בלבד (ר' custPortalToken)
+const _custCols = 'id,name,agent_id,phone,email,whatsapp,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount';
+const _custColsOld = 'id,name,agent_id,phone,email,business_id,invoice_name,order_doc_type,payment_terms';
 const _pageCust = async (cols) => {
   const all = [];
   for (let f = 0; f < 50000; f += 1000) {
@@ -108,6 +137,20 @@ function nameOf(list, id, field = 'name') {
 if (id == null) return '';
 const r = cache[list].find(x => x.id === id);
 return r ? (field === 'issue' ? 'גיליון ' + r.issue_number : r[field]) : '';
+}
+
+/* אפשרויות <option> לסינון לפי סוכן: רק סוכנים פעילים.
+   סוכן לא פעיל מוצג (בקבוצה נפרדת בתחתית) רק אם עדיין משויכות אליו רשומות
+   (keepIds) או שהוא הבחירה הנוכחית — כדי שאפשר יהיה לראות ולהעביר את מה שנשאר אצלו. */
+function agentFilterOptions(selected = '', keepIds = []) {
+const keep = new Set((keepIds || []).filter(x => x != null).map(String));
+const sel = String(selected ?? '');
+const opt = a => `<option value="${a.id}" ${String(a.id) === sel ? 'selected' : ''}>${esc(a.name)}</option>`;
+const all = cache.agents || [];
+const active = all.filter(a => a.active !== false);
+const inactive = all.filter(a => a.active === false && (keep.has(String(a.id)) || String(a.id) === sel));
+return active.map(opt).join('') +
+(inactive.length ? `<optgroup label="לא פעילים">${inactive.map(opt).join('')}</optgroup>` : '');
 }
 
 /* ---------- 3. תרגומים וקבועים ---------- */

@@ -8,6 +8,7 @@ agents.js — מודול סוכנים (מנהל בלבד)
 'use strict';
 
 let _agents = [];
+let _agentsShowInactive = false; // סוכנים לא פעילים מוסתרים כברירת מחדל
 
 Pages.agents = {
 render: async (el) => {
@@ -15,7 +16,10 @@ _agents = await run(db.from('agents').select('*').order('name'));
 el.innerHTML = `
 <div class="page-head">
 <h2>סוכנים ועמלות</h2>
+<div class="actions">
+${_agents.some(a => a.active === false) ? `<button class="btn btn-ghost btn-sm" onclick="agentsToggleInactive()">${_agentsShowInactive ? 'הסתר לא פעילים' : 'הצג לא פעילים (' + _agents.filter(a => a.active === false).length + ')'}</button>` : ''}
 <button class="btn" onclick="agentAdd()">+ סוכן חדש</button>
+</div>
 </div>
 <p class="muted" style="margin-bottom:12px;font-size:.85rem">
 פיצול העמלה (חיוב/גבייה) מוגדר במסך ההגדרות — כרגע:
@@ -24,16 +28,16 @@ ${100 - Number(cache.settings.commission_split_billing || 50)}% בגבייה.
 תקופת "לקוח חדש": ${cache.settings.new_customer_months || 3} חודשים.
 </p>
 <div class="card" id="agentsTable"></div>`;
-renderTable(document.getElementById('agentsTable'), _agents, [
-{ h: 'שם', f: r => `<b>${esc(r.name)}</b>` + (r.profile_id ? '' : ' <span class="pill">חיצוני</span>') + (r.active ? '' : ' <span class="pill red">לא פעיל</span>') },
+renderTable(document.getElementById('agentsTable'), _agentsShowInactive ? _agents : _agents.filter(a => a.active !== false), [
+{ h: 'שם', f: r => `<b>${esc(r.name)}</b>` + (r.profile_id ? '' : ' <span class="pill">חיצוני</span>') + (r.active !== false ? '' : ' <span class="pill red">לא פעיל</span>') },
 { h: 'טלפון', f: r => `<span dir="ltr">${esc(r.phone)}</span>` },
-{ h: '% לקוח חדש', f: r => r.pct_new + '%' },
-{ h: '% מתחדש', f: r => r.pct_renew + '%' },
 { h: 'יעד חודשי', f: r => money(r.monthly_target) || '—' },
 { h: 'בונוס', f: r => r.bonus_type === 'none' ? '—' : (r.bonus_type === 'fixed' ? money(r.bonus_value) : r.bonus_value + '%') },
 ], { onRow: r => agentEdit(r.id), empty: 'אין סוכנים עדיין — הוסף את הראשון' });
 }
 };
+
+function agentsToggleInactive() { _agentsShowInactive = !_agentsShowInactive; openPage('agents'); }
 
 const AGENT_FIELDS = () => [
 { name: 'name', label: 'שם הסוכן', required: true },
@@ -43,8 +47,6 @@ options: cache.profiles.filter(p => ['admin', 'sales'].includes(p.role)).map(p =
 { name: 'voicenter_ext', label: 'שלוחה (Voicenter)', dir: 'ltr' },
 { name: 'email', label: 'אימייל', dir: 'ltr' },
 { name: 'payment_details', label: 'פרטי תשלום (לסוכן חיצוני)' },
-{ name: 'pct_new', label: '% עמלה — לקוח חדש', type: 'number', required: true, default: 15 },
-{ name: 'pct_renew', label: '% עמלה — לקוח מתחדש', type: 'number', required: true, default: 7 },
 { name: 'monthly_target', label: 'יעד מכירות חודשי (₪)', type: 'number' },
 { name: 'bonus_type', label: 'סוג בונוס בעמידה ביעד', type: 'select', required: true, default: 'none',
 options: [{ v: 'none', t: 'ללא בונוס' }, { v: 'fixed', t: 'סכום קבוע' }, { v: 'percent', t: 'אחוז תוספת על העמלה' }] },
@@ -55,7 +57,8 @@ options: [{ v: 'none', t: 'ללא בונוס' }, { v: 'fixed', t: 'סכום קב
 
 function agentAdd() {
 openForm('סוכן חדש', AGENT_FIELDS(), {}, async (rec) => {
-await run(db.from('agents').insert(rec));
+// העמלה לפי מדרגות הסכם העבודה; עמלה אישית (אחוז מלקוח חדש/מתחדש) — במוקד המכירות → הסכם עבודה
+await run(db.from('agents').insert({ ...rec, pct_new: 0, pct_renew: 0 }));
 await refreshCache();
 toast('הסוכן נוסף');
 openPage('agents');

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- נטען בלי לחסום את הצגת הדף: ברשת איטית/מסוננת המסך עולה מיד בגופן מערכת -->
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <!-- PWA: פתיחה מהטלפון כאפליקציה -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="@@COLOR_BRAND@@">
@@ -17,6 +17,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="@@PAPER_NAME@@">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/animations.css">
 <link rel="stylesheet" href="css/style.css?v=1789462194">
 <script>
 /* רשת ביטחון: קישור הזמנה/איפוס-סיסמה שנחת בדף הראשי (כשהכתובת לא רשומה
@@ -101,10 +103,11 @@ onkeydown="if(event.key==='Enter')doAuth()"></div>
 <!-- ===== מסך 3: ממתין לאישור מנהל ===== -->
 <div id="pendingScreen" class="center-screen hidden">
 <div class="auth-card" style="text-align:center">
-<div class="paper-name">ממתין לאישור</div>
-<p class="paper-sub" style="margin-top:12px">
+<div class="paper-name" id="pendingTitle">ממתין לאישור</div>
+<p class="paper-sub" id="pendingMsg" style="margin-top:12px">
 החשבון נוצר בהצלחה.<br>מנהל המערכת צריך לאשר אותך ולהקצות תפקיד לפני הכניסה.
 </p>
+<p class="muted" id="pendingWho" style="font-size:.8rem;margin-top:8px" dir="ltr"></p>
 <button class="btn btn-ghost" onclick="logout()">התנתקות</button>
 </div>
 </div>

@@ -863,6 +863,14 @@ async function mgrProposeSendDocument(p) {
   const { data: cust } = await db.from('customers').select('id,name,email').eq('id', cid).single();
   mgrSetBusy(false);
   const doc = (docs || [])[0];
+  const PAYABLE_KINDS = new Set(['proforma', 'tax_invoice']);
+  let _payLinkUrl = '';
+  if (doc && PAYABLE_KINDS.has(doc.doc_kind)) {
+    try {
+      const pr = await mgrPayLinkMint(cid, 0, {});
+      if (pr && pr.link && pr.link.url) _payLinkUrl = pr.link.url;
+    } catch (_e) {}
+  }
   if (!doc) { await fail('מסמך ' + num + ' לא נמצא אצל הלקוח הזה.'); return; }
   if (!doc.pdf_url) { await fail('למסמך ' + num + ' אין קובץ PDF במערכת — אי אפשר לצרף.'); return; }
   const email = String(cust && cust.email || '').trim();
@@ -872,6 +880,7 @@ async function mgrProposeSendDocument(p) {
   const defBody = 'שלום ' + name + ',\n\n' +
     'מצורף ' + kindHe + ' מספר ' + num + (doc.total ? ' על סך ' + money(Number(doc.total)) : '') + '.\n' +
     (String(inp.note || '').trim() ? String(inp.note).trim() + '\n' : '') +
+    (_payLinkUrl ? '\nלתשלום מקוון: ' + _payLinkUrl + '\n' : '') +
     '\nתודה רבה,\n@@PAPER_NAME@@';
   _mgrSendDoc = { toolUseId: p.tool_use_id, cid, name, docId: doc.id, num, kindHe };
   const card = document.createElement('div');
@@ -887,6 +896,7 @@ async function mgrProposeSendDocument(p) {
       <input type="text" value="${esc(kindHe)} ${esc(num)}${doc.total ? ' · ' + money(Number(doc.total)) : ''} (PDF)" disabled></div>
     <div class="field"><label>גוף המייל</label>
       <textarea id="mgrDocBody" rows="5" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit">${esc(defBody)}</textarea></div>
+    ${_payLinkUrl ? '<div style="font-size:.82rem;color:var(--success,#2a7a2a);margin-top:-4px;margin-bottom:4px">💳 קישור תשלום נוסף אוטומטית לגוף המייל — ניתן להסיר מהטקסט</div>' : ''}
     <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
       <button class="btn" id="mgrDocBtn" onclick="mgrSendDocumentApprove()">✅ שלח במייל</button>
       <button class="btn btn-ghost" onclick="mgrSendDocumentCancel()">בטל</button>

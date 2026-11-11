@@ -36,7 +36,6 @@ const NAV = [
 { id: 'attendance', title: 'נוכחות', icon: '⏱️', roles: ['admin', 'sales', 'editor', 'graphics', 'committee'], group: 'ניהול' },
 { id: 'agents', title: 'סוכנים', icon: '👤', roles: ['admin'], group: 'ניהול' },
 { id: 'agent-perf', title: 'ביצועי סוכנים', icon: '📈', roles: ['admin'], group: 'ניהול' },
-{ id: 'pricing', title: 'מחירון', icon: '🏷️', roles: ['admin'], group: 'ניהול' },
 { id: 'users', title: 'משתמשים', icon: '👥', roles: ['admin'], group: 'ניהול' },
 { id: 'settings', title: 'הגדרות', icon: '⚙️', roles: ['admin'], group: 'ניהול' },
 ];
@@ -60,7 +59,7 @@ document.getElementById('authErr').textContent = 'שגיאה בטעינת פרו
 return;
 }
 profile = data;
-if (profile.role === 'pending' || !profile.active) { show('pendingScreen'); return; }
+if (profile.role === 'pending' || !profile.active) { showPendingScreen(); return; }
 if (profile.role === 'committee') { // לוועדה ממשק ממוקד משלה
 buildShell(); show('app'); await refreshCache(); await updateClockButton(); openPage('committee'); return;
 }
@@ -116,14 +115,19 @@ errEl.textContent = '';
 if (!email || pass.length < 8) { errEl.textContent = 'נא להזין אימייל וסיסמה (8 תווים לפחות)'; return; }
 const errMap = {
 'Invalid login credentials': 'אימייל או סיסמה שגויים',
-'User already registered': 'משתמש עם אימייל זה כבר רשום',
+'User already registered': 'האימייל הזה כבר רשום במערכת — לחץ/י "כניסה", או הירשם/י עם אימייל אחר',
 'Email not confirmed': 'יש לאמת את האימייל לפני הכניסה',
 };
 if (signupMode) {
 const name = document.getElementById('authName').value.trim();
 if (!name) { errEl.textContent = 'נא למלא שם מלא'; return; }
-const { error } = await db.auth.signUp({ email, password: pass, options: { data: { full_name: name } } });
+const { data: su, error } = await db.auth.signUp({ email, password: pass, options: { data: { full_name: name } } });
+if (error && error.message === 'User already registered') { showEmailTaken(errEl); return; }
 if (error) { errEl.textContent = errMap[error.message] || error.message; return; }
+/* כשאימות מייל פעיל, Supabase לא מחזיר שגיאה על מייל קיים — רק משתמש בלי identities */
+if (su && su.user && Array.isArray(su.user.identities) && su.user.identities.length === 0) {
+showEmailTaken(errEl); return;
+}
 } else {
 const { error } = await db.auth.signInWithPassword({ email, password: pass });
 if (error) { errEl.textContent = errMap[error.message] || error.message; return; }
@@ -132,6 +136,25 @@ const { data } = await db.auth.getSession();
 session = data.session;
 if (session) await afterLogin();
 else errEl.textContent = 'נשלח מייל אימות — אשר אותו והתחבר';
+}
+
+/* מסך חסימה: נרשם חדש שממתין לתפקיד, או משתמש קיים שהושבת — הודעה שונה לכל מצב */
+function showPendingScreen() {
+const disabled = profile.role !== 'pending' && !profile.active;
+document.getElementById('pendingTitle').textContent = disabled ? 'החשבון מושבת' : 'ממתין לאישור';
+document.getElementById('pendingMsg').innerHTML = disabled
+? 'החשבון הזה הושבת על ידי מנהל המערכת.<br>אם זה לא החשבון שלך — התנתק/י והירשם/י עם האימייל האישי שלך.'
+: 'החשבון נוצר בהצלחה.<br>מנהל המערכת צריך לאשר אותך ולהקצות תפקיד לפני הכניסה.';
+document.getElementById('pendingWho').textContent = 'מחובר/ת כ: ' + ((session && session.user && session.user.email) || '');
+show('pendingScreen');
+}
+
+/* מייל שכבר רשום בהרשמה — הודעה עם קיצור דרך לכניסה ולשכחתי סיסמה (המייל כבר בשדה) */
+function showEmailTaken(errEl) {
+errEl.innerHTML = 'האימייל הזה כבר רשום במערכת.<br>'
++ '<a onclick="toggleAuthMode()" style="cursor:pointer;text-decoration:underline">לכניסה</a> · '
++ '<a onclick="forgotPw()" style="cursor:pointer;text-decoration:underline">שכחתי סיסמה</a>'
++ '<br><span class="muted" style="font-size:.8rem">אם זה לא המייל שלך — הירשם/י עם האימייל האישי שלך.</span>';
 }
 
 async function logout() { await db.auth.signOut(); location.reload(); }
@@ -292,9 +315,9 @@ ${lists}`;
 }
 };
 
-function stat(num, label, cls = '') { return `<div class="stat ${cls}"><div class="num">${num}</div><div class="lbl">${label}</div></div>`; }
+function stat(num, label, cls = '') { return `<div class="stat animate-fade-in ${cls}"><div class="num">${num}</div><div class="lbl">${label}</div></div>`; }
 function dashList(title, items, emptyText) {
-return `<div class="card card-pad"><b>${title}</b><ul class="dash-list" style="margin-top:8px">
+return `<div class="card card-pad animate-fade-in"><b>${title}</b><ul class="dash-list" style="margin-top:8px">
 ${items.length ? items.join('') : `<li class="muted">${emptyText}</li>`}</ul></div>`;
 }
 

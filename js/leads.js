@@ -7,6 +7,9 @@ leads.js — מודול לידים
 - צפייה משותפת: כל סוכן רואה את כל הלידים (כולל של סוכנים אחרים) —
   אבל עורך/גורר רק את שלו; ליד של סוכן אחר נפתח לצפייה בלבד (נאכף גם ב-RLS)
 - חסימת כפילות לפי טלפון: אם המספר כבר אצל סוכן אחר — הסוכן לא יכול להזין
+- חיפוש לפי טלפון: הקלדת מספר בשורת החיפוש מקפיצה מיד אם יש ליד עם המספר
+  (בכל הלידים — כולל של סוכנים אחרים, מאגר וסגורים; מתעלם ממקפים/רווחים/972),
+  ואם אין ליד — בודק גם מול לקוחות (RPC ‏check_duplicate_phone)
 - סימון כפילות מול לקוחות: ליד שהטלפון שלו קיים אצל לקוח מקבל תג "קיים כלקוח"
   (RPC ‏lead_customer_duplicates — עובד גם כשהסוכן לא רואה את הלקוח ישירות)
 - מסע לקוח: פולו-אפ עם תזכורת, ורישום סטטוס מחדש אחרי כל פולו-אפ
@@ -53,7 +56,7 @@ Pages.leads = {
       ? `<select id="leadAgentFilter" onchange="leadsDraw()">
            <option value="">כל הסוכנים</option>
            <option value="__none__">— ללא שיוך (מאגר) —</option>
-           ${cache.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+           ${agentFilterOptions('', _leads.map(l => l.agent_id))}
          </select>`
       : `<select id="leadScope" onchange="leadsDraw()">
            <option value="mine">הלידים שלי</option>
@@ -74,13 +77,14 @@ Pages.leads = {
         </div>
       </div>
       <div class="filter-bar">
-        <input id="leadSearch" placeholder="חיפוש..." oninput="leadsDraw()" style="min-width:200px">
+        <input id="leadSearch" placeholder="חיפוש..." oninput="leadsDraw();leadPhoneHitDraw(this.value.trim())" style="min-width:200px">
         ${scopeBar}
         <select id="leadShowClosed" onchange="leadsDraw()">
           <option value="open">פתוחים בלבד</option>
           <option value="all">כולל סגורים</option>
         </select>
       </div>
+      <div id="leadPhoneHit"></div>
       <div id="leadDelReqs"></div>
       <div id="leadsArea"></div>`;
     emuEnsureStyles(); // סגנונות הכרטיסים (תפיסה/מאגר/צפייה-בלבד) כבר ברינדור
@@ -98,6 +102,7 @@ function leadsSwitchView() {
 /* סינון לפי חיפוש, היקף (סוכן/מאגר), ומצב פתוח/סגור */
 function leadsFiltered() {
   const term = (document.getElementById('leadSearch')?.value || '').trim();
+  const termDigits = leadSearchDigits(term);
   const showClosed = (document.getElementById('leadShowClosed')?.value || 'open') === 'all';
 
   let scopeMatch = () => true;
@@ -118,7 +123,52 @@ function leadsFiltered() {
     (isAdmin() || !l.pending_delete) &&
     (showClosed || !['won', 'lost'].includes(l.status)) &&
     scopeMatch(l) &&
-    (!term || [l.name, l.phone, l.email, l.field, l.interest, l.notes].some(v => (v || '').includes(term))));
+    (!term || [l.name, l.phone, l.email, l.field, l.interest, l.notes].some(v => (v || '').includes(term)) ||
+      (termDigits && normPhone(l.phone).includes(termDigits))));
+}
+
+/* ---------- חיפוש לפי טלפון: מקפיץ אם קיים ליד עם המספר ----------
+   מחפש בכל הלידים (לא רק בהיקף/פתוחים שבסינון), כי המטרה לדעת אם המספר כבר במערכת */
+function leadSearchDigits(term) {
+  // נחשב "טלפון" רק אם יש לפחות 7 ספרות ואין אותיות
+  if (!term || /[^\d\s\-+().]/.test(term)) return '';
+  const d = normPhone(term);
+  return d.length >= 7 ? d : '';
+}
+let _leadPhoneSeq = 0;
+async function leadPhoneHitDraw(term) {
+  const box = document.getElementById('leadPhoneHit');
+  if (!box) return;
+  const digits = leadSearchDigits(term);
+  if (!digits) { box.innerHTML = ''; return; }
+  const agentName = id => (cache.agents.find(a => a.id === id) || {}).name;
+  const hits = _leads.filter(l => (isAdmin() || !l.pending_delete) && normPhone(l.phone).includes(digits)).slice(0, 5);
+  const banner = (cls, html) => `<div class="card" style="margin:8px 0;padding:10px 14px;border-inline-start:4px solid var(--${cls === 'found' ? 'danger' : 'brand'})">${html}</div>`;
+  if (hits.length) {
+    box.innerHTML = banner('found', `<b>📞 נמצא${hits.length > 1 ? 'ו ' + hits.length + ' לידים' : ' ליד'} עם המספר הזה:</b>` +
+      hits.map(l => {
+        const owner = l.agent_id ? (agentName(l.agent_id) || 'סוכן אחר') : 'מאגר ללא שיוך';
+        return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+          <b>${esc(l.name)}</b> · <span dir="ltr">${esc(l.phone)}</span> · ${esc(owner)} · ${pill('lead', l.status)} ${leadDupTag(l)}
+          <button class="btn btn-sm" onclick="openLeadCard(${l.id})">פתח</button></div>`;
+      }).join(''));
+    return;
+  }
+  // אין ליד — בדיקה מול לקוחות (רק למספר מלא, כדי לא להציף את השרת בכל הקשה)
+  if (digits.length < 9) { box.innerHTML = banner('no', '🔍 אין ליד עם המספר הזה (עד כה)'); return; }
+  const seq = ++_leadPhoneSeq;
+  box.innerHTML = banner('no', '🔍 אין ליד עם המספר הזה · בודק מול לקוחות...');
+  let dup = null;
+  try {
+    // שולחים גם כפי שהוקלד וגם מנורמל — לא ידוע באיזה פורמט הטלפון שמור אצל הלקוח
+    const variants = [...new Set([term, digits])];
+    const res = await Promise.all(variants.map(v => db.rpc('check_duplicate_phone', { p_phone: v })));
+    dup = res.flatMap(r => r.data || []).find(d => d.kind !== 'lead') || null;
+  } catch (e) { /* בלי בדיקת לקוחות */ }
+  if (seq !== _leadPhoneSeq || document.getElementById('leadSearch')?.value.trim() !== term) return;
+  box.innerHTML = dup
+    ? banner('found', `👥 אין ליד עם המספר — אבל הוא קיים <b>כלקוח</b>: "${esc(dup.name)}"${dup.mine ? ' (אצלך)' : ''}`)
+    : banner('no', '✅ המספר לא קיים במערכת — אין ליד ואין לקוח עם המספר הזה');
 }
 
 function leadsDraw() {
@@ -283,6 +333,47 @@ async function similarNamesFinder(names, leads) {
     return out;
   };
 }
+/* שם זהה (אותן מילים, בלי בע"מ/חברת וכו') ללקוח או לליד של סוכן אחר.
+   מחזיר { kind, name, agent } של ההתאמה הראשונה, או null. */
+function _sameNameWords(a, b) {
+  const x = leadNameWords(a), y = new Set(leadNameWords(b));
+  return x.length > 0 && x.length === y.size && x.every(w => y.has(w));
+}
+async function otherAgentSameName(name) {
+  const words = leadNameWords(name);
+  if (!words.length) return null;
+  const me = myAgentId();
+  const myName = me ? (cache.agents.find(a => a.id === me) || {}).name : null;
+  const custs = await customersMatchingWords(words);
+  const c = custs.find(x => _sameNameWords(x.name, name) && (!myName || x.agent !== myName));
+  if (c) return { kind: 'לקוח', name: c.name, agent: c.agent || 'ללא סוכן' };
+  try {
+    const longest = words.slice().sort((p, q) => q.length - p.length)[0];
+    const { data } = await db.from('leads').select('name,agent_id,status').ilike('name', '%' + longest + '%').limit(100);
+    const l = (data || []).find(x => !['won', 'lost'].includes(x.status) && x.agent_id !== me && _sameNameWords(x.name, name));
+    if (l) return { kind: 'ליד', name: l.name, agent: l.agent_id ? ((cache.agents.find(a => a.id === l.agent_id) || {}).name || 'סוכן אחר') : 'מאגר ללא שיוך' };
+  } catch (e) { /* בלי לידים — רק בדיקת לקוחות */ }
+  return null;
+}
+/* שער כפילות מול סוכן אחר (שם זהה / טלפון): סוכן — חסימה; מנהל — אישור.
+   זורק שגיאה כשנחסם (הטופס נשאר פתוח). */
+async function crossAgentGuard(rec, what) {
+  if (rec.phone) {
+    const dups = await run(db.rpc('check_duplicate_phone', { p_phone: rec.phone }));
+    const d = (dups || []).find(x => !x.mine && !x.unassigned);
+    if (d) {
+      const kind = d.kind === 'lead' ? 'ליד' : 'לקוח';
+      if (isSales()) { showOops(`אופססס! 🤚<br>הטלפון כבר נמצא אצל סוכן אחר (${kind} "${esc(d.name)}").<br><b>לא ניתן להזין את ה${what}.</b>`); throw new Error('duplicate-other'); }
+      if (!confirm(`שים לב: הטלפון כבר קיים אצל ${kind} "${d.name}" של סוכן אחר.\nלהמשיך בכל זאת?`)) throw new Error('duplicate-other-cancel');
+    }
+  }
+  const n = await otherAgentSameName(rec.name);
+  if (n) {
+    if (isSales()) { showOops(`אופססס! 🤚<br>${n.kind} בשם "${esc(n.name)}" כבר קיים אצל ${esc(n.agent)}.<br><b>לא ניתן להזין את ה${what}.</b> אם זה עסק אחר — פנה למנהל.`); throw new Error('duplicate-name-other'); }
+    if (!confirm(`שים לב: ${n.kind} בשם "${n.name}" כבר קיים אצל ${n.agent}.\nלהמשיך בכל זאת?`)) throw new Error('duplicate-name-cancel');
+  }
+  return true;
+}
 async function leadSimilarNames(name) { return (await similarNamesFinder([name]))(name); }
 
 function leadQuickAdd() {
@@ -331,6 +422,8 @@ function leadQuickAdd() {
         }
       }
     }
+    /* שם זהה ללקוח/ליד של סוכן אחר — חסימה לסוכן (גם בטלפון אחר / בלי טלפון) */
+    await crossAgentGuard({ name: rec.name }, 'ליד');
     /* שם דומה (טלפון שונה) — התראה בלבד, ההחלטה אצל הסוכן */
     const similar = await leadSimilarNames(rec.name);
     if (similar.length && !confirm(

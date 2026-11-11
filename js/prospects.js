@@ -109,6 +109,15 @@ function psDrawScanBox() {
     </div>`;
 }
 
+/* הודעת שגיאה מובנת — "Failed to fetch" וכו' = הבקשה לא הגיעה לשרת */
+function psErrHe(m) {
+  m = String(m || '');
+  if (/failed to fetch|failed to send a request|networkerror|load failed/i.test(m))
+    return 'אין חיבור לשרת — הבקשה לא הגיעה ליעד. בדרך כלל: סינון אינטרנט במחשב (אתרוג/נטפרי) או ניתוק רשת. (' + m + ')';
+  if (/אין הרשאה|לא מזוהה/.test(m)) return m + ' — למשתמש אין הרשאת סוכן/מנהל פעילה (בדוק ב"משתמשים והרשאות").';
+  return m;
+}
+
 function psDrawProgress() {
   const box = document.getElementById('psScanBox');
   if (!box || !_psScan) return;
@@ -125,6 +134,7 @@ function psDrawProgress() {
         · ${s.stats.filtered} סוננו
         ${s.stats.failedPages.length ? `· <span style="color:var(--danger)">${s.stats.failedPages.length} עמודים נכשלו (${s.stats.failedPages.join(', ')})</span>` : ''}
       </div>
+      ${s.stats.failedPages.length && s.stats.lastErr ? `<div style="margin-top:6px;font-size:.85rem;color:var(--danger)">סיבת הכישלון: ${esc(psErrHe(s.stats.lastErr))}</div>` : ''}
       ${s.running ? `<button class="btn btn-sm btn-danger-ghost" style="margin-top:8px" onclick="psCancel()">עצור סריקה</button>` : `
         ${s.stats.existing.length ? `<details style="margin-top:8px;font-size:.85rem"><summary>כבר במערכת (${s.stats.existing.length}) — לא נוספו</summary>
           <div class="muted" style="margin-top:6px">${s.stats.existing.map(x => esc(x)).join(' · ')}</div></details>` : ''}
@@ -181,7 +191,7 @@ async function psStartScan() {
       while (!_psScan.cancel && next <= doc.numPages) {
         const p = next++;
         try { await psScanPage(doc, p); }
-        catch (e) { console.error('prospects page', p, e); _psScan.stats.failedPages.push(p); }
+        catch (e) { console.error('prospects page', p, e); _psScan.stats.failedPages.push(p); _psScan.stats.lastErr = (e && e.message) || String(e); }
         _psScan.done++;
         psDrawProgress();
         psLiveRefresh();

@@ -259,7 +259,7 @@ _iePaint();
 שומר, ומרענן את הרשימה במקום (בלי לזרוק למסך הלקוחות) */
 async function ieCustEdit(custId) {
 let c;
-try { c = await run(db.from('customers').select('*').eq('id', custId).single()); } catch (e) { }
+try { c = await custLoad(custId, { required: true }); } catch (e) { }
 if (!c) { toast('לקוח לא נמצא', true); return; }
 openForm('עריכת לקוח — ' + c.name, CUSTOMER_FIELDS, c, async (rec) => {
 await run(db.from('customers').update(rec).eq('id', custId));

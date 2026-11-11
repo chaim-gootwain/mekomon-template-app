@@ -30,10 +30,9 @@ const SH_TABS = [
   ['team', '♧ צוות ויעדים'],
   ['training', '▥ קליטה והכשרה'],
   ['courses', '▷ קורסים'],
-  ['procedures', '☷ נהלים וכללים'],
-  ['routine', '◷ שגרת ניהול'],
+  ['resources', '☷ חומרי עזר'],
   ['reports', '▤ דיווחים יומיים'],
-  ['messages', '✉ הודעות לצוות'],
+  ['contract', '✍ הסכם עבודה'],
 ];
 
 const SH_TASKS = [
@@ -60,7 +59,7 @@ const SH_DEFAULTS = {
     { title: 'הצפת חסמים', body: 'מציפים בזמן אמת: מה קרה, מה נוסה ומה העזרה הנדרשת. מחיר חריג, תלונה או חוסר בהירות במוצר מועברים למנהל.' },
     { title: 'סגירת יום', body: 'מעדכנים את המערכת, מדווחים פעילות ותוצאות, מציפים חסמים ומכינים את מחר. הדוח מסכם את היום; אינו מחליף תיעוד לקוחות.' },
     { title: 'מידע והרשאות', body: 'משתמשים בחשבון אישי ובהרשאות המתאימות לתפקיד. אין לשתף סיסמאות.' },
-    { title: 'שכר ועמלות · טיוטה לבירור', body: '50 ₪ לשעה; עד 15,000 ₪ — 10%; בין 15,000 ל־30,000 ₪ — 15%. נדרש להבהיר אם החישוב מדורג או על כלל המכירות, תקופת החישוב, בסיס גבייה או חתימה, מע״מ וביטולים.' },
+    { title: 'שכר ועמלות · טיוטה לבירור', body: '43 ₪ לשעה בתלוש שכר, או 50 ₪ לשעה + מע״מ כנגד חשבונית; עד 15,000 ₪ — 10%; בין 15,000 ל־30,000 ₪ — 14%; מעל 30,000 ₪ — 17%. בונוס של 500 ₪ בחודש שבו המכירות מגיעות ל־30,000 ₪. נדרש להבהיר אם החישוב מדורג או על כלל המכירות, תקופת החישוב, בסיס גבייה או חתימה, מע״מ וביטולים.' },
   ],
   messages: [
     { title: 'בוקר טוב', body: '*בוקר טוב צוות 🔥*\n\nהיעד הצוותי היום: ___\nהמיקוד המקצועי: ___\n\nנכנסים לשעון נוכחות, פותחים את המערכת ובודקים חזרות.\n\nכל אחד משתף:\n*היעד שלי:* ___\n*הפעולה שלי להשגת היעד:* ___\n\nנתקעתם? מציפים בזמן.\n*יום של עשייה ותוצאות!*' },
@@ -70,6 +69,15 @@ const SH_DEFAULTS = {
   checks: {},   // 'agentId-day-task' → true
   lessons: {},  // 'agentId-courseIdx' → true
   notes: {},    // agentId → טקסט משוב
+  // הסכם עבודה: תנאים כלליים (זהים לכל הסוכנים) + פרטים אישיים לכל סוכן
+  contract: {
+    employer: '', employer_id: '', employer_address: '', signer: '',
+    role: 'נציג/ת מכירות פרסום', scope: 'משרה חלקית, לפי סידור עבודה שבועי שייקבע מראש בתיאום',
+    hourly: 43, hourly_invoice: 50, tier1_cap: 15000, tier1_pct: 10, tier2_cap: 30000, tier2_pct: 14, tier3_pct: 17,
+    bonus_threshold: 30000, bonus_amount: 500,
+    tier_mode: 'graded', basis: 'collected', trial_months: 3, trial_unit: 'months', weekly_target: 5000, tail_days: 30, pay_day: 9, notice_days: 14, extra: '',  // trial_months = אורך תקופת הניסיון ביחידות trial_unit
+  },
+  contract_people: {},  // agentId → { id_number, address, start_date }
 };
 
 const SH_SCHEDULE = [
@@ -194,6 +202,7 @@ ${blockers.map(r => `<div class="muted" style="font-size:.8rem;padding:2px 0">�
     const monthly = _shReports.filter(r => String(r.report_date).slice(0, 7) === ym);
     const notes = shGet('notes');
     return `
+<div class="page-head"><h2>צוות ויעדים</h2><button class="btn" onclick="shOnboard()">＋ איש/אשת מכירות חדש/ה</button></div>
 <p class="muted" style="font-size:.85rem;margin-bottom:12px">יעדים חודשיים — אותו יעד של מסך "סוכנים". הסכומים מחושבים מהדיווחים היומיים של החודש הנוכחי.</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px">
 ${shAgents().map(a => {
@@ -208,6 +217,7 @@ ${notes[a.id] ? `<div class="muted" style="font-size:.78rem;margin-top:8px;white
 <button class="btn btn-sm btn-ghost" onclick="shGoalForm(${a.id})">יעד</button>
 <button class="btn btn-sm btn-ghost" onclick="_shAgent=${a.id};shGo('training')">תיק הכשרה</button>
 <button class="btn btn-sm btn-ghost" onclick="shCoach(${a.id})">משוב אישי</button>
+<button class="btn btn-sm btn-ghost" onclick="shContractForm(${a.id})">📄 הסכם עבודה</button>
 </div></div>`;
     }).join('') || '<div class="empty">אין סוכנים פעילים</div>'}
 </div>`;
@@ -257,18 +267,56 @@ ${_shAgent != null ? `<label style="display:flex;gap:8px;align-items:center;marg
 ${_shAgent != null ? `<button class="btn btn-sm btn-ghost" onclick="shCoach(${_shAgent})">תיעוד תובנות ויישום</button>` : ''}</div>`;
   },
 
-  procedures() {
+  contract() {
+    const c = shTerms(), people = shGet('contract_people');
+    const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${k}</span><b>${v || '<span style="color:#b91c1c">חסר</span>'}</b></div>`;
     return `
-<div class="page-head"><h2>שיטה ברורה. עבודה מסודרת.</h2><button class="btn btn-ghost" onclick="shListEdit('procedures')">✏️ עריכת הנהלים</button></div>
-<div class="card card-pad" style="margin-bottom:14px"><b>לכל ליד אחראי. לכל שיחה תיעוד. לכל המשך מועד.</b><div class="muted" style="font-size:.85rem">שלושת הכללים שמחזיקים את רצף העבודה של הצוות.</div></div>
-${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">${esc(p.title)}</summary><p style="margin-top:8px;white-space:pre-wrap">${esc(p.body)}</p></details>`).join('')}`;
+<div class="page-head"><h2>הסכם עבודה לאנשי מכירות</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="shOnboard()">＋ איש/אשת מכירות חדש/ה</button><button class="btn btn-ghost" onclick="shContractTerms()">✏️ עריכת תנאי ההסכם</button></div></div>
+<div class="card card-pad" style="margin-bottom:14px;background:#fff8e6;border-color:#f3d48a"><b>⚠ נוסח לדוגמה</b><div class="muted" style="font-size:.85rem">ההסכם מבוסס על דיני העבודה בישראל ומהווה גם הודעה לעובד על תנאי העבודה. מומלץ לעבור עליו פעם אחת עם עו״ד או רו״ח לפני החתימה הראשונה.</div></div>
+<div class="grid2" style="gap:16px;align-items:start">
+<div class="card card-pad"><b>תנאים כלליים</b>
+${row('המעסיק', esc(c.employer || (cache.settings || {}).paper_name || ''))}
+${row('ח.פ / ע.מ', esc(c.employer_id))}
+${row('כתובת המעסיק', esc(c.employer_address))}
+${row('חותם בשם המעסיק', esc(c.signer))}
+${row('תפקיד', esc(c.role))}
+${row('שכר שעתי — שכיר (תלוש)', money(c.hourly) + ' ברוטו')}
+${row('תמורה שעתית — עצמאי (חשבונית)', money(c.hourly_invoice) + ' + מע״מ')}
+${row('עמלות', esc(shTiersText(c, true)))}
+${row('בונוס חודשי', Number(c.bonus_amount) ? money(c.bonus_amount) + ' במכירות של ' + money(c.bonus_threshold) + ' ומעלה' : 'ללא')}
+${row('בסיס העמלה', c.basis === 'signed' ? 'הזמנות חתומות' : 'נגבה בפועל')}
+${row('יעד מכירות שבועי', Number(c.weekly_target) ? 'לפחות ' + money(c.weekly_target) : 'ללא')}
+${row('תקופת ניסיון', shTrialText(c) || 'ללא')}
+${row('תשלום שכר / תמורה', 'עד ה-' + Number(c.pay_day) + ' בחודש')}
+${row('הודעה מוקדמת — עצמאי', Number(c.notice_days) + ' ימים')}
+</div>
+<div class="card card-pad"><b>הפקת הסכם לסוכן</b>
+${shAgents().map(a => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
+<div style="flex:1"><b>${esc(a.name)}</b><div class="muted" style="font-size:.78rem">${people[a.id] && people[a.id].start_date ? 'תחילת עבודה: ' + heDate(people[a.id].start_date) : 'פרטים אישיים טרם הוזנו'}</div></div>
+<button class="btn btn-sm" onclick="shContractForm(${a.id})">📄 הפקת הסכם</button></div>`).join('') || '<div class="empty">אין סוכנים פעילים</div>'}
+</div>
+</div>`;
   },
 
-  routine() {
+  resources() {
     const week = [['יום ראשון', 'זריקת אנרגיה', '30 דקות · הצלחות ויעדים'], ['יום שני', 'אימון פתיחת שיחה', '15 דקות · אבחון צורך'], ['יום שלישי', 'בקרת אמצע שבוע', '20 דקות · פערים וחסמים'], ['יום רביעי', 'התנגדויות ופולואפ', '20 דקות · מקרים אמיתיים'], ['יום חמישי', 'סיכום ותכנון', '25 דקות · למידה ויעדים']];
     const sunday = [['ניצחונות והצלחות', 5], ['זריקת אנרגיה וסיפור לקוח', 5], ['יעד מול ביצוע', 7], ['תרגול מיומנות אחת', 8], ['התחייבות אישית לשבוע', 5]];
     const anchors = [['פתיחת משמרת', 'נוכחות, הודעת בוקר ויעד'], ['אמצע יום', 'פעילות, פער ועזרה נדרשת'], ['סיום משמרת', 'דוח תוצאות ותכנון מחר'], ['משוב אישי', '15 דקות לכל סוכן בשבוע']];
     return `
+<div class="page-head"><h2>חומרי עזר</h2></div>
+
+<details open class="card card-pad" style="margin-bottom:12px">
+<summary style="cursor:pointer;font-weight:700;font-size:1.05rem">☷ נהלים וכללים</summary>
+<div style="margin-top:12px">
+<div class="page-head" style="margin:0 0 8px"><span class="muted" style="font-size:.85rem">שיטה ברורה. עבודה מסודרת.</span><button class="btn btn-sm btn-ghost" onclick="shListEdit('procedures')">✏️ עריכה</button></div>
+<div class="card card-pad" style="margin-bottom:8px"><b>לכל ליד אחראי. לכל שיחה תיעוד. לכל המשך מועד.</b><div class="muted" style="font-size:.85rem">שלושת הכללים שמחזיקים את רצף העבודה של הצוות.</div></div>
+${shGet('procedures').map(p => `<details class="card card-pad" style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">${esc(p.title)}</summary><p style="margin-top:8px;white-space:pre-wrap">${esc(p.body)}</p></details>`).join('')}
+</div>
+</details>
+
+<details class="card card-pad" style="margin-bottom:12px">
+<summary style="cursor:pointer;font-weight:700;font-size:1.05rem">◷ שגרת ניהול</summary>
+<div style="margin-top:12px">
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:16px">
 ${week.map(w => `<div class="card card-pad"><div class="muted" style="font-size:.78rem">${w[0]}</div><b>${w[1]}</b><div class="muted" style="font-size:.78rem">${w[2]}</div></div>`).join('')}
 </div>
@@ -277,9 +325,20 @@ ${week.map(w => `<div class="card card-pad"><div class="muted" style="font-size:
 ${sunday.map(s => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line)"><span>${s[0]}</span><span class="muted">${s[1]} דקות</span></div>`).join('')}</div>
 <div class="card card-pad"><b>העוגנים היומיים</b>
 ${anchors.map(s => `<div style="padding:7px 0;border-top:1px solid var(--line)"><b>${s[0]}</b><div class="muted" style="font-size:.8rem">${s[1]}</div></div>`).join('')}
-<div style="display:flex;gap:6px;margin-top:10px"><button class="btn btn-sm btn-ghost" onclick="shGo('messages')">לתבניות ההודעות</button><button class="btn btn-sm btn-ghost" onclick="shGo('reports')">דוחות הצוות</button></div></div>
+</div></div>
+<p class="muted" style="font-size:.8rem;margin-top:12px">המסגרת לדוגמה היא ראשון עד חמישי, 09:00–17:00. שעות והפסקות מותאמות לעבודה בפועל.</p>
 </div>
-<p class="muted" style="font-size:.8rem;margin-top:12px">המסגרת לדוגמה היא ראשון עד חמישי, 09:00–17:00. שעות והפסקות מותאמות לעבודה בפועל.</p>`;
+</details>
+
+<details class="card card-pad" style="margin-bottom:12px">
+<summary style="cursor:pointer;font-weight:700;font-size:1.05rem">✉ הודעות לצוות</summary>
+<div style="margin-top:12px">
+<div class="page-head" style="margin:0 0 8px"><span class="muted" style="font-size:.85rem">תבניות מוכנות להעתקה. משלימים יעדים ונתונים לפני שליחה.</span><button class="btn btn-sm btn-ghost" onclick="shListEdit('messages')">✏️ עריכה</button></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+${shGet('messages').map((m, i) => `<div class="card card-pad"><b>${esc(m.title)}</b><pre style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;margin:8px 0">${esc(m.body)}</pre><button class="btn btn-sm" onclick="shCopyMsg(${i})">העתקת ההודעה</button></div>`).join('')}
+</div>
+</div>
+</details>`;
   },
 
   reports() {
@@ -289,14 +348,6 @@ ${anchors.map(s => `<div style="padding:7px 0;border-top:1px solid var(--line)">
 <div class="card" id="shReportsTable"></div>`;
   },
 
-  messages() {
-    return `
-<div class="page-head"><h2>מילים שמניעות את הצוות</h2><button class="btn btn-ghost" onclick="shListEdit('messages')">✏️ עריכת התבניות</button></div>
-<p class="muted" style="font-size:.85rem;margin-bottom:12px">תבניות מוכנות להעתקה. משלימים יעדים ונתונים לפני שליחה.</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
-${shGet('messages').map((m, i) => `<div class="card card-pad"><b>${esc(m.title)}</b><pre style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;margin:8px 0">${esc(m.body)}</pre><button class="btn btn-sm" onclick="shCopyMsg(${i})">העתקת ההודעה</button></div>`).join('')}
-</div>`;
-  },
 };
 
 function shSortedReports() {
@@ -437,10 +488,377 @@ function shListEdit(key) {
   });
 }
 
+/* ---------- הסכם עבודה ---------- */
+function shTerms() { return Object.assign({}, SH_DEFAULTS.contract, shGet('contract')); }
+
+function shTiersText(c, short) {
+  const n = v => Number(v || 0).toLocaleString('he-IL');
+  const top = c.tier3_pct === '' || c.tier3_pct == null ? c.tier2_pct : c.tier3_pct;
+  const t = [
+    `עד ${n(c.tier1_cap)} ₪ — ${Number(c.tier1_pct || 0)}%`,
+    `מעל ${n(c.tier1_cap)} ₪ ועד ${n(c.tier2_cap)} ₪ — ${Number(c.tier2_pct || 0)}%`,
+    `מעל ${n(c.tier2_cap)} ₪ — ${Number(top || 0)}%`,
+  ];
+  if (short) return t.join(' · ') + (c.tier_mode === 'whole' ? ' (על כל הסכום)' : ' (מדורג)');
+  return t;
+}
+
+function shTrialText(c) {
+  const k = Number(c.trial_months || 0);
+  if (!k) return '';
+  const w = c.trial_unit === 'weeks';
+  if (k === 1) return w ? 'שבוע אחד' : 'חודש אחד';
+  if (k === 2) return w ? 'שבועיים' : 'חודשיים';
+  return k + (w ? ' שבועות' : ' חודשים');
+}
+
+function shContractTerms() {
+  const c = shTerms();
+  const rec0 = Object.assign({}, c, { employer: c.employer || (cache.settings || {}).paper_name || '' });
+  openForm('תנאי הסכם העבודה', [
+    { type: 'section', label: 'פרטי המעסיק' },
+    { name: 'employer', label: 'שם המעסיק (כפי שרשום)' },
+    { name: 'employer_id', label: 'ח.פ / ע.מ', dir: 'ltr' },
+    { name: 'employer_address', label: 'כתובת המעסיק' },
+    { name: 'signer', label: 'שם החותם בשם המעסיק' },
+    { type: 'section', label: 'התפקיד' },
+    { name: 'role', label: 'תואר התפקיד' },
+    { name: 'scope', label: 'היקף המשרה' },
+    { name: 'trial_months', label: 'אורך תקופת הניסיון (0 = ללא)', type: 'number' },
+    { name: 'trial_unit', label: 'יחידת תקופת הניסיון', type: 'select', options: [{ v: 'months', t: 'חודשים' }, { v: 'weeks', t: 'שבועות' }] },
+    { name: 'weekly_target', label: 'יעד מכירות שבועי מינימלי (₪, 0 = ללא)', type: 'number' },
+    { type: 'section', label: 'שכר ועמלות' },
+    { name: 'hourly', label: 'שכר שעתי — שכיר, בתלוש (₪ ברוטו)', type: 'number', required: true },
+    { name: 'hourly_invoice', label: 'תמורה שעתית — עצמאי, כנגד חשבונית (₪ + מע״מ)', type: 'number', required: true },
+    { name: 'tier1_cap', label: 'מדרגה 1 — עד (₪ לחודש)', type: 'number' },
+    { name: 'tier1_pct', label: 'מדרגה 1 — עמלה %', type: 'number' },
+    { name: 'tier2_cap', label: 'מדרגה 2 — עד (₪ לחודש)', type: 'number' },
+    { name: 'tier2_pct', label: 'מדרגה 2 — עמלה %', type: 'number' },
+    { name: 'tier3_pct', label: 'מעל מדרגה 2 — עמלה %', type: 'number' },
+    { name: 'tier_mode', label: 'אופן החישוב', type: 'select', options: [{ v: 'graded', t: 'מדורג — כל חלק לפי המדרגה שלו' }, { v: 'whole', t: 'על כל הסכום — לפי המדרגה שהושגה' }] },
+    { name: 'basis', label: 'בסיס העמלה', type: 'select', options: [{ v: 'collected', t: 'סכומים שנגבו בפועל' }, { v: 'signed', t: 'הזמנות חתומות' }] },
+    { name: 'bonus_threshold', label: 'בונוס — רף מכירות חודשי (₪)', type: 'number' },
+    { name: 'bonus_amount', label: 'בונוס — סכום (₪, 0 = ללא)', type: 'number' },
+    { name: 'tail_days', label: 'עמלה על גבייה אחרי סיום העבודה — עד כמה ימים', type: 'number' },
+    { name: 'pay_day', label: 'תשלום השכר / התמורה — עד יום בחודש (לשכיר לכל המאוחר ה-9, לפי חוק)', type: 'number', required: true },
+    { name: 'notice_days', label: 'הודעה מוקדמת לסיום — עצמאי (ימים)', type: 'number', required: true },
+    { name: 'extra', label: 'סעיפים נוספים (יודפסו כסעיף "הוראות נוספות")', type: 'textarea', rows: 4 },
+  ], rec0, async (rec) => {
+    await shSet('contract', Object.assign({}, c, rec));
+    toast('תנאי ההסכם נשמרו'); shRender();
+  });
+}
+
+function shContractForm(agentId) {
+  const a = (cache.agents || []).find(x => x.id === agentId);
+  if (!a) return;
+  const people = shGet('contract_people');
+  const p = Object.assign({ start_date: today(), gender: 'm', emp_type: 'payslip', comp_mode: 'tiers' }, people[agentId] || {},
+    { pct_new: Number(a.pct_new || 0) || '', pct_renew: Number(a.pct_renew || 0) || '' });
+  openForm('הסכם עבודה · ' + a.name, [
+    { type: 'html', html: '<p class="muted" style="font-size:.8rem">הפרטים נשמרים להפקה חוזרת. התנאים הכלליים (שכר, עמלות, פרטי המעסיק) נערכים בלשונית "הסכם עבודה" במוקד המכירות.</p>' },
+    { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
+    { name: 'emp_type', label: 'סוג ההעסקה', type: 'select', options: [{ v: 'payslip', t: 'שכיר — תלוש שכר' }, { v: 'invoice', t: 'עצמאי — כנגד חשבונית' }] },
+    { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
+    { name: 'address', label: 'כתובת העובד' },
+    { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
+    { type: 'section', label: 'עמלה' },
+    { name: 'comp_mode', label: 'שיטת העמלה', type: 'select', options: [{ v: 'tiers', t: 'מדרגות ההסכם (כמו כולם)' }, { v: 'pct', t: 'אישי: אחוז מלקוח חדש / מתחדש' }] },
+    { name: 'pct_new', label: '% לקוח חדש (רק בשיטה האישית)', type: 'number' },
+    { name: 'pct_renew', label: '% לקוח מתחדש (רק בשיטה האישית)', type: 'number' },
+  ], p, async (rec) => {
+    if (rec.comp_mode === 'pct' && !(Number(rec.pct_new) > 0 || Number(rec.pct_renew) > 0)) {
+      toast('בשיטה האישית יש למלא אחוז ללקוח חדש ו/או מתחדש', true); throw new Error('pct');
+    }
+    // חלון ההדפסה נפתח לפני השמירה — כדי שלא ייחסם כחלון קופץ
+    shContractPrint(a, rec);
+    // האחוזים נשמרים בכרטיס הסוכן (שם המערכת קוראת אותם); במדרגות — 0
+    const pct = rec.comp_mode === 'pct'
+      ? { pct_new: Number(rec.pct_new) || 0, pct_renew: Number(rec.pct_renew) || 0 }
+      : { pct_new: 0, pct_renew: 0 };
+    await run(db.from('agents').update(pct).eq('id', agentId), 'שמירת אחוזי העמלה');
+    Object.assign(a, pct);
+    const { pct_new, pct_renew, ...person } = rec;
+    people[agentId] = person;
+    await shSet('contract_people', people);
+  });
+}
+
+/* קליטת איש מכירות חדש במקום אחד: הזמנה למערכת (משתמש בתפקיד מכירות),
+   רשומת סוכן, פרטי ההסכם ויעד — ואז הפקת הסכם העבודה */
+function shOnboard() {
+  openForm('איש/אשת מכירות חדש/ה', [
+    { type: 'section', label: 'פרטים אישיים' },
+    { name: 'name', label: 'שם מלא', required: true },
+    { name: 'gender', label: 'לשון ההסכם', type: 'select', options: [{ v: 'm', t: 'עובד' }, { v: 'f', t: 'עובדת' }] },
+    { name: 'emp_type', label: 'סוג ההעסקה', type: 'select', options: [{ v: 'payslip', t: 'שכיר — תלוש שכר' }, { v: 'invoice', t: 'עצמאי — כנגד חשבונית' }] },
+    { name: 'phone', label: 'טלפון', dir: 'ltr' },
+    { name: 'email', label: 'אימייל', type: 'email', dir: 'ltr' },
+    { name: 'id_number', label: 'ת.ז', dir: 'ltr' },
+    { name: 'address', label: 'כתובת' },
+    { type: 'section', label: 'עבודה' },
+    { name: 'start_date', label: 'תאריך תחילת עבודה', type: 'date', required: true },
+    { name: 'monthly_target', label: 'יעד מכירות חודשי (₪)', type: 'number' },
+    { name: 'voicenter_ext', label: 'שלוחה (Voicenter) — אם יש', dir: 'ltr' },
+    { type: 'section', label: 'מה לעשות עכשיו' },
+    { name: 'invite', label: 'לשלוח הזמנה לכניסה למערכת (תפקיד מכירות — נדרש אימייל)', type: 'checkbox' },
+    { name: 'print', label: 'להפיק הסכם עבודה מיד', type: 'checkbox' },
+  ], { start_date: today(), gender: 'm', emp_type: 'payslip', invite: true, print: true }, async (rec) => {
+    if (rec.invite && !rec.email) { toast('לשליחת הזמנה למערכת צריך אימייל — או לבטל את הסימון', true); throw new Error('email'); }
+    // החלון נפתח מיד, לפני הפעולות מול השרת, כדי שלא ייחסם כחלון קופץ
+    const win = rec.print ? window.open('', '_blank') : null;
+    try {
+      let profileId = null;
+      if (rec.invite) {
+        toast('שולח הזמנה...');
+        const r = await _adminUsersCall({ action: 'invite', email: rec.email, full_name: rec.name, phone: rec.phone, role: 'sales', redirectTo: location.origin + '/set-password.html' });
+        profileId = (r && r.id) || null;
+      }
+      const agent = await run(db.from('agents').insert({
+        name: rec.name, phone: rec.phone || null, email: rec.email || null, voicenter_ext: rec.voicenter_ext || null,
+        profile_id: profileId, monthly_target: rec.monthly_target, pct_new: 0, pct_renew: 0, bonus_type: 'none', active: true,
+      }).select().single(), 'הוספת הסוכן נכשלה');
+      const person = { gender: rec.gender, emp_type: rec.emp_type, comp_mode: 'tiers', id_number: rec.id_number, address: rec.address, start_date: rec.start_date };
+      const people = shGet('contract_people');
+      people[agent.id] = person;
+      await shSet('contract_people', people);
+      await refreshCache();
+      if (win) shContractPrint(agent, person, win);
+      toast(rec.name + ' נוסף/ה לצוות' + (rec.invite ? ' · הזמנה נשלחה ל-' + rec.email : ''));
+      _shAgent = agent.id;
+      shRender();
+    } catch (e) {
+      if (win) win.close();
+      throw e;
+    }
+  });
+}
+
+const SH_FEM = [
+  ['העובד מועסק', 'העובדת מועסקת'], ['תפקידו כולל', 'תפקידה כולל'], ['שתוטל עליו', 'שתוטל עליה'],
+  ['העובד יפעל', 'העובדת תפעל'], [', ישתמש במחירון', ', תשתמש במחירון'], ['ולא ייתן ללקוח', 'ולא תיתן ללקוח'],
+  ['השבועי של העובד', 'השבועי של העובדת'], ['העסקת העובד', 'העסקת העובדת'],
+  ['העובד ידווח על שעות עבודתו', 'העובדת תדווח על שעות עבודתה'], ['ימסור העובד', 'תמסור העובדת'],
+  ['ישולם לעובד שכר', 'ישולם לעובדת שכר'], ['תשולם לעובד עמלה', 'תשולם לעובדת עמלה'],
+  ['על ידי העובד', 'על ידי העובדת'], ['המכירות של העובד', 'המכירות של העובדת'], ['ישולם לו בונוס', 'ישולם לה בונוס'],
+  ['העובד יהיה זכאי', 'העובדת תהיה זכאית'], ['משרתו', 'משרתה'],
+  ['שיגיע לעובד במסגרת עבודתו', 'שיגיע לעובדת במסגרת עבודתה'], ['העובד ישמור', 'העובדת תשמור'],
+  ['לא יעתיק, לא יוריד ולא יעביר', 'לא תעתיק, לא תוריד ולא תעביר'], ['ולא ישתמש בהם', 'ולא תשתמש בהם'],
+  ['לצורך עבודתו', 'לצורך עבודתה'], ['העובד ישתמש רק בחשבון האישי שניתן לו', 'העובדת תשתמש רק בחשבון האישי שניתן לה'],
+  ['לא ישתף סיסמאות, וישמור', 'לא תשתף סיסמאות, ותשמור'], ['שיימסרו לעובד', 'שיימסרו לעובדת'], ['וגישתו', 'וגישתה'],
+  ['עבודת העובד', 'עבודת העובדת'], ['ולשלם לו את שכרו', 'ולשלם לה את שכרה'],
+  ['יועבר לעובד כל המגיע לו', 'יועבר לעובדת כל המגיע לה'], ['הודעה לעובד על תנאי עבודתו', 'הודעה לעובדת על תנאי עבודתה'],
+  ['המגיעה לעובד על פי דין', 'המגיעה לעובדת על פי דין'],
+  ['להעסיק את העובד בתפקיד מכירות, והעובד מעוניין להיות מועסק', 'להעסיק את העובדת בתפקיד מכירות, והעובדת מעוניינת להיות מועסקת'],
+  ['<b>העובד:</b>', '<b>העובדת:</b>'],
+  ['העובד יספק', 'העובדת תספק'], ['העובד מספק את השירותים כעצמאי', 'העובדת מספקת את השירותים כעצמאית'], ['העובד אחראי לבדו', 'העובדת אחראית לבדה'],
+  ['אילו הועסק העובד כשכיר, היה שכרו', 'אילו הועסקה העובדת כשכירה, היה שכרה'], ['זכויותיו יחושבו', 'זכויותיה יחושבו'],
+  ['המגיעים לו.', 'המגיעים לה.'], ['לקבל מהעובד שירותי מכירה כעצמאי, והעובד מעוניין לספק לו', 'לקבל מהעובדת שירותי מכירה כעצמאית, והעובדת מעוניינת לספק לו'], ['ישולם לעובד <b>', 'ישולם לעובדת <b>'],
+  ['שהועבר לטיפול העובד', 'שהועבר לטיפול העובדת'], ['משיוכו לעובד', 'משיוכו לעובדת'],
+  ['יישאר משויך לעובד', 'יישאר משויך לעובדת'], ['לא תזכה את העובד', 'לא תזכה את העובדת'], ['<div>העובד — ', '<div>העובדת — '],
+];
+/* עמלה אישית (אחוז מלקוח חדש / מתחדש) — לסוכן שלא במדרגות */
+function shPctCommissionText(p, a, basis, tail) {
+  const pn = Number(p.pct_new != null && p.pct_new !== '' ? p.pct_new : a.pct_new) || 0;
+  const pr = Number(p.pct_renew != null && p.pct_renew !== '' ? p.pct_renew : a.pct_renew) || 0;
+  const months = Math.max(Number((cache.settings || {}).new_customer_months || 3) || 3, 0);
+  return `בנוסף לשכר היסוד תשולם לעובד עמלה בשיעור <b>${pn}%</b> מהמכירות ללקוח חדש ובשיעור <b>${pr}%</b> מהמכירות ללקוח מתחדש. "לקוח חדש" — לקוח ב-${months} החודשים הראשונים ממועד החיוב הראשון שלו; לאחר מכן הוא לקוח מתחדש. ${basis}<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר. עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${tail} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`;
+}
+
+/* כלל השיוך — אותם ימים שבהגדרות "שחרור לידים" (lead_release_days / lead_keep_advertiser_days) */
+function shLeadOwnershipText() {
+  const s = cache.settings || {};
+  const rel = Number(s.lead_release_days) > 0 ? Number(s.lead_release_days) : 60;
+  const keep = Number(s.lead_keep_advertiser_days) > 0 ? Number(s.lead_keep_advertiser_days) : 120;
+  return `ליד שהועבר לטיפול העובד ולא היה עמו קשר מתועד במערכת (שיחה, הערה או תיעוד) במשך ${rel} ימים — ייצא אוטומטית משיוכו לעובד ויעבור למאגר הלידים הכללי, שממנו כל איש מכירות רשאי לתפוס אותו ולטפל בו כרגיל. ליד שפרסם אצל המעסיק יישאר משויך לעובד ${keep} ימים ממועד הפרסום האחרון שלו, גם אם לא היה עמו קשר בתקופה זו. עסקה שתיסגר עם ליד לאחר שיצא משיוכו ונתפס על ידי איש מכירות אחר — לא תזכה את העובד בעמלה.`;
+}
+
+/* עצמאי כנגד חשבונית: אותם סעיפי עבודה (תפקיד, עמלות, לידים, סודיות, ציוד),
+   בלי תלוש, זכויות שכיר ותקופת ניסיון; במקומם תמורה + מע״מ וסעיף מעמד עצמאי
+   (כולל השכר החלופי — שכר השכיר — אם ייקבעו יחסי עובד ומעסיק) */
+function shInvoiceSections(sec, c, p, n, blank) {
+  const by = t => (sec.find(x => x[0] === t) || [t, ''])[1];
+  const toInvoice = h => h
+    .split('בנוסף לשכר היסוד').join('בנוסף לתמורה השעתית')
+    .split('ותפורט בתלוש השכר').join('ותיכלל בחשבונית, בתוספת מע״מ כדין')
+    .split('ויפורטו בתלוש השכר').join('ויכללו בחשבונית, בתוספת מע״מ כדין')
+    .split('₪ ברוטו</b>').join('₪ בתוספת מע״מ</b>');
+  const role = by('התפקיד')
+    .replace(/העובד מועסק בתפקיד (<b>.*?<\/b>)\. תפקידו כולל/, 'העובד יספק למעסיק שירותי $1, הכוללים')
+    .replace('הקשורה לתפקיד שתוטל', 'הקשורה לשירותים שתוטל');
+  const out = [
+    ['השירותים', role],
+    ['תחילת ההתקשרות', `ההתקשרות מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.`],
+    ['היקף ודיווח שעות', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה, והדיווח ישמש בסיס לחשבונית. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
+    ['תמורה', `בעבור כל שעת עבודה ישולם לעובד <b>${n(c.hourly_invoice)} ₪ בתוספת מע״מ כדין</b>, כנגד חשבונית מס. התמורה תשולם עד ה-${Number(c.pay_day)} בכל חודש בעבור החודש הקודם.`],
+    ['עמלות מכירה', toInvoice(by('עמלות מכירה'))],
+    ['לידים ושיוך לקוחות', by('לידים ושיוך לקוחות')],
+    ['מעמד עצמאי', `העובד מספק את השירותים כעצמאי (עוסק מורשה או פטור), ואין בין הצדדים יחסי עובד ומעסיק. העובד אחראי לבדו לתשלום מס הכנסה, מע״מ וביטוח לאומי בגין התמורה. הצדדים מצהירים כי התמורה נקבעה בהתחשב במעמד זה: אילו הועסק העובד כשכיר, היה שכרו ${n(c.hourly)} ₪ לשעה ברוטו, וההפרש מהווה תשלום מלא ומראש בעד כל הזכויות הסוציאליות. אם ייקבע כי התקיימו בין הצדדים יחסי עובד ומעסיק — זכויותיו יחושבו לפי שכר זה, וכל סכום ששולם מעבר לו יקוזז מהסכומים המגיעים לו.`],
+    ['סודיות ומאגר הלקוחות', by('סודיות ומאגר הלקוחות')],
+    ['ציוד ומסמכים', by('ציוד ומסמכים')],
+    ['סיום ההתקשרות', `כל צד רשאי לסיים את ההתקשרות בהודעה מוקדמת בכתב של ${Number(c.notice_days)} ימים. עם סיום ההתקשרות יועבר לעובד כל המגיע לו לפי הסכם זה.`],
+  ];
+  const extra = sec.find(x => x[0] === 'הוראות נוספות');
+  if (extra) out.push(extra);
+  out.push(['כללי', 'הסכם זה ממצה את ההתקשרות בין הצדדים. כל שינוי בו ייעשה בכתב ובחתימת שני הצדדים.']);
+  return out;
+}
+
+/* מינוח של הסכם שירותים: "המזמין" ו"נותן/ת השירותים" במקום "המעסיק" ו"העובד/ת" */
+const SH_CONTRACTOR = [
+  ['ליותר מעובד אחד', 'ליותר מאיש מכירות אחד'],
+  ['העובדת', 'נותנת השירותים'], ['לעובדת', 'לנותנת השירותים'],
+  ['העובד', 'נותן השירותים'], ['לעובד', 'לנותן השירותים'],
+  ['למעסיק', 'למזמין'], ['המעסיק', 'המזמין'],
+];
+function shContractor(html) { return SH_CONTRACTOR.reduce((h, [a, b]) => h.split(a).join(b), html); }
+
+function shFem(html) { return SH_FEM.reduce((h, [m, f]) => h.split(m).join(f), html); }
+
+function shContractPrint(a, p, win) {
+  const c = shTerms();
+  const employer = c.employer || (cache.settings || {}).paper_name || '@@PAPER_NAME@@';
+  const blank = v => v ? esc(v) : '<span class="blank"></span>';
+  // הלוגו של המופע — כתובת מלאה, כי חלון ההדפסה נפתח ריק (about:blank)
+  const logo = new URL('img/logo.png', location.href).href;
+  const n = v => Number(v || 0).toLocaleString('he-IL');
+  const trial = shTrialText(c);
+  const mode = c.tier_mode === 'whole'
+    ? 'שיעור העמלה נקבע לפי סך המכירות של החודש וחל על כל הסכום, כדלקמן:'
+    : 'העמלה מדורגת: כל חלק מסך המכירות החודשי מזכה בשיעור של המדרגה שבה הוא נמצא, כדלקמן:';
+  const basis = c.basis === 'signed'
+    ? 'העמלה תחושב על הזמנות פרסום חתומות שנסגרו על ידי העובד באותו חודש קלנדרי, לפני מע״מ ובניכוי הנחות. הזמנה שבוטלה או שלא נגבתה — העמלה בגינה תקוזז מהעמלות הבאות.'
+    : 'העמלה תחושב על סכומים שנגבו בפועל באותו חודש קלנדרי מעסקאות שנסגרו על ידי העובד, לפני מע״מ ובניכוי הנחות, זיכויים וביטולים.';
+  let sec = [
+    ['התפקיד', `העובד מועסק בתפקיד <b>${esc(c.role)}</b>. תפקידו כולל איתור ופנייה למפרסמים, מכירת שטחי פרסום ושירותים נלווים של המעסיק, תיעוד מלא של כל פנייה, שיחה ותוצאה במערכת המעסיק, קביעת פעולת המשך לכל ליד, ביצוע פולואפים, וכל משימה נוספת הקשורה לתפקיד שתוטל עליו מעת לעת.<br>העובד יפעל לפי נהלי המכירות של המעסיק, ישתמש במחירון ובהצעות המאושרים בלבד, ולא ייתן ללקוח הנחה, תנאי תשלום או התחייבות חריגה ללא אישור מראש מהמעסיק.` + (Number(c.weekly_target) ? `<br>יעד המכירות השבועי של העובד הוא <b>לפחות ${n(c.weekly_target)} ₪</b> (לפי בסיס חישוב העמלה שבסעיף העמלות). העמידה ביעד תיבחן במסגרת המשוב והמעקב השוטפים.` : '')],
+    ['תחילת העבודה ותקופת ניסיון', `העסקת העובד מתחילה ביום <b>${blank(heDate(p.start_date))}</b> והיא לתקופה בלתי קצובה.` + (trial ? ` תקופת הניסיון היא ${trial} מיום תחילת העבודה, ובמהלכה רשאי כל צד לסיים את ההעסקה בהודעה מוקדמת כקבוע בדין.` : '')],
+    ['היקף המשרה ושעות העבודה', `${esc(c.scope)}. העובד ידווח על שעות עבודתו בשעון הנוכחות של המעסיק בכל יום עבודה. שעות נוספות יבוצעו רק באישור מראש של המעסיק וישולמו לפי חוק שעות עבודה ומנוחה. בסוף כל יום עבודה ימסור העובד דיווח פעילות כנדרש בנהלי המעסיק.`],
+    ['שכר יסוד', `בעבור כל שעת עבודה ישולם לעובד שכר של <b>${n(c.hourly)} ₪ ברוטו</b>. השכר ישולם עד ה-${Math.min(Number(c.pay_day) || 9, 9)} בכל חודש בעבור החודש הקודם, בצירוף תלוש שכר.`],
+    ['עמלות מכירה', p.comp_mode === 'pct' ? shPctCommissionText(p, a, basis, n(c.tail_days)) : `בנוסף לשכר היסוד תשולם לעובד עמלה חודשית. ${mode}<ul>${shTiersText(c).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${basis}${Number(c.bonus_amount) ? `<br>בנוסף, בכל חודש שבו סך המכירות של העובד (לפי אותו בסיס חישוב) יגיע ל-${n(c.bonus_threshold)} ₪ ומעלה, ישולם לו בונוס של <b>${n(c.bonus_amount)} ₪ ברוטו</b>.` : ''}${Number(c.bonus_amount) ? '<br>העמלה והבונוס ישולמו יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות להם, ויפורטו בתלוש השכר.' : '<br>העמלה תשולם יחד עם השכר של החודש שלאחר החודש שבו קמה הזכאות לה, ותפורט בתלוש השכר.'} עסקה המיוחסת ליותר מעובד אחד תחולק לפי החלטת המעסיק שתימסר מראש. בעד עסקאות שנסגרו על ידי העובד לפני סיום ההעסקה ונגבו עד ${n(c.tail_days)} ימים לאחר סיומה — תשולם עמלה לפי סעיף זה.`],
+    ['לידים ושיוך לקוחות', shLeadOwnershipText()],
+    ['זכויות סוציאליות', 'העובד יהיה זכאי לכל הזכויות על פי דין, ובכלל זה: הפרשות לפנסיה ולפיצויי פיטורים לפי צו ההרחבה לביטוח פנסיוני מקיף במשק, ימי חופשה לפי חוק חופשה שנתית, דמי מחלה לפי חוק דמי מחלה, דמי הבראה, החזר הוצאות נסיעה לעבודה וימי חג — הכול לפי הדין וצווי ההרחבה החלים, ובהתאם להיקף משרתו.'],
+    ['סודיות ומאגר הלקוחות', 'מאגר הלקוחות, הלידים, המחירונים, תנאי ההתקשרות עם לקוחות וכל מידע עסקי שיגיע לעובד במסגרת עבודתו הם רכוש המעסיק וסוד מסחרי שלו. העובד ישמור עליהם בסודיות מלאה במהלך העבודה ולאחריה, לא יעתיק, לא יוריד ולא יעביר אותם לאחר, ולא ישתמש בהם אלא לצורך עבודתו אצל המעסיק. העובד ישתמש רק בחשבון האישי שניתן לו במערכת, לא ישתף סיסמאות, וישמור על פרטיות הלקוחות לפי חוק הגנת הפרטיות.'],
+    ['ציוד ומסמכים', 'כל ציוד, חומר שיווקי, מסמך או הרשאת גישה שיימסרו לעובד יוחזרו למעסיק עם סיום ההעסקה, וגישתו למערכות המעסיק תיחסם.'],
+    ['סיום ההעסקה', 'כל צד רשאי לסיים את ההעסקה בהודעה מוקדמת בכתב, לפי חוק הודעה מוקדמת לפיטורים ולהתפטרות. המעסיק רשאי לוותר על עבודת העובד בתקופת ההודעה ולשלם לו את שכרו בעדה. עם סיום ההעסקה יועבר לעובד כל המגיע לו על פי דין והסכם זה.'],
+  ];
+  if ((c.extra || '').trim()) sec.push(['הוראות נוספות', esc(c.extra).replace(/\n/g, '<br>')]);
+  sec.push(['כללי', 'הסכם זה מהווה גם הודעה לעובד על תנאי עבודתו לפי חוק הודעה לעובד ולמועמד לעבודה (תנאי עבודה), התשס״ב-2002. ההסכם הוא אישי ואינו כפוף להסכם קיבוצי. כל שינוי בו ייעשה בכתב ובחתימת שני הצדדים. אין באמור בהסכם זה כדי לגרוע מזכות המגיעה לעובד על פי דין.']);
+
+  const inv = p.emp_type === 'invoice';
+  if (inv) sec = shInvoiceSections(sec, c, p, n, blank);
+
+  const w = win || window.open('', '_blank');
+  if (!w) { toast('הדפדפן חסם חלון קופץ — אפשרו חלונות קופצים לאתר ונסו שוב', true); return; }
+  let doc = `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>הסכם עבודה — ${esc(a.name)}</title>
+<style>
+body{font-family:'Segoe UI',Arial,sans-serif;max-width:760px;margin:0 auto;padding:36px 30px;color:#1c2438;font-size:14px;line-height:1.7}
+h1{color:@@COLOR_BRAND@@;font-size:22px;text-align:center;border-bottom:3px solid @@COLOR_GRAD@@;padding-bottom:8px;margin-bottom:4px}
+.logo{text-align:center;margin-bottom:6px}.logo img{height:90px}
+.sub{text-align:center;color:#64748b;margin-bottom:22px}
+.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.parties div{border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px}
+h3{font-size:15px;margin:16px 0 4px;color:@@COLOR_DARK@@}
+ul{margin:4px 0;padding-right:22px}
+.blank{display:inline-block;min-width:130px;border-bottom:1px solid #1c2438}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px}
+.sign div{border-top:1px solid #1c2438;padding-top:6px;text-align:center}
+.toolbar{text-align:center;margin-bottom:18px}
+.pg{width:100%;border-collapse:collapse}.pg td{padding:0}
+.bsd{text-align:right;font-size:12px;padding-bottom:10px}
+@media print{.toolbar{display:none}body{padding:0}}
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ הדפסה / שמירה כ-PDF</button></div>
+<table class="pg"><thead><tr><td><div class="bsd">בס"ד</div></td></tr></thead><tbody><tr><td>
+<div class="logo"><img src="${logo}" alt="${esc(employer)}" onerror="this.parentNode.remove()"></div>
+<h1>הסכם עבודה</h1>
+<div class="sub">שנערך ונחתם ביום ${heDate(today())}</div>
+<div class="parties">
+<div><b>המעסיק:</b> ${esc(employer)}<br>ח.פ / ע.מ: ${blank(c.employer_id)}<br>כתובת: ${blank(c.employer_address)}</div>
+<div><b>העובד:</b> ${esc(a.name)}<br>ת.ז: ${blank(p.id_number)}<br>כתובת: ${blank(p.address)}${a.phone ? '<br>טלפון: <span dir="ltr">' + esc(a.phone) + '</span>' : ''}</div>
+</div>
+<p>הואיל והמעסיק מעוניין להעסיק את העובד בתפקיד מכירות, והעובד מעוניין להיות מועסק על ידו — הוסכם בין הצדדים כדלקמן:</p>
+${sec.map(([t, b], i) => `<h3>${i + 1}. ${t}</h3><div>${b}</div>`).join('')}
+<p style="margin-top:22px">ולראיה באו הצדדים על החתום:</p>
+<div class="sign"><div>המעסיק${c.signer ? ' — ' + esc(c.signer) : ''}</div><div>העובד — ${esc(a.name)}</div></div>
+</td></tr></tbody></table>
+</body></html>`;
+  if (inv) doc = doc
+    .replace('<title>הסכם עבודה', '<title>הסכם התקשרות')
+    .replace('<h1>הסכם עבודה</h1>', '<h1>הסכם התקשרות למתן שירותים</h1>')
+    .replace('<br>ת.ז: ', '<br>ת.ז / ע.מ: ')
+    .replace(/<p>הואיל והמעסיק מעוניין להעסיק[^<]*<\/p>/, '<p>הואיל והמעסיק מעוניין לקבל מהעובד שירותי מכירה כעצמאי, והעובד מעוניין לספק לו שירותים אלה — הוסכם בין הצדדים כדלקמן:</p>');
+  if (p.gender === 'f') doc = shFem(doc);
+  if (inv) doc = shContractor(doc);
+  w.document.write(doc);
+  w.document.close();
+}
+
 async function shCopyMsg(i) {
   const m = shGet('messages')[i];
   try { await navigator.clipboard.writeText(m.body); toast('ההודעה הועתקה'); }
   catch (e) { openForm('בחרו והעתיקו את הנוסח', [{ name: 'body', label: m.title, type: 'textarea', rows: 14 }], { body: m.body }, async () => { }); }
+}
+
+/* ---------- שחרור לידים אוטומטי (מיגרציה 2026-11-03_lead_release) ---------- */
+function shLrCardHtml() {
+  const s = cache.settings || {};
+  const on = String(s.lead_release_enabled || '0') === '1';
+  const v = (k, d) => esc(String(s[k] != null && s[k] !== '' ? s[k] : d));
+  return `
+<b>♻️ שחרור לידים אוטומטי</b>
+<p class="muted" style="font-size:.82rem">ליד משויך שלא היה איתו קשר (שיחה, הערה, תיעוד) — יוצא מהשיוך ועובר למאגר, וכל סוכן יכול לתפוס אותו. ליד שפרסם נשאר אצל הסוכן לפי מספר הימים שלמטה מהפרסום האחרון. חל על לידים בלבד, לא על לקוחות. רץ כל לילה. דורש את המיגרציה 2026-11-03_lead_release.</p>
+<div class="grid2" style="margin-top:6px">
+<div class="field"><label>ימים בלי קשר עד שחרור</label><input id="shLrDays" type="number" min="1" value="${v('lead_release_days', 60)}" dir="ltr"></div>
+<div class="field"><label>ליד שפרסם — נשאר אצל הסוכן (ימים)</label><input id="shLrKeep" type="number" min="0" value="${v('lead_keep_advertiser_days', 120)}" dir="ltr"></div>
+</div>
+<label style="display:flex;gap:8px;align-items:center;margin-top:4px;cursor:pointer"><input id="shLrOn" type="checkbox" ${on ? 'checked' : ''} style="width:18px;height:18px"> שחרור אוטומטי פעיל</label>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+<button class="btn btn-sm" onclick="shLrSave()">💾 שמירה</button>
+<button class="btn btn-sm btn-ghost" onclick="shLrPreview()">👁 תצוגה מקדימה</button>
+<button class="btn btn-sm btn-ghost" onclick="shLrRunNow()">שחרור עכשיו</button>
+</div>
+${s.lead_release_last ? `<div class="muted" style="font-size:.78rem;margin-top:6px">הרצה אחרונה: ${esc(s.lead_release_last)} לידים</div>` : ''}
+<div id="shLrOut" style="margin-top:8px"></div>`;
+}
+
+async function shLrSave() {
+  const days = Number(document.getElementById('shLrDays').value), keep = Number(document.getElementById('shLrKeep').value);
+  const on = document.getElementById('shLrOn').checked;
+  if (!(days >= 1) || !(keep >= 0)) { toast('מספר ימים לא תקין', true); return; }
+  if (on && String(cache.settings.lead_release_enabled || '0') !== '1'
+    && !confirm('בהפעלה, בלילה הקרוב ישתחררו בבת אחת כל הלידים שעומדים בכלל.\nמומלץ קודם "תצוגה מקדימה". להפעיל?')) return;
+  const recs = [['lead_release_days', String(days)], ['lead_keep_advertiser_days', String(keep)], ['lead_release_enabled', on ? '1' : '0']];
+  await run(db.from('settings').upsert(recs.map(([key, value]) => ({ key, value }))), 'שמירת ההגדרות');
+  recs.forEach(([k, val]) => cache.settings[k] = val);
+  toast(on ? 'השחרור האוטומטי פעיל' : 'נשמר (השחרור האוטומטי כבוי)');
+}
+
+async function shLrPreview() {
+  const out = document.getElementById('shLrOut');
+  const { data, error } = await db.rpc('lead_release_candidates');
+  if (error) { out.innerHTML = '<p class="muted">לא ניתן לבדוק — ודאו שהורצה המיגרציה 2026-11-03_lead_release.sql ושההגדרות נשמרו.</p>'; return; }
+  const rows = data || [];
+  if (!rows.length) { out.innerHTML = '<p class="muted">אין כרגע לידים שישתחררו.</p>'; return; }
+  const leads = {};
+  try {
+    const r = await db.from('leads').select('id,name').in('id', rows.map(x => x.lead_id));
+    (r.data || []).forEach(l => leads[l.id] = l.name);
+  } catch (e) { }
+  out.innerHTML = `<b>${rows.length} לידים ישתחררו:</b>
+<div class="table-wrap" style="max-height:260px;overflow:auto;margin-top:6px"><table class="data"><thead><tr><th>ליד</th><th>סוכן</th><th>קשר אחרון</th></tr></thead><tbody>
+${rows.map(x => `<tr><td>${esc(leads[x.lead_id] || '#' + x.lead_id)}</td><td>${esc(nameOf('agents', x.agent_id))}</td><td>${heDate(localDay(x.last_contact))}</td></tr>`).join('')}
+</tbody></table></div>`;
+}
+
+async function shLrRunNow() {
+  if (!confirm('לשחרר עכשיו למאגר את כל הלידים שעומדים בכלל?')) return;
+  const { data, error } = await db.rpc('lead_release_stale', { p_force: true });
+  if (error) { toast('השחרור נכשל — ודאו שהורצה המיגרציה 2026-11-03_lead_release.sql', true); return; }
+  toast(`${data || 0} לידים שוחררו למאגר`);
+  await refreshCache();
+  const card = document.getElementById('shLrCard');
+  if (card) card.innerHTML = shLrCardHtml();
 }
 
 async function shToggleSave(on) {
@@ -470,6 +888,11 @@ async function shToggleSave(on) {
         const anchor = el.querySelector('#activityLog');
         const anchorCard = anchor ? anchor.closest('.card') : null;
         if (anchorCard) el.insertBefore(card, anchorCard); else el.appendChild(card);
+        const lr = document.createElement('div');
+        lr.className = 'card card-pad';
+        lr.id = 'shLrCard';
+        lr.innerHTML = shLrCardHtml();
+        el.insertBefore(lr, card.nextSibling);
       } catch (e) { console.error('sales hub settings card', e); }
       return r;
     };

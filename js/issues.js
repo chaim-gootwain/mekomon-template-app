@@ -430,9 +430,12 @@ price_item_id: rec.price_item_id || a.price_item_id || null,
 price: rec.price != null ? Number(rec.price) : (a.price || 0),
 discount: rec.discount != null ? Number(rec.discount) : (a.discount || 0),
 page_number: rec.page_number != null ? (Number(rec.page_number) || null) : a.page_number,
-deal_stage: rec.deal_stage || null,
 requested_placement: rec.requested_placement || null,
 };
+// שלב העסקה נשמר רק אם שונה בטופס: הפלטפלן מחזיק את המודעות בזיכרון, והפקה
+// מ"חיוב הגיליון" מסמנת "חשבונית הופקה" במסד — כתיבה עיוורת של הערך הישן
+// מחקה את הסימון, ובפרסום נפתח למודעה חיוב כפול.
+if ((rec.deal_stage || null) !== (a.deal_stage || null)) upd.deal_stage = rec.deal_stage || null;
 // שינוי הסטטוס (שובץ/אושר) נשמר גם במסד — לא רק בזיכרון, אחרת המודעה לא תחויב
 if (upd.page_number && a.status === 'approved') upd.status = 'placed';
 if (!upd.page_number && a.status === 'placed') upd.status = 'approved';
@@ -537,7 +540,9 @@ window.fpMarkInvoiced = async function (id) {
 if (!['admin', 'editor'].includes(profile.role)) return;
 const a = (typeof _fpAds !== 'undefined') ? _fpAds.find(x => x.id === id) : null; if (!a) return;
 let next;
-if (a.deal_stage === 'paid') { toast('המודעה כבר מסומנת כשולם'); return; }
+// המצב העדכני מהמסד (ההפקה אולי סימנה מאז שהפלטפלן נטען)
+try { const { data: cur } = await db.from('ads').select('deal_stage').eq('id', id).single(); if (cur) a.deal_stage = cur.deal_stage; } catch (e) { }
+if (a.deal_stage === 'paid') { toast('המודעה כבר מסומנת כשולם'); if (typeof _fpPaint === 'function') _fpPaint(); return; }
 next = (a.deal_stage === 'invoiced') ? null : 'invoiced';
 const up = await db.from('ads').update({ deal_stage: next }).eq('id', id);
 if (up.error) { toast('שגיאה: ' + up.error.message, true); return; }
