@@ -63,15 +63,7 @@ location.reload();
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
 const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
-/* portal_token הוא מפתח הכניסה של הלקוח לפורטל — מי שמחזיק אותו מגיש מודעות בשם הלקוח.
-   רק מנהל ואנשי מכירות צריכים אותו (קישור הפורטל בכרטיס הלקוח); לשאר התפקידים מוסרים
-   אותו משורות שנטענו עם select('*'), כדי שלא יישב בזיכרון הדפדפן ולא יוצג בשום מקום */
 const custCanPortal = () => ['admin', 'sales'].includes(profile.role);
-function custSafe(rows) {
-if (custCanPortal() || !rows) return rows;
-(Array.isArray(rows) ? rows : [rows]).forEach(r => { if (r) delete r.portal_token; });
-return rows;
-}
 
 /* שליפת portal_token דרך RPC מאובטח — מחזיר null לתפקידים שלא מורשים */
 async function custPortalToken(id) {
@@ -81,14 +73,17 @@ if (error) { console.error('custPortalToken', error); return null; }
 return data || null;
 }
 
+/* כל עמודות הלקוח חוץ מ-portal_token (נשלף דרך custPortalToken בלבד) */
+const _custAllCols = 'id,name,agent_id,phone,email,whatsapp,business_id,invoice_name,order_doc_type,payment_terms,agency_id,regular_advertiser,status,status_reason,fixed_discount,became_customer_at,city,field,contact_person,contacts,credit_limit,crm_status,notes,tags,mailing_list,created_at,updated_at';
+
 /* טעינת לקוח מלא. שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
    custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
 async function custLoadAll() {
-return custSafe(await runAll((f, t) => db.from('customers').select('*').order('name').order('id').range(f, t)));
+return await runAll((f, t) => db.from('customers').select(_custAllCols).order('name').order('id').range(f, t));
 }
 async function custLoad(id, { required = false } = {}) {
-const q = db.from('customers').select('*').eq('id', id);
-return custSafe(required ? await run(q.single()) : (await run(q.limit(1)))[0]);
+const q = db.from('customers').select(_custAllCols).eq('id', id);
+return required ? await run(q.single()) : (await run(q.limit(1)))[0];
 }
 
 async function refreshCache() {
