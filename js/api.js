@@ -63,7 +63,7 @@ location.reload();
 /* ---------- 2. מטמון רשימות (לתפריטים נפתחים) ---------- */
 const cache = { customers: [], agents: [], agencies: [], issues: [], priceList: [], sections: [], profiles: [], settings: {} };
 
-const custCanPortal = () => ['admin', 'sales'].includes(profile.role);
+const custCanPortal = () => ['admin', 'manager', 'sales'].includes(profile.role);
 
 /* שליפת portal_token דרך RPC מאובטח — מחזיר null לתפקידים שלא מורשים */
 async function custPortalToken(id) {
