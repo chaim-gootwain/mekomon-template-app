@@ -298,17 +298,12 @@ clearTimeout(el._suggestTimer);
 el._suggestTimer = setTimeout(async () => {
 const suggestions = await f.getSuggestions(el.value.trim());
 suggestDiv.innerHTML = suggestions.length
-? `<div style="padding:8px;background:#f5f5f5;border-radius:4px;border-left:3px solid #d35400">` +
-  suggestions.slice(0, 5).map(s => `<div style="padding:4px 0;cursor:pointer" data-val="${esc(s)}">${esc(s)}</div>`).join('') +
+? `<div style="padding:8px;background:#fff7ed;border-radius:4px;border-inline-start:3px solid #d35400;font-size:0.85rem">` +
+  `<div style="font-weight:600;color:#9a3412;margin-bottom:4px">⚠️ שם דומה קיים במערכת</div>` +
+  suggestions.slice(0, 5).map(s => `<div style="padding:2px 0;color:#7c2d12">${esc(s)}</div>`).join('') +
   `</div>`
 : '';
 }, 300);
-});
-suggestDiv.addEventListener('click', e => {
-const item = e.target.closest('[data-val]');
-if (!item) return;
-el.value = item.dataset.val;
-suggestDiv.innerHTML = '';
 });
 }
 });

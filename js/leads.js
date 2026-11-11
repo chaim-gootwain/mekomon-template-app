@@ -436,6 +436,27 @@ function leadQuickAdd() {
     toast('הליד נוסף — ' + heDateTime(data.created_at));
     openPage('leads');
   });
+  // התראה בזמן אמת לטלפון כפול - מחכה שה-DOM יהיה מוכן
+  setTimeout(() => {
+    const phoneEl = document.getElementById('f_phone');
+    if (!phoneEl) return;
+    const warnDiv = document.createElement('div');
+    warnDiv.id = 'phone_dup_warn';
+    phoneEl.parentNode.appendChild(warnDiv);
+    phoneEl.addEventListener('input', () => {
+      clearTimeout(phoneEl._warnTimer);
+      phoneEl._warnTimer = setTimeout(async () => {
+        const phone = phoneEl.value.trim();
+        if (phone.replace(/\D/g, '').length < 7) { warnDiv.innerHTML = ''; return; }
+        const dups = await db.rpc('check_duplicate_phone', { p_phone: phone }).then(r => r.data || []).catch(() => []);
+        if (!dups.length) { warnDiv.innerHTML = ''; return; }
+        const d = dups[0];
+        const kind = d.kind === 'lead' ? 'ליד' : 'לקוח';
+        const who = d.mine ? 'אצלך' : (d.unassigned ? 'במאגר ללא שיוך' : 'אצל סוכן אחר');
+        warnDiv.innerHTML = `<div style="margin-top:4px;padding:8px;background:#fff7ed;border-radius:4px;border-inline-start:3px solid #d35400;font-size:0.85rem">⚠️ הטלפון כבר קיים: ${kind} "<b>${esc(d.name)}</b>" ${who}</div>`;
+      }, 300);
+    });
+  }, 0);
 }
 
 /* --- כרטיס ליד מלא: פרטים + ציר זמן + פעולות --- */
