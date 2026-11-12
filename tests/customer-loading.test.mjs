@@ -20,6 +20,7 @@ const T = ctx.__t;
 const ROWS = Array.from({ length: 2500 }, (_, i) => ({ id: i + 1, name: 'לקוח ' + (i + 1), portal_token: 'tok-' + (i + 1) }));
 const fresh = () => ROWS.map(r => ({ ...r }));
 const rpcCalls = [];
+let MISSING = []; // עמודות שלא קיימות ב"מסד" (כמו updated_at בעמנואל)
 function project(rows, cols) {
   if (!cols || cols === '*') return rows;
   const keep = cols.split(',').map(c => c.trim());
@@ -36,8 +37,13 @@ function fakeDb() {
     from(table) {
       assert.strictEqual(table, 'customers');
       const q = { rows: fresh() };
-      const done = (data, error = null) => Promise.resolve({ data, error });
-      q.select = (cols) => { q.cols = cols; return q; };
+      const done = (data, error = null) => Promise.resolve(q.err ? { data: null, error: q.err } : { data, error });
+      q.select = (cols) => {
+        q.cols = cols;
+        const miss = (cols || '').split(',').map(c => c.trim()).find(c => MISSING.includes(c));
+        if (miss) q.err = { message: `column customers.${miss} does not exist`, code: '42703' };
+        return q;
+      };
       q.order = () => q;
       q.eq = (col, v) => { q.rows = q.rows.filter(r => r[col] === v); return q; };
       q.range = (f, t) => done(project(q.rows.slice(f, t + 1), q.cols));
@@ -88,6 +94,26 @@ for (const role of ['editor', 'graphics']) {
     assert.strictEqual(rpcCalls.length, 0);
   });
 }
+
+await t('עמודה שחסרה במסד של המופע (updated_at): הטעינה עובדת בלעדיה, בלי הודעת שגיאה', async () => {
+  // סקריפט api.js נטען מחדש — המטמון של רשימת העמודות הוא לכל סשן
+  const ctx2 = vm.createContext({
+    console: { ...console, warn() { } }, setTimeout, document: stub, window: stub, location: stub, navigator: stub, supabase: stub,
+    localStorage: { getItem: () => null, setItem() { } },
+  });
+  vm.runInContext(src + '\n;globalThis.__t = { custLoad, custLoadAll, setProfile: (p) => { profile = p; }, setDb: (d) => { db = d; }, setToast: (f) => { toast = f; } };', ctx2);
+  const T2 = ctx2.__t;
+  MISSING = ['updated_at', 'mailing_list'];
+  const t2 = [];
+  T2.setDb(fakeDb()); T2.setToast((m) => t2.push(m)); T2.setProfile({ role: 'admin' });
+  try {
+    const all = await T2.custLoadAll();
+    assert.strictEqual(all.length, 2500);
+    assert.strictEqual((await T2.custLoad(7)).name, 'לקוח 7');
+    assert.strictEqual((await T2.custLoad(7, { required: true })).id, 7);
+    assert.strictEqual(t2.length, 0, 'בלי toast שגיאה');
+  } finally { MISSING = []; }
+});
 
 await t('לקוח שלא קיים: בלי required מחזיר undefined, בלי שגיאה', async () => {
   T.setProfile({ role: 'editor' });

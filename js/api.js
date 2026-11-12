@@ -78,11 +78,30 @@ const _custAllCols = 'id,name,agent_id,phone,email,whatsapp,business_id,invoice_
 
 /* טעינת לקוח מלא. שאילתות שבוחרות עמודות ספציפיות (id,name,phone וכו') לא צריכות לעבור כאן.
    custLoad: בלי required מחזיר undefined כשאין לקוח כזה; עם required — שגיאה (toast) כמו .single() */
+/* העמודות שקיימות בפועל במופע: עמודה מהרשימה שעוד לא קיימת במסד של מופע מסוים
+   (למשל updated_at בעמנואל) הפילה את כל טעינת הלקוח — "column customers.X does not exist".
+   בדיקה שקטה אחת לסשן (בלי toast): מורידים עמודות חסרות ומשתמשים בשאר. */
+let _custColsReady = null;
+function _custCols() {
+if (!_custColsReady) _custColsReady = (async () => {
+let cols = _custAllCols.split(',');
+for (let i = 0; i < cols.length; i++) {
+const { error } = await db.from('customers').select(cols.join(',')).limit(1);
+const m = error && /column customers\.(\w+) does not exist/i.exec(error.message || '');
+if (!m || !cols.includes(m[1])) break;
+console.warn('custLoad: העמודה customers.' + m[1] + ' לא קיימת במופע — נטענת בלעדיה');
+cols = cols.filter(c => c !== m[1]);
+}
+return cols.join(',');
+})().catch(() => _custAllCols);
+return _custColsReady;
+}
 async function custLoadAll() {
-return await runAll((f, t) => db.from('customers').select(_custAllCols).order('name').order('id').range(f, t));
+const cols = await _custCols();
+return await runAll((f, t) => db.from('customers').select(cols).order('name').order('id').range(f, t));
 }
 async function custLoad(id, { required = false } = {}) {
-const q = db.from('customers').select(_custAllCols).eq('id', id);
+const q = db.from('customers').select(await _custCols()).eq('id', id);
 return required ? await run(q.single()) : (await run(q.limit(1)))[0];
 }
 
