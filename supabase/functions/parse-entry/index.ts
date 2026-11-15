@@ -148,6 +148,16 @@ function normalizeParsed(p) {
   ];
   return out;
 }
+/* שגיאת Anthropic → הודעה ברורה בעברית (במקום ה-JSON הטכני באנגלית) */
+function aiErrHe(status, text) {
+  const t = String(text || '');
+  if (/credit balance is too low/i.test(t)) return 'נגמר הקרדיט של שירות ה-AI (Anthropic) — צריך לטעון קרדיט בחשבון: console.anthropic.com ← Settings ← Billing';
+  if (status === 401 || /invalid x-api-key|authentication_error/i.test(t)) return 'מפתח ה-AI ‏(ANTHROPIC_API_KEY) לא תקין או בוטל — צריך לעדכן אותו ב-Supabase';
+  if (status === 429) return 'מגבלת קצב של שירות ה-AI (429) — נסה שוב בעוד דקה';
+  if (status === 529 || /overloaded/i.test(t)) return 'שירות ה-AI עמוס כרגע (529) — נסה שוב בעוד כמה דקות';
+  return null;
+}
+
 Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: cors
@@ -225,7 +235,7 @@ Deno.serve(async (req)=>{
     });
     const rText = await r.text();
     if (!r.ok) return json({
-      error: 'שגיאת פענוח (' + r.status + ')',
+      error: aiErrHe(r.status, rText) || 'שגיאת פענוח (' + r.status + ')',
       detail: rText.slice(0, 300)
     }, 502);
     let resp;

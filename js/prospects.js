@@ -306,6 +306,8 @@ async function psExtract(b64) {
     }
     lastErr = (data && data.error) || (error && error.message) || 'שגיאה';
     if (data && /ANTHROPIC_API_KEY|אין הרשאה|לא מזוהה/.test(data.error || '')) break;
+    // נגמר הקרדיט — אין טעם להמשיך: עוצרים את כל הסריקה (לא רק את העמוד)
+    if (data && /קרדיט/.test(data.error || '')) { if (_psScan) _psScan.cancel = true; break; }
     // עומס / מגבלת קצב (429, 529) — מחכים יותר; שגיאה אחרת — המתנה קצרה
     const busy = /\((429|529|503)\)|overload|rate/i.test(lastErr + ' ' + ((data && data.detail) || ''));
     await new Promise(r => setTimeout(r, (busy ? 6000 : 1500) * (attempt + 1) + Math.random() * 1000));
