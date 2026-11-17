@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>הוספת לקוח חדש - מקומון</title>
+	<style>
+		* { box-sizing: border-box; }
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+			background: #f5f5f5;
+			padding: 2rem;
+			margin: 0;
+		}
+		.container {
+			max-width: 600px;
+			margin: 0 auto;
+			background: white;
+			border-radius: 8px;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+			padding: 2rem;
+		}
+		h1 {
+			text-align: center;
+			margin-bottom: 2rem;
+			color: #333;
+		}
+		.form-group {
+			margin-bottom: 1.5rem;
+		}
+		label {
+			display: block;
+			margin-bottom: 0.5rem;
+			font-weight: 500;
+			color: #333;
+		}
+		.hint {
+			font-size: 0.85rem;
+			color: #666;
+			margin-bottom: 0.5rem;
+			display: block;
+		}
+		.hint a {
+			color: #0066cc;
+			text-decoration: none;
+		}
+		.hint a:hover {
+			text-decoration: underline;
+		}
+		input, textarea, select {
+			width: 100%;
+			padding: 0.75rem;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+			font-family: inherit;
+			font-size: 1rem;
+			direction: ltr;
+		}
+		input:focus, textarea:focus, select:focus {
+			outline: none;
+			border-color: #0066cc;
+			box-shadow: 0 0 0 3px rgba(0,102,204,0.1);
+		}
+		textarea {
+			resize: none;
+			height: 80px;
+		}
+		.color-preview {
+			display: inline-block;
+			width: 40px;
+			height: 40px;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+			vertical-align: middle;
+			margin-right: 0.5rem;
+		}
+		.section-divider {
+			margin: 2rem 0;
+			padding: 2rem 0 0 0;
+			border-top: 2px solid #eee;
+		}
+		.section-title {
+			font-size: 1.1rem;
+			font-weight: 600;
+			margin: 1rem 0 1.5rem 0;
+			color: #333;
+		}
+		button {
+			width: 100%;
+			padding: 1rem;
+			background: #0066cc;
+			color: white;
+			border: none;
+			border-radius: 4px;
+			font-size: 1rem;
+			font-weight: 600;
+			cursor: pointer;
+			transition: background 0.2s;
+		}
+		button:hover {
+			background: #0052a3;
+		}
+		button:disabled {
+			background: #ccc;
+			cursor: not-allowed;
+		}
+		.error {
+			background: #fee;
+			color: #c00;
+			padding: 1rem;
+			border-radius: 4px;
+			margin-bottom: 1rem;
+			display: none;
+		}
+		.success {
+			background: #efe;
+			color: #060;
+			padding: 1rem;
+			border-radius: 4px;
+			margin-bottom: 1rem;
+			display: none;
+		}
+		.spinner {
+			display: inline-block;
+			width: 1rem;
+			height: 1rem;
+			border: 2px solid rgba(255,255,255,0.3);
+			border-top-color: white;
+			border-radius: 50%;
+			animation: spin 0.8s linear infinite;
+			margin-left: 0.5rem;
+		}
+		@keyframes spin {
+			to { transform: rotate(360deg); }
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>הוספת לקוח חדש</h1>
+
+		<div class="error" id="error"></div>
+		<div class="success" id="success"></div>
+
+		<form id="onboardForm">
+			<!-- פרטי עיתון -->
+			<div class="section-title">פרטי העיתון</div>
+
+			<div class="form-group">
+				<label for="paperName">שם העיתון *</label>
+				<input type="text" id="paperName" name="paperName" required>
+			</div>
+
+			<div class="form-group">
+				<label for="paperSub">סלוגן / תיאור קצר</label>
+				<input type="text" id="paperSub" name="paperSub">
+			</div>
+
+			<div class="form-group">
+				<label for="paperPhone">טלפון</label>
+				<input type="tel" id="paperPhone" name="paperPhone">
+			</div>
+
+			<div class="form-group">
+				<label for="paperEmail">דוא"ל</label>
+				<input type="email" id="paperEmail" name="paperEmail" required>
+			</div>
+
+			<div class="form-group">
+				<label for="region">אזור גיאוגרפי</label>
+				<select id="region" name="region">
+					<option value="">-- בחר אזור --</option>
+					<option value="north">צפון</option>
+					<option value="center">מרכז</option>
+					<option value="south">דרום</option>
+					<option value="coastal">חוף</option>
+				</select>
+			</div>
+
+			<!-- צבעים -->
+			<div class="section-title">צבעי המותג</div>
+
+			<div class="form-group">
+				<label for="colorBrand">צבע ראשי *</label>
+				<span class="color-preview" id="colorBrandPreview"></span>
+				<input type="color" id="colorBrand" name="colorBrand" value="#0066cc" required>
+			</div>
+
+			<div class="form-group">
+				<label for="colorDark">צבע כהה</label>
+				<span class="color-preview" id="colorDarkPreview"></span>
+				<input type="color" id="colorDark" name="colorDark" value="#333333">
+			</div>
+
+			<div class="form-group">
+				<label for="colorLight">צבע בהיר</label>
+				<span class="color-preview" id="colorLightPreview"></span>
+				<input type="color" id="colorLight" name="colorLight" value="#f5f5f5">
+			</div>
+
+			<div class="form-group">
+				<label for="colorBg">צבע רקע</label>
+				<span class="color-preview" id="colorBgPreview"></span>
+				<input type="color" id="colorBg" name="colorBg" value="#ffffff">
+			</div>
+
+			<!-- API Keys -->
+			<div class="section-title">API Keys וסודות</div>
+
+			<div class="form-group">
+				<label for="gmailAppPassword">סיסמת אפליקציית Gmail *</label>
+				<span class="hint">
+					🔒 לא סיסמת Gmail הרגילה.
+					<a href="https://myaccount.google.com/apppasswords" target="_blank">צור סיסמה חדשה כאן</a>
+					(דורש 2-Step Verification)
+				</span>
+				<input type="password" id="gmailAppPassword" name="gmailAppPassword" placeholder="xxxx xxxx xxxx xxxx" required>
+			</div>
+
+			<div class="form-group">
+				<label for="gmailUser">דוא"ל Gmail (השולח) *</label>
+				<input type="email" id="gmailUser" name="gmailUser" placeholder="example@gmail.com" required>
+			</div>
+
+			<div class="form-group">
+				<label for="ezcountApiKey">EZcount API Key</label>
+				<span class="hint">
+					כנס ל-<a href="https://www.ezcount.co.il" target="_blank">EZcount</a>
+					→ הגדרות → API → העתק מפתח
+				</span>
+				<input type="password" id="ezcountApiKey" name="ezcountApiKey">
+			</div>
+
+			<div class="form-group">
+				<label for="greeninvoiceKey">Greeninvoice API Key</label>
+				<span class="hint">
+					כנס ל-<a href="https://www.greeninvoice.co.il" target="_blank">Greeninvoice</a>
+					→ פרופיל → מפתחות API
+				</span>
+				<input type="password" id="greeninvoiceKey" name="greeninvoiceKey">
+			</div>
+
+			<div class="form-group">
+				<label for="greeninvoiceSecret">Greeninvoice Secret</label>
+				<input type="password" id="greeninvoiceSecret" name="greeninvoiceSecret">
+			</div>
+
+			<div class="form-group">
+				<label for="anthropicApiKey">Anthropic API Key *</label>
+				<span class="hint">
+					כנס ל-<a href="https://console.anthropic.com/api/keys" target="_blank">Anthropic Console</a>
+					→ צור מפתח API חדש
+				</span>
+				<input type="password" id="anthropicApiKey" name="anthropicApiKey" required>
+			</div>
+
+			<!-- הגדרות -->
+			<div class="section-title">הגדרות</div>
+
+			<div class="form-group">
+				<label for="vatRate">שיעור מע"מ (%)</label>
+				<input type="number" id="vatRate" name="vatRate" min="0" max="100" step="0.01" value="17" placeholder="17">
+			</div>
+
+			<div class="form-group">
+				<label for="pricingNotes">ערות מחירון (JSON)</label>
+				<span class="hint">דוגמה: {"basePrice": 100, "discount": 10}</span>
+				<textarea id="pricingNotes" name="pricingNotes" placeholder="{}"></textarea>
+			</div>
+
+			<button type="submit">יצירת לקוח חדש <span class="spinner" id="spinner" style="display: none;"></span></button>
+		</form>
+	</div>
+
+	<script>
+		const form = document.getElementById('onboardForm');
+		const colorInputs = ['colorBrand', 'colorDark', 'colorLight', 'colorBg'];
+		const errorDiv = document.getElementById('error');
+		const successDiv = document.getElementById('success');
+		const spinner = document.getElementById('spinner');
+
+		// Update color previews
+		colorInputs.forEach(id => {
+			const input = document.getElementById(id);
+			const preview = document.getElementById(id + 'Preview');
+			input.addEventListener('input', () => {
+				preview.style.background = input.value;
+			});
+			preview.style.background = input.value;
+		});
+
+		form.addEventListener('submit', async (e) => {
+			e.preventDefault();
+			errorDiv.style.display = 'none';
+			successDiv.style.display = 'none';
+
+			const data = new FormData(form);
+			const payload = Object.fromEntries(data);
+
+			// Validate JSON
+			if (payload.pricingNotes) {
+				try {
+					JSON.parse(payload.pricingNotes);
+				} catch (err) {
+					showError('ערות מחירון חייבות להיות JSON תקיף');
+					return;
+				}
+			}
+
+			spinner.style.display = 'inline-block';
+
+			try {
+				const response = await fetch('/api/onboard', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(payload)
+				});
+
+				if (!response.ok) {
+					const error = await response.json();
+					throw new Error(error.message || 'שגיאה בשרת');
+				}
+
+				const result = await response.json();
+				showSuccess('לקוח נוצר בהצלחה! סטטוס: ' + result.status);
+				form.reset();
+				colorInputs.forEach(id => {
+					document.getElementById(id + 'Preview').style.background = document.getElementById(id).value;
+				});
+			} catch (err) {
+				showError(err.message);
+			} finally {
+				spinner.style.display = 'none';
+			}
+		});
+
+		function showError(msg) {
+			errorDiv.textContent = msg;
+			errorDiv.style.display = 'block';
+		}
+
+		function showSuccess(msg) {
+			successDiv.textContent = msg;
+			successDiv.style.display = 'block';
+		}
+	</script>
+</body>
+</html>
