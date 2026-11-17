@@ -20,6 +20,33 @@ function json(body, status = 200) {
     }
   });
 }
+/* קובץ ה-PDF של מסמך חשבונאי. הקישור ש-EZcount שומר (pdf_link) מחזיר
+   דף HTML קטן שמפנה ב-JavaScript לקובץ האמיתי — הורדה ישירה צירפה את
+   ה-HTML בשם .pdf, והלקוח קיבל "מסמך שלא נפתח" (12.11.2026).
+   עוקבים אחרי ההפניה (רק לכתובות EZcount — לא פרוקסי לכל כתובת) ומחזירים
+   רק קובץ שמתחיל ב-%PDF; אחרת null. */
+async function fetchDocPdf(urls) {
+  for (const start of urls.filter(Boolean)) {
+    let u = String(start);
+    for (let hop = 0; hop < 3; hop++) {
+      let r;
+      try { r = await fetch(u); } catch (_e) { break; }
+      if (!r.ok) break;
+      const buf = new Uint8Array(await r.arrayBuffer());
+      const head = new TextDecoder("latin1").decode(buf.subarray(0, 1024));
+      if (head.includes("%PDF-")) return buf;
+      const txt = new TextDecoder().decode(buf.subarray(0, 20000));
+      const m = txt.match(/location(?:\.href)?\s*=\s*['"](https:\/\/[^'"]+)['"]/i) ||
+        txt.match(/http-equiv=["']?refresh["']?[^>]*url=([^"'>\s]+)/i);
+      if (!m) break;
+      let next;
+      try { next = new URL(m[1], u); } catch (_e) { break; }
+      if (next.protocol !== "https:" || !/(^|\.)ezcount\.co\.il$/i.test(next.hostname)) break;
+      u = next.toString();
+    }
+  }
+  return null;
+}
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") return new Response("ok", {
     headers: cors
@@ -82,7 +109,7 @@ Deno.serve(async (req)=>{
     // הפונקציה מורידה בעצמה את ה-PDF מהקישור השמור בטבלה — לא מקבלת
     // כתובות חופשיות מהדפדפן. כשל בהורדה מוחזר כשגיאה ברורה, בלי לשלוח.
     if (attach_document_id) {
-      const { data: doc } = await admin.from("documents").select("id,customer_id,doc_number,pdf_url")
+      const { data: doc } = await admin.from("documents").select("id,customer_id,doc_number,pdf_url,pdf_url_copy")
         .eq("id", Number(attach_document_id)).single();
       if (!doc || !doc.pdf_url || !/^https:\/\//.test(String(doc.pdf_url))) return json({
         ok: false, error: "no-doc-pdf", detail: "למסמך אין קובץ PDF זמין במערכת"
@@ -90,11 +117,12 @@ Deno.serve(async (req)=>{
       if (customer_id && doc.customer_id && Number(customer_id) !== Number(doc.customer_id)) return json({
         ok: false, error: "doc-mismatch", detail: "המסמך לא שייך ללקוח הזה"
       }, 400);
-      const pdfRes = await fetch(String(doc.pdf_url));
-      if (!pdfRes.ok) return json({
-        ok: false, error: "doc-fetch", detail: "הורדת ה-PDF נכשלה (" + pdfRes.status + ") — אפשר לשלוח קישור במקום"
+      const _copy = /^https:\/\//.test(String(doc.pdf_url_copy || "")) ? doc.pdf_url_copy : null;
+      const buf = await fetchDocPdf([doc.pdf_url, _copy]);
+      // לא שולחים קובץ שבור: אם לא התקבל PDF אמיתי — שגיאה ברורה, בלי מייל
+      if (!buf) return json({
+        ok: false, error: "doc-fetch", detail: "לא הצלחתי להוריד את קובץ ה-PDF של המסמך — המייל לא נשלח. אפשר לשלוח קישור למסמך במקום"
       }, 502);
-      const buf = new Uint8Array(await pdfRes.arrayBuffer());
       if (buf.length > 10 * 1024 * 1024) return json({
         ok: false, error: "doc-too-big", detail: "קובץ המסמך גדול מדי לצירוף"
       }, 400);

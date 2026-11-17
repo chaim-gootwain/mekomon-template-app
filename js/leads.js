@@ -71,6 +71,7 @@ Pages.leads = {
         <div class="actions">
           <input type="file" id="leadImportFile" class="hidden" accept=".xlsx,.xls,.csv" onchange="leadsImport()">
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('leadImportFile').click()">⬆ ייבוא מאקסל</button>
+          ${isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="leadsCustCleanup()" title="לידים שהטלפון או השם שלהם כבר קיימים אצל לקוח">🧹 לידים שכבר לקוחות</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="leadsSwitchView()">
             ${_leadsView === 'kanban' ? '☰ תצוגת טבלה' : '▦ תצוגת קנבן'}</button>
           <button class="btn" onclick="leadQuickAdd()">+ ליד חדש</button>
@@ -339,6 +340,15 @@ function _sameNameWords(a, b) {
   const x = leadNameWords(a), y = new Set(leadNameWords(b));
   return x.length > 0 && x.length === y.size && x.every(w => y.has(w));
 }
+/* לקוח בשם זהה — של כל סוכן (כולל שלי). מחזיר { name, agent } או null */
+async function customerSameName(name) {
+  const words = leadNameWords(name);
+  if (!words.length) return null;
+  const c = (await customersMatchingWords(words)).find(x => _sameNameWords(x.name, name));
+  return c ? { name: c.name, agent: c.agent || '' } : null;
+}
+/* מפתח שם להשוואה מהירה ברשימות גדולות — סט המילים, ממוין */
+function leadNameKey(n) { return leadNameWords(n).sort().join(' '); }
 async function otherAgentSameName(name) {
   const words = leadNameWords(name);
   if (!words.length) return null;
@@ -421,6 +431,12 @@ function leadQuickAdd() {
           throw new Error('duplicate-other-cancel');
         }
       }
+    }
+    /* כבר לקוח (שם זהה, של כל סוכן) — לא פותחים עליו ליד */
+    const _asCust = await customerSameName(rec.name);
+    if (_asCust) {
+      if (isSales()) { showOops(`"${esc(_asCust.name)}" כבר לקוח במערכת${_asCust.agent ? ' (אצל ' + esc(_asCust.agent) + ')' : ''}.<br><b>לא פותחים עליו ליד.</b>`); throw new Error('lead-is-customer'); }
+      if (!confirm(`"${_asCust.name}" כבר לקוח במערכת${_asCust.agent ? ' (אצל ' + _asCust.agent + ')' : ''}.\nלפתוח עליו ליד בכל זאת?`)) throw new Error('lead-is-customer-cancel');
     }
     /* שם זהה ללקוח/ליד של סוכן אחר — חסימה לסוכן (גם בטלפון אחר / בלי טלפון) */
     await crossAgentGuard({ name: rec.name }, 'ליד');
@@ -669,6 +685,64 @@ async function leadDelete(id) {
   } catch (e) { /* run shows the error */ }
 }
 
+/* ---------- ניקוי: לידים שכבר לקוחות (מנהל) ----------
+   ליד שהטלפון/וואטסאפ שלו זהה ללקוח (9 ספרות אחרונות) או ששמו זהה לשם לקוח
+   (אותן מילים, בלי בע"מ וכו'). לידים שהומרו ("נסגר ✓") לא נכללים — הם
+   ההיסטוריה של ההמרה. מוצגת רשימה לאישור; המחיקה דרך delete_lead (כמו מחיקה רגילה). */
+let _lcc = [];
+async function leadsCustCleanup() {
+  if (!isAdmin()) return;
+  toast('בודק לידים מול לקוחות...');
+  const [leads, custs] = await Promise.all([
+    runAll((f, t) => db.from('leads').select('id,name,phone,whatsapp,agent_id,status').neq('status', 'won').order('id').range(f, t)),
+    runAll((f, t) => db.from('customers').select('id,name,phone,whatsapp').order('id').range(f, t)),
+  ]);
+  const ph = p => String(p || '').replace(/\D/g, '').slice(-9);
+  const byPh = {}, byName = {};
+  custs.forEach(c => {
+    [c.phone, c.whatsapp].map(ph).filter(k => k.length === 9).forEach(k => { if (!byPh[k]) byPh[k] = c; });
+    const nk = leadNameKey(c.name); if (nk && !byName[nk]) byName[nk] = c;
+  });
+  _lcc = [];
+  leads.forEach(l => {
+    const k = [l.phone, l.whatsapp].map(ph).find(x => x.length === 9 && byPh[x]);
+    const c = k ? byPh[k] : byName[leadNameKey(l.name)];
+    if (c) _lcc.push({ l, c, why: k ? 'טלפון' : 'שם' });
+  });
+  const modal = document.getElementById('viewModal');
+  modal.innerHTML = `<h3>🧹 לידים שכבר קיימים כלקוח (${_lcc.length})</h3>
+    ${_lcc.length ? `<p class="muted" style="font-size:.85rem">סמן את מה למחוק. התאמה לפי <b>טלפון</b> בטוחה; לפי <b>שם</b> — כדאי לעבור (ייתכן עסק אחר באותו שם). לידים שהומרו ללקוח לא מופיעים כאן. המחיקה סופית, כולל ציר הזמן של הליד.</p>
+    <label style="font-size:.85rem;cursor:pointer"><input type="checkbox" checked onchange="document.querySelectorAll('.lccChk').forEach(x=>x.checked=this.checked)"> סמן הכל</label>
+    <div class="table-wrap" style="max-height:55vh;overflow:auto;margin-top:6px"><table class="data"><thead><tr><th></th><th>ליד</th><th>סוכן</th><th>סטטוס</th><th>לקוח קיים</th><th>לפי</th></tr></thead><tbody>
+    ${_lcc.map((x, i) => `<tr><td><input type="checkbox" class="lccChk" data-i="${i}" checked></td>
+      <td><b>${esc(x.l.name)}</b>${x.l.phone ? ` <span dir="ltr" class="muted">${esc(x.l.phone)}</span>` : ''}</td>
+      <td>${esc(nameOf('agents', x.l.agent_id)) || '<span class="muted">מאגר</span>'}</td>
+      <td>${pill('lead', x.l.status)}</td>
+      <td>${esc(x.c.name)}${x.c.phone ? ` <span dir="ltr" class="muted">${esc(x.c.phone)}</span>` : ''}</td>
+      <td>${x.why === 'טלפון' ? '<span class="pill green">טלפון</span>' : '<span class="pill amber">שם</span>'}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="muted">אין לידים שקיימים גם כלקוח 👍</p>'}
+    <div class="m-actions" style="margin-top:12px">
+      ${_lcc.length ? `<button class="btn btn-danger" id="lccRun" onclick="leadsCustCleanupRun()">🗑 מחיקת המסומנים</button>` : ''}
+      <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
+    </div>`;
+  document.getElementById('viewBack').classList.add('open');
+}
+async function leadsCustCleanupRun() {
+  const picked = [...document.querySelectorAll('.lccChk')].filter(x => x.checked).map(x => _lcc[Number(x.dataset.i)]);
+  if (!picked.length) { toast('לא סומן אף ליד', true); return; }
+  if (!confirm(`למחוק לצמיתות ${picked.length} לידים שכבר קיימים כלקוח?\nציר הזמן שלהם יימחק. הפעולה בלתי-הפיכה.`)) return;
+  const btn = document.getElementById('lccRun'); if (btn) btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (const x of picked) {
+    const { error } = await db.rpc('delete_lead', { p_lead_id: x.l.id });
+    if (error) { fail++; console.error('lcc delete', x.l.id, error); } else ok++;
+    if (btn) btn.textContent = `נמחקו ${ok} מתוך ${picked.length}...`;
+  }
+  document.getElementById('viewBack').classList.remove('open');
+  toast(`🗑 נמחקו ${ok} לידים${fail ? ` · ${fail} נכשלו (ראה קונסול)` : ''}`, !!fail);
+  openPage('leads');
+}
+
 /* ---------- ייבוא לידים מאקסל ----------
    עמודות: שם (חובה) · טלפון · אימייל · מקור · תחום · מתעניין · הערות · סוכן
    כפילות לפי טלפון (מול לידים ולקוחות) — מדולגת */
@@ -684,8 +758,9 @@ async function leadsImport() {
 
   const [exLeads, exCustomers] = await Promise.all([
     runAll((f, t) => db.from('leads').select('phone').order('id').range(f, t)),
-    runAll((f, t) => db.from('customers').select('phone').order('id').range(f, t)),
+    runAll((f, t) => db.from('customers').select('phone,name').order('id').range(f, t)),
   ]);
+  const custNames = new Set(exCustomers.map(c => leadNameKey(c.name)).filter(Boolean)); // כבר לקוח — לא ליד
   // נרמול טלפון (9 ספרות אחרונות) — 050-1234567 ו-0501234567 הם אותו מספר
   const _phKey = p => String(p || '').replace(/\D/g, '').slice(-9);
   const knownPhones = new Set([...exLeads, ...exCustomers].map(x => _phKey(x.phone)).filter(k => k.length >= 7));
@@ -698,6 +773,7 @@ async function leadsImport() {
     const phone = pickField(row, ['טלפון', 'נייד', 'פלאפון', 'סלולרי', 'phone']);
     const phKey = _phKey(phone);
     if (phKey.length >= 7 && knownPhones.has(phKey)) { skipped.push(name); continue; }
+    if (custNames.has(leadNameKey(name))) { skipped.push(name); continue; }
     toInsert.push({
       name, phone,
       email: pickField(row, ['אימייל', 'מייל', 'email']),

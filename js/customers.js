@@ -368,6 +368,7 @@ ${canWrite ? `<div class="cc-toolbar">
 <div class="cc-msep"></div>
 <button id="csBtn" class="btn" onclick="ccMenuClose();customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
 ${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<button class="btn" onclick="ccMenuClose();debtReminderSend(${id})">💬 שלח תזכורת חוב</button>` : ''}
+<button class="btn" onclick="ccMenuClose();custPayLinkOpen(${id})">💳 קישור לתשלום באשראי</button>
 </div>
 </div>
 <div class="cc-mwrap">
@@ -455,6 +456,108 @@ document.querySelectorAll('.cc-tab').forEach(t => t.classList.toggle('hidden', t
 }
 
 /* נירמול טלפון לפורמט בינ"ל לוואטסאפ */
+/* ---------- קישור לתשלום באשראי — מכרטיס הלקוח (מנהל וסוכן) ----------
+   אותה נקודת קצה של סוכן המקומון (/.netlify/functions/pay-link, דרך
+   mgrPayLinkMint): קישור קבוע לסליקה; אחרי תשלום הקבלה והרישום בכרטסת
+   אוטומטיים. סוכן — רק ללקוחות שלו (נאכף בשרת). מופע בלי סליקה → הודעה. */
+let _cpl = null;
+async function custPayLinkOpen(cid) {
+  if (!['admin', 'sales'].includes(profile.role)) return;
+  if (typeof mgrPayLinkMint !== 'function') { toast('קישורי תשלום לא זמינים במערכת הזו', true); return; }
+  toast('מכין קישור תשלום...');
+  let cust = null, r = null;
+  try {
+    const { data } = await db.from('customers').select('id,name,email,phone,whatsapp').eq('id', cid).limit(1);
+    cust = data && data[0];
+    if (cust) r = await mgrPayLinkMint(cid, 0, {});
+  } catch (e) { r = { err: 'יצירת הקישור נכשלה: ' + String(e && e.message || e).slice(0, 120) }; }
+  if (!cust) { toast('הלקוח לא נמצא', true); return; }
+  if (!r || r.err || !r.link) { toast((r && r.err) || 'יצירת הקישור נכשלה', true); return; }
+  const hasEmail = !!String(cust.email || '').trim(), hasPhone = !!String(cust.whatsapp || cust.phone || '').trim();
+  _cpl = { cid, cust, url: r.link.url, balance: Number(r.link.balance) || 0, fixed: 0, note: '', maxPay: Number(r.link.max_payments) || 0 };
+  const payOpts = '<option value="0">ברירת המחדל של המערכת</option>' +
+    Array.from({ length: 12 }, (_, i) => i + 1).map(n => `<option value="${n}">${n === 1 ? 'תשלום אחד (בלי תשלומים)' : 'עד ' + n + ' תשלומים'}</option>`).join('');
+  document.getElementById('cplOv')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'cplOv';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:16px';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:560px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:92vh;overflow:auto">
+    <h3 style="margin:0 0 10px">💳 קישור לתשלום — ${esc(cust.name)}</h3>
+    <div style="font-size:.85rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;margin-bottom:10px">
+      יתרה פתוחה כרגע: <b>${money(_cpl.balance) || '₪0'}</b>. בלי סכום — דף התשלום נפתח על כל היתרה בזמן הלחיצה.
+      אחרי התשלום הקבלה והרישום בכרטסת אוטומטיים — אין צורך לרשום ידנית.</div>
+    <div class="grid2">
+      <div class="field"><label>סכום בש"ח כולל מע"מ (ריק = כל היתרה)</label><input type="number" id="cplAmt" step="any" min="0" oninput="custPayLinkMsg()"></div>
+      <div class="field"><label>מקסימום תשלומים</label><select id="cplMax">${payOpts}</select></div>
+    </div>
+    <div class="field"><label>על מה התשלום (רק עם סכום; יודפס על המסמך)</label><input type="text" id="cplNote" maxlength="120" oninput="custPayLinkMsg()"></div>
+    <div class="grid2">
+      <div class="field"><label>ערוץ</label><select id="cplCh">
+        <option value="whatsapp" ${hasPhone ? '' : 'disabled'}>וואטסאפ${hasPhone ? '' : ' — אין טלפון בכרטיס'}</option>
+        <option value="email" ${hasEmail ? (hasPhone ? '' : 'selected') : 'disabled'}>מייל${hasEmail ? ' (' + esc(cust.email) + ')' : ' — אין בכרטיס'}</option>
+        <option value="copy" ${!hasPhone && !hasEmail ? 'selected' : ''}>העתקת הקישור בלבד</option>
+      </select></div>
+      <div class="field"><label>הקישור</label><input type="text" id="cplUrl" dir="ltr" readonly onclick="this.select()" value="${esc(_cpl.url)}"></div>
+    </div>
+    <div class="field"><label>נוסח ההודעה</label><textarea id="cplMsg" rows="5"></textarea></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="cplBtn" onclick="custPayLinkSend()">💳 שליחה</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('cplOv').remove()">ביטול</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  custPayLinkMsg();
+}
+function _cplText(url, amt, note) {
+  return 'שלום ' + (_cpl.cust.name || '') + ',\n' +
+    'לנוחיותך קישור לתשלום ' + (amt > 0 ? 'של ' + money(amt) + (note ? ' (' + note + ')' : '') : 'היתרה') + ' באשראי:\n' + url + '\n' +
+    (amt > 0 ? 'הקבלה נשלחת אוטומטית לאחר התשלום.\n' : 'הדף נפתח על היתרה הפתוחה נכון לרגע התשלום, והקבלה נשלחת אוטומטית.\n') +
+    'תודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@';
+}
+function custPayLinkMsg() {
+  if (!_cpl) return;
+  const amt = Number((document.getElementById('cplAmt') || {}).value) > 0 ? Number(document.getElementById('cplAmt').value) : 0;
+  const note = String((document.getElementById('cplNote') || {}).value || '').trim();
+  const box = document.getElementById('cplMsg');
+  if (box) box.value = _cplText(_cpl.url, amt, note);
+}
+async function custPayLinkSend() {
+  const s = _cpl; if (!s) return;
+  const btn = document.getElementById('cplBtn');
+  const amtRaw = document.getElementById('cplAmt').value;
+  const amt = amtRaw === '' || !(Number(amtRaw) > 0) ? 0 : Math.round(Number(amtRaw) * 100) / 100;
+  const note = amt > 0 ? String(document.getElementById('cplNote').value || '').trim().slice(0, 120) : '';
+  const maxNow = Number(document.getElementById('cplMax').value) || 0;
+  const ch = document.getElementById('cplCh').value;
+  let msg = String(document.getElementById('cplMsg').value || '').trim();
+  if (btn) { btn.disabled = true; btn.textContent = 'מכין...'; }
+  // סכום / הערה / תשלומים שונו → קישור חדש (ומחליפים אותו בהודעה)
+  if (amt !== s.fixed || note !== s.note || maxNow !== s.maxPay) {
+    const r = await mgrPayLinkMint(s.cid, amt, { note, max_payments: maxNow }).catch(e => ({ err: String(e && e.message || e).slice(0, 120) }));
+    if (r.err || !r.link) { if (btn) { btn.disabled = false; btn.textContent = '💳 שליחה'; } toast(r.err || 'יצירת הקישור נכשלה', true); return; }
+    msg = msg.split(s.url).join(r.link.url);
+    Object.assign(s, { url: r.link.url, fixed: amt, note, maxPay: maxNow, balance: Number(r.link.balance) || s.balance });
+    document.getElementById('cplUrl').value = s.url;
+  }
+  if (!msg.includes(s.url)) { if (btn) { btn.disabled = false; btn.textContent = '💳 שליחה'; } toast('נוסח ההודעה חייב לכלול את הקישור', true); return; }
+  try {
+    if (ch === 'email') {
+      const { data, error } = await db.functions.invoke('send-email', { body: { to: s.cust.email, subject: 'קישור לתשלום — @@PAPER_NAME@@', body: msg, customer_id: s.cid } });
+      if (error || !data || !data.ok) throw new Error((data && (data.detail || data.error)) || 'שליחת המייל נכשלה');
+    } else if (ch === 'whatsapp') {
+      window.open('https://wa.me/' + _ccIntl(s.cust.whatsapp || s.cust.phone) + '?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+    } else {
+      try { await navigator.clipboard.writeText(s.url); } catch (e) { }
+    }
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = '💳 שליחה'; } toast('נכשל: ' + String(e && e.message || e), true); return; }
+  const amtTxt = (s.fixed ? 'על סכום ' + money(s.fixed) : 'על כל היתרה') + (s.note ? ' — ' + s.note : '');
+  const chTxt = ch === 'email' ? 'מייל' : ch === 'whatsapp' ? 'וואטסאפ' : 'הועתק';
+  try { await addInteraction('customer', s.cid, '💳 קישור תשלום באשראי ' + amtTxt + ' (' + chTxt + ') — יתרה ' + money(s.balance)); } catch (e) { }
+  document.getElementById('cplOv')?.remove();
+  _cpl = null;
+  toast(ch === 'email' ? '✅ הקישור נשלח במייל' : ch === 'whatsapp' ? '✅ נפתח וואטסאפ עם הקישור — לחץ שם "שלח"' : '✅ הקישור הועתק');
+}
+
 function _ccIntl(p) { let s = String(p || '').replace(/\D/g, ''); if (s.startsWith('0')) s = '972' + s.slice(1); else if (!s.startsWith('972')) s = '972' + s; return s; }
 
 /* גודל מודעה כמילה (במקום שבר): "1/4" → "רבע עמוד". שם טקסטואלי נשמר כמו שהוא */

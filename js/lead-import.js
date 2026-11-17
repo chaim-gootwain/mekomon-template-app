@@ -152,7 +152,8 @@ async function liApplyMapping() {
   const phoneMap = {}; // מפתח טלפון → תיאור הרשומה הקיימת
   exCustomers.forEach(c => { const k = liPhKey(c.phone); if (liPhoneReal(k) && !phoneMap[k]) phoneMap[k] = 'לקוח "' + c.name + '"'; });
   exLeads.forEach(l => { const k = liPhKey(l.phone); if (liPhoneReal(k) && !phoneMap[k]) phoneMap[k] = 'ליד "' + l.name + '"'; });
-  const nameMap = {}; // מפתח שם → ליד קיים (השוואה משנית, רק מול לידים)
+  const nameMap = {}; // מפתח שם → לקוח/ליד קיים (לקוח קודם: מי שכבר לקוח לא נכנס כליד)
+  exCustomers.forEach(c => { const k = liNameKey(c.name); if (k && !nameMap[k]) nameMap[k] = 'לקוח "' + c.name + '"'; });
   exLeads.forEach(l => { const k = liNameKey(l.name); if (k && !nameMap[k]) nameMap[k] = 'ליד "' + l.name + '"'; });
 
   const seenPhones = {}, seenNames = {}; // כפילויות בתוך הקובץ עצמו

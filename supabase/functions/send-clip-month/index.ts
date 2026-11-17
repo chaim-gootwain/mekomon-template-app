@@ -14,6 +14,33 @@ function json(b, s = 200) {
     }
   });
 }
+/* קובץ ה-PDF של מסמך חשבונאי. הקישור ש-EZcount שומר (pdf_link) מחזיר
+   דף HTML קטן שמפנה ב-JavaScript לקובץ האמיתי — הורדה ישירה צירפה את
+   ה-HTML בשם .pdf, והלקוח קיבל "מסמך שלא נפתח" (12.11.2026).
+   עוקבים אחרי ההפניה (רק לכתובות EZcount — לא פרוקסי לכל כתובת) ומחזירים
+   רק קובץ שמתחיל ב-%PDF; אחרת null. */
+async function fetchDocPdf(urls) {
+  for (const start of urls.filter(Boolean)) {
+    let u = String(start);
+    for (let hop = 0; hop < 3; hop++) {
+      let r;
+      try { r = await fetch(u); } catch (_e) { break; }
+      if (!r.ok) break;
+      const buf = new Uint8Array(await r.arrayBuffer());
+      const head = new TextDecoder("latin1").decode(buf.subarray(0, 1024));
+      if (head.includes("%PDF-")) return buf;
+      const txt = new TextDecoder().decode(buf.subarray(0, 20000));
+      const m = txt.match(/location(?:\.href)?\s*=\s*['"](https:\/\/[^'"]+)['"]/i) ||
+        txt.match(/http-equiv=["']?refresh["']?[^>]*url=([^"'>\s]+)/i);
+      if (!m) break;
+      let next;
+      try { next = new URL(m[1], u); } catch (_e) { break; }
+      if (next.protocol !== "https:" || !/(^|\.)ezcount\.co\.il$/i.test(next.hostname)) break;
+      u = next.toString();
+    }
+  }
+  return null;
+}
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") return new Response("ok", {
     headers: cors
@@ -163,15 +190,13 @@ Deno.serve(async (req)=>{
               const { data: _docRows } = await admin.from("documents").select("pdf_url").eq("pdf_url", String(invoice.pdf_url)).limit(1);
               _pu = _docRows && _docRows[0] && _docRows[0].pdf_url || null;
             }
-            if (_pu) {
-              const _pr = await fetch(_pu);
-              if (_pr.ok) {
-                const _pb = new Uint8Array(await _pr.arrayBuffer());
-                let _ps = "";
-                for(let i = 0; i < _pb.length; i += _CH)_ps += String.fromCharCode.apply(null, _pb.subarray(i, i + _CH));
-                _invB64 = btoa(_ps);
-                _invFname = "חשבונית_" + (invoice.doc_number || "") + ".pdf";
-              }
+            // רק PDF אמיתי (EZcount מחזיר דף הפניה) — אחרת לא מצרפים חשבונית שבורה
+            const _pb = _pu ? await fetchDocPdf([_pu]) : null;
+            if (_pb) {
+              let _ps = "";
+              for(let i = 0; i < _pb.length; i += _CH)_ps += String.fromCharCode.apply(null, _pb.subarray(i, i + _CH));
+              _invB64 = btoa(_ps);
+              _invFname = "חשבונית_" + (invoice.doc_number || "") + ".pdf";
             }
           }
         } catch (_e) {}
