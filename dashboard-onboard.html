@@ -309,18 +309,21 @@
 				return;
 			}
 
-			tbody.innerHTML = customers.map(customer => `
+			tbody.innerHTML = customers.map(customer => {
+				const statusClass = /^[a-z-]+$/.test(customer.status) ? customer.status : '';
+				return `
 				<tr>
 					<td>${escapeHtml(customer.paperName)}</td>
 					<td>${escapeHtml(customer.paperEmail)}</td>
-					<td><span class="status ${customer.status}">${getStatusLabel(customer.status)}</span></td>
+					<td><span class="status ${statusClass}">${getStatusLabel(customer.status)}</span></td>
 					<td>${formatDate(customer.createdAt)}</td>
 					<td class="action">
-						${customer.status !== 'completed' ? `<button class="run" onclick="showRunModal('${customer.id}')">הרץ</button>` : ''}
-						<button class="details" onclick="showDetailsModal('${customer.id}')">פרטים</button>
+						${customer.status !== 'completed' ? `<button class="run" onclick="showRunModal('${escapeHtml(customer.id)}')">הרץ</button>` : ''}
+						<button class="details" onclick="showDetailsModal('${escapeHtml(customer.id)}')">פרטים</button>
 					</td>
 				</tr>
-			`).join('');
+			`;
+			}).join('');
 		}
 
 		function getStatusLabel(status) {
@@ -398,7 +401,7 @@
 					throw new Error('שגיאה בהרצה');
 				}
 
-				// Stream logs
+				// Stream logs (textContent מונע XSS מתגובה שרת שמכילה ערכים מ-DB)
 				const reader = response.body.getReader();
 				const decoder = new TextDecoder();
 
@@ -406,13 +409,18 @@
 					const { done, value } = await reader.read();
 					if (done) break;
 					const text = decoder.decode(value);
-					logDiv.innerHTML += text;
+					const line = document.createElement('div');
+					line.textContent = text;
+					logDiv.appendChild(line);
 					logDiv.scrollTop = logDiv.scrollHeight;
 				}
 
 				await loadCustomers();
 			} catch (err) {
-				logDiv.innerHTML += `<div style="color: red;">❌ ${err.message}</div>`;
+				const errDiv = document.createElement('div');
+				errDiv.style.color = 'red';
+				errDiv.textContent = '❌ ' + err.message;
+				logDiv.appendChild(errDiv);
 			} finally {
 				spinner.style.display = 'none';
 			}
