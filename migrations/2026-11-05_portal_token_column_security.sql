@@ -10,15 +10,22 @@
 begin;
 
 -- שלב 1: הסרת GRANT גורף על הטבלה, החלפה בעמודות מפורשות (ללא portal_token)
+-- תיקון 18.11.2026: הגרסה הקודמת העניקה רשימת עמודות קבועה. היא נכשלה (updated_at לא קיימת
+-- ב-customers ⇒ כל המיגרציה בוטלה ולא רצה באף מופע), וגם הייתה חסרה עמודות שהקוד קורא
+-- (field, contact_role ...). עכשיו: מוענקות כל העמודות הקיימות חוץ מ-portal_token.
+-- ⚠️ עמודה חדשה שתתווסף ל-customers בעתיד לא תהיה קריאה אוטומטית — מיגרציה שמוסיפה עמודה
+--    ל-customers צריכה גם: grant select (<עמודה>) on public.customers to authenticated;
+--    (או להריץ שוב את הקובץ הזה — הוא idempotent).
 revoke select on public.customers from authenticated;
-grant select (
-  id, name, agent_id, phone, email, whatsapp,
-  business_id, invoice_name, order_doc_type, payment_terms,
-  agency_id, regular_advertiser, status, status_reason, fixed_discount,
-  became_customer_at, city, contact_person, contacts,
-  credit_limit, crm_status, notes, tags, mailing_list,
-  created_at, updated_at
-) on public.customers to authenticated;
+do $grant$
+declare cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into cols
+  from information_schema.columns
+  where table_schema = 'public' and table_name = 'customers' and column_name <> 'portal_token';
+  execute format('grant select (%s) on public.customers to authenticated', cols);
+end
+$grant$;
 
 -- שלב 2: פונקציה מאובטחת להחזרת portal_token למורשים בלבד
 create or replace function public.get_customer_portal_token(p_customer_id int)

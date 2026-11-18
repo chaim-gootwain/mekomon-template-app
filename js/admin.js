@@ -357,7 +357,9 @@ const tables = ['customers', 'leads', 'agents', 'ads', 'issues', 'articles', 'ch
 const failed = [], empty = [];
 for (const t of tables) {
 let data;
-try { data = await runAll((f, to) => db.from(t).select('*').order('id').range(f, to), 'שגיאה בגיבוי ' + t); }
+// customers: בלי portal_token (העמודה חסומה לקריאה ישירה)
+const _cols = t === 'customers' ? await _custCols() : '*';
+try { data = await runAll((f, to) => db.from(t).select(_cols).order('id').range(f, to), 'שגיאה בגיבוי ' + t); }
 catch (e) { failed.push(t); continue; }
 if (!data.length) { empty.push(t); continue; }
 const headers = Object.keys(data[0]);

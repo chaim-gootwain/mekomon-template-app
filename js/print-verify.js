@@ -381,7 +381,7 @@ function _pvNewAdNewCust(){
     { name:'name', label:'שם העסק', required:true, default:pre },
     { name:'phone', label:'טלפון', dir:'ltr' }
   ], {}, async function(rec){
-    var data=await run(db.from('customers').insert(rec).select().single());
+    var data=await run(db.from('customers').insert(rec).select(await _custCols()).single());
     try{ await addInteraction('customer', data.id, 'הלקוח נוצר (מאימות גיליון מול מודפס)'); }catch(e){}
     toast('✓ לקוח נוסף');
     await done(data);
