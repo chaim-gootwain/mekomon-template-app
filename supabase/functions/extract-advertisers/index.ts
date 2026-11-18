@@ -14,7 +14,10 @@ function json(body: unknown, status = 200) {
 }
 
 const API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
-const MODEL = Deno.env.get('PROSPECT_MODEL') || Deno.env.get('INVOICE_PARSE_MODEL') || 'claude-sonnet-5-5';
+// Haiku (18.11.2026, חיסכון בקרדיט): הסריקה שולחת עמוד-עמוד, וקובץ של 160+ עמודים
+// על Sonnet יקר. PROSPECT_MODEL גובר (למשל claude-sonnet-5-5 אם האיכות לא מספיקה).
+// בכוונה בלי נפילה ל-INVOICE_PARSE_MODEL — שלא תחזיר את הסריקה למודל היקר בשקט.
+const MODEL = Deno.env.get('PROSPECT_MODEL') || 'claude-haiku-5-5';
 const MAX_IMAGE_B64 = 7_000_000; // ~5MB תמונה
 
 const SIZES = ['full', 'half', 'third', 'quarter', 'eighth', 'strip', 'small', 'classified'];
@@ -171,7 +174,11 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 8000,
-        system: buildSystem(paperName, region, contentRules),
+        // חילוץ פשוט — מאמץ נמוך (פחות טוקני חשיבה)
+        output_config: { effort: 'low' },
+        // ההוראות זהות בכל עמודי הקובץ → נשמרות במטמון: מחיר מלא פעם אחת,
+        // ובשאר העמודים (בתוך 5 דקות) קריאה מהמטמון בעלות זעירה
+        system: [{ type: 'text', text: buildSystem(paperName, region, contentRules), cache_control: { type: 'ephemeral' } }],
         messages: [{
           role: 'user',
           content: [
@@ -184,6 +191,7 @@ Deno.serve(async (req: Request) => {
     const rText = await r.text();
     if (!r.ok) return json({ error: aiErrHe(r.status, rText) || 'שגיאת זיהוי (' + r.status + ')', detail: rText.slice(0, 300) }, 502);
     let resp: any; try { resp = JSON.parse(rText); } catch (_) { resp = {}; }
+    if (resp.stop_reason === 'refusal') return json({ error: 'שירות ה-AI סירב לעבד את העמוד הזה' }, 422);
     const content = (resp.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
     const raw = extractJson(content);
     if (!raw || !Array.isArray(raw.ads)) return json({ error: 'הזיהוי לא החזיר JSON תקין' }, 422);
