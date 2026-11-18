@@ -94,8 +94,9 @@ if (t.value.trim() && t.value !== t.dataset.auto && !(cache.customers || []).som
 t.value = nameOf('customers', id) || '';
 t.dataset.auto = t.value;
 }
-function adAdd(prefill) {
+function adAdd(prefill, opts) {
 prefill = { ...(prefill || {}) };
+opts = opts || {};
 if (prefill.customer_id && !prefill.title) prefill.title = nameOf('customers', prefill.customer_id) || '';
 openForm('מודעה חדשה', [
 { name: 'customer_id', label: 'לקוח', type: 'customer', required: true, onpick: _adTitleFromCustomer },
@@ -153,7 +154,8 @@ await addInteraction('ad', data.id, 'המודעה נוצרה ידנית');
 // חבילות (#6): אם ללקוח חבילה פעילה עם יתרה — הצעת שיוך שמורידה מהמונה
 if (!data.contract_id && typeof packageLinkAd === 'function') { try { await packageLinkAd(data.id, rec.customer_id); } catch (e) { } }
 toast('המודעה נוספה');
-openPage('ads');
+// opts.onSaved — המסך שקרא לטופס מטפל בהמשך (למשל הזנת מודעות לגיליון נשארת פתוחה)
+if (typeof opts.onSaved === 'function') opts.onSaved(data); else openPage('ads');
 });
 }
 

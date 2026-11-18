@@ -80,7 +80,8 @@ const inv = _ieCharges == null ? '<span class="muted">בודק חשבונית…
 return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--line,#e5e7eb);border-radius:8px;padding:8px 10px">
 <b>${esc(_ieCust.name)}</b>${_ieCust.phone ? ` <span class="muted" dir="ltr" style="font-size:.82rem">${esc(_ieCust.phone)}</span>` : ''}
 ${inv} ${_ieDealBadge()}
-<button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="ieClearCust()">שנה</button>
+<button class="btn btn-sm" style="margin-right:auto" title="פותח את טופס המודעה המלא (תוכן, קובץ, הנחה, עמלה...)" onclick="ieFullAdForm()">＋ מודעה ללקוח</button>
+<button class="btn btn-sm btn-ghost" onclick="ieClearCust()">שנה</button>
 </div>`;
 }
 return `<input id="ieSearch" autocomplete="off" placeholder="הקלד/י שם עסק או טלפון…" oninput="ieSearchCust(this.value)">
@@ -413,4 +414,17 @@ try { _ieAds = await run(db.from('ads').select('*').eq('issue_id', _ieIssue.id).
 }
 if (opts.closeWizard && typeof _drShow === 'function') { if (typeof _drDeal !== 'undefined') delete _drDeal[custId]; _drShow(); }
 });
+}
+
+/* טופס "מודעה חדשה" המלא (adAdd) — ללקוח שנבחר, עם הגיליון הנוכחי כיעד; אחרי שמירה נשארים במסך */
+function ieFullAdForm() {
+if (!_ieCust || !_ieIssue) { toast('בחר לקוח קודם', true); return; }
+const pre = { customer_id: _ieCust.id, issue_id: _ieIssue.id };
+const sz = document.getElementById('ieSize')?.value; if (sz) pre.price_item_id = Number(sz);
+const pr = document.getElementById('iePrice')?.value; if (pr !== '' && pr != null) pre.price = Number(pr);
+const ti = document.getElementById('ieTitle')?.value.trim(); if (ti) pre.title = ti;
+const ds = document.getElementById('ieDesc')?.value.trim(); if (ds) pre.requested_placement = ds;
+const gn = document.getElementById('ieGfxNote')?.value.trim(); if (gn) pre.graphics_note = gn;
+const issueId = _ieIssue.id;
+adAdd(pre, { onSaved: () => openIssueEntry(issueId) });
 }
