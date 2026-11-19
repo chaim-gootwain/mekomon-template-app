@@ -721,23 +721,26 @@ async function _pibHash(bytes) {
    ואז התמונה המפוקסלת נכנסת לקובץ הדפוס. ה-JPEG נשמר בתוך ה-PDF בלי דחיסה מחדש.
    במופע בלי הפונקציה (404) — הורדה ישירה כמו קודם. */
 let _pibWrapOff = false;
+/* עטיפת תמונה ב-PDF בשרת (ad-image-pdf). מחזיר את נתיב ה-PDF ב-ad-files, או null
+   (לא תמונה / במופע אין את הפונקציה / כשל — ואז משתמשים בקובץ המקורי). */
+async function _pibWrapImage(path) {
+  if (_pibWrapOff || !/\.(jpe?g|png)$/i.test(path)) return null;
+  try {
+    const { data: s } = await db.auth.getSession();
+    const r = await fetch('/.netlify/functions/ad-image-pdf', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + ((s && s.session && s.session.access_token) || '') },
+      body: JSON.stringify({ path }),
+    });
+    if (r.status === 404) { _pibWrapOff = true; return null; }
+    if (r.ok) { const j = await r.json(); if (j.ok && j.path) return j.path; }
+  } catch (e) { console.warn('ad-image-pdf', e); }
+  return null;
+}
 async function _pibAdFileBytes(path) {
-  if (!_pibWrapOff && /\.(jpe?g|png)$/i.test(path)) {
-    try {
-      const { data: s } = await db.auth.getSession();
-      const r = await fetch('/.netlify/functions/ad-image-pdf', {
-        method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + ((s && s.session && s.session.access_token) || '') },
-        body: JSON.stringify({ path }),
-      });
-      if (r.status === 404) _pibWrapOff = true;
-      else if (r.ok) {
-        const j = await r.json();
-        if (j.ok && j.path) {
-          const w = await db.storage.from('ad-files').download(j.path);
-          if (!w.error && w.data) return new Uint8Array(await w.data.arrayBuffer());
-        }
-      }
-    } catch (e) { console.warn('ad-image-pdf', e); }
+  const wp = await _pibWrapImage(path);
+  if (wp) {
+    const w = await db.storage.from('ad-files').download(wp);
+    if (!w.error && w.data) return new Uint8Array(await w.data.arrayBuffer());
   }
   const r = await db.storage.from('ad-files').download(path);
   if (r.error) throw r.error;
@@ -791,7 +794,10 @@ async function fpDownloadAllAds() {
     const ttl = _PIB_SHARE_DAYS * 86400, errs = [], out = [];
     let done = 0;
     await _pibPool(list, 6, async (it, k) => {
-      const { data, error } = await db.storage.from('ad-files').createSignedUrl(it.path, ttl, { download: it.name });
+      // תמונה (JPG/PNG) — גם בקישור נשלחת כ-PDF של עמוד אחד (עטיפה בשרת, בלי דחיסה מחדש)
+      const wp = await _pibWrapImage(it.path);
+      if (wp) it.name = it.name.replace(/\.[A-Za-z0-9]{1,6}$/, '') + '.pdf';
+      const { data, error } = await db.storage.from('ad-files').createSignedUrl(wp || it.path, ttl, { download: it.name });
       if (error || !data) errs.push(_adLabel(it.ad)); else out[k] = { name: it.name, url: data.signedUrl, page: it.ad.page_number || null };
       modal.innerHTML = `${head}<p>מכין קישורים ${++done}/${list.length}...</p>`;
     });
@@ -811,7 +817,7 @@ async function fpDownloadAllAds() {
     const until = new Date(expires).toLocaleDateString('he-IL');
     const wa = 'https://wa.me/?text=' + encodeURIComponent(`כל המודעות של גיליון ${issue.issue_number}:\n${link}`);
     modal.innerHTML = `${head}
-<p>${files.length} מודעות בגודל המקורי. המקבל רואה רשימה, מוריד מודעה בודדת או את כולן ב-ZIP.</p>
+<p>${files.length} מודעות בגודל המקורי (תמונות — כ-PDF). המקבל רואה רשימה, מוריד מודעה בודדת או את כולן ב-ZIP.</p>
 <div class="field"><label>🔗 הקישור (בתוקף עד ${esc(until)})</label>
 <input id="pibShareLink" readonly dir="ltr" value="${esc(link)}" onclick="this.select()" style="width:100%;font-size:.78rem"></div>
 <div class="m-actions"><button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('pibShareLink').value).then(()=>toast('✓ הקישור הועתק'))">📋 העתקת הקישור</button>
