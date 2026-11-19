@@ -1,0 +1,13 @@
+-- ============================================================
+-- מיגרציה: מחיקת מדיניות אחסון ישנה adfiles_portal_upload
+-- ------------------------------------------------------------
+-- המדיניות הישנה (insert ל-public על ad-files) קראה ישירות את
+-- customers.portal_token בהרשאות המשתמש. אחרי הסתרת portal_token
+-- (2026-11-05_portal_token_column_security) כל העלאת קובץ של עובד
+-- נכשלה: "permission denied for table customers" (התגלה בעמנואל 19.11.2026).
+-- היא גם הייתה שבורה (השוותה את הטוקן לשם הלקוח ולא לשם הקובץ).
+-- העלאה מהפורטל מכוסה ע"י portal_files_insert (anon, דרך הפונקציה
+-- המאובטחת portal_upload_allowed — 2026-09-02_portal_file_upload_policy).
+-- הרצה: Supabase Dashboard → SQL Editor, בכל מופע. בטוח להרצה חוזרת.
+-- ============================================================
+drop policy if exists "adfiles_portal_upload" on storage.objects;
