@@ -56,7 +56,8 @@ renderTable(document.getElementById('gfxTable'), queue, [
 { h: 'דדליין', f: r => _gfxDeadlineCell(issMap[r.issue_id]) },
 { h: 'מקור', f: r => srcMap[r.id] ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();adFileOpen('${esc(srcMap[r.id].storage_path)}')">📎 מקור</button>` : '<span class="muted">—</span>' },
 { h: 'הנחיה', f: r => esc(r.revision_note || r.graphics_note) || '—' },
-{ h: '', f: r => `<button class="btn btn-sm" style="background:var(--ok)" onclick="event.stopPropagation();proofReady(${r.id})">✓ פרוף מוכן</button>` },
+{ h: '', f: r => `<button class="btn btn-sm" style="background:var(--ok)" onclick="event.stopPropagation();proofReady(${r.id})">✓ פרוף מוכן</button>` +
+  (profile.role === 'admin' ? ` <button class="btn btn-sm btn-ghost" title="אישור לשיבוץ בלי פרוף ובלי ועדה" onclick="event.stopPropagation();adApproveSkipProof(${r.id})">⏭ לשיבוץ</button>` : '') },
 ], { onRow: r => openAdCard(r.id), empty: 'התור ריק — כל הכבוד! 🎉' });
 }
 
