@@ -71,7 +71,7 @@ Pages.leads = {
         <div class="actions">
           <input type="file" id="leadImportFile" class="hidden" accept=".xlsx,.xls,.csv" onchange="leadsImport()">
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('leadImportFile').click()">⬆ ייבוא מאקסל</button>
-          ${isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="leadsCustCleanup()" title="לידים שהטלפון או השם שלהם כבר קיימים אצל לקוח">🧹 לידים שכבר לקוחות</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="leadsCustCleanup()" title="לידים שהטלפון או השם שלהם כבר קיימים אצל לקוח או בליד אחר">🧹 לידים כפולים</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="leadsSwitchView()">
             ${_leadsView === 'kanban' ? '☰ תצוגת טבלה' : '▦ תצוגת קנבן'}</button>
           <button class="btn" onclick="leadQuickAdd()">+ ליד חדש</button>
@@ -367,8 +367,9 @@ async function otherAgentSameName(name) {
   const c = custs.find(x => _nameStrongMatch(x.name, name) && (!myName || x.agent !== myName));
   if (c) return { kind: 'לקוח', name: c.name, agent: c.agent || 'ללא סוכן' };
   try {
-    const longest = words.slice().sort((p, q) => q.length - p.length)[0];
-    const { data } = await db.from('leads').select('name,agent_id,status').ilike('name', '%' + longest + '%').limit(100);
+    // מועמדים לפי כל המילים (לא רק הארוכה — "הקשר שלנו" לא נמצא כשחיפשו רק "בטלפון")
+    const ws = [...new Set(words)].slice(0, 8).filter(w => !/[,()%*]/.test(w));
+    const { data } = await db.from('leads').select('name,agent_id,status').or(ws.map(w => 'name.ilike.%' + w + '%').join(',')).limit(300);
     const l = (data || []).find(x => !['won', 'lost'].includes(x.status) && x.agent_id !== me && _nameStrongMatch(x.name, name));
     if (l) return { kind: 'ליד', name: l.name, agent: l.agent_id ? ((cache.agents.find(a => a.id === l.agent_id) || {}).name || 'סוכן אחר') : 'מאגר ללא שיוך' };
   } catch (e) { /* בלי לידים — רק בדיקת לקוחות */ }
@@ -714,25 +715,49 @@ async function leadsCustCleanup() {
     new Set(leadNameWords(c.name)).forEach(w => { (byWord[w] = byWord[w] || []).push(c); });
   });
   _lcc = [];
+  // לידים כפולים (בין סוכנים או אצל אותו סוכן): הליד החדש מול הישן — מוצע למחוק את החדש
+  const open = leads.filter(l => l.status !== 'lost').sort((a, b) => a.id - b.id);
+  const lPh = {}, lWord = {}, lead2 = [];
+  open.forEach(l => {
+    const ks = [l.phone, l.whatsapp].map(ph).filter(x => x.length === 9);
+    let other = null, why = '';
+    const kHit = ks.find(x => lPh[x]); if (kHit) { other = lPh[kHit]; why = 'טלפון'; }
+    if (!other) for (const w of new Set(leadNameWords(l.name))) { const h = (lWord[w] || []).find(o => _nameStrongMatch(o.name, l.name)); if (h) { other = h; why = 'שם'; break; } }
+    if (other) lead2.push({ l, o: other, why, kind: 'lead' });
+    ks.forEach(x => { if (!lPh[x]) lPh[x] = l; });
+    new Set(leadNameWords(l.name)).forEach(w => { (lWord[w] = lWord[w] || []).push(l); });
+  });
   leads.forEach(l => {
     const k = [l.phone, l.whatsapp].map(ph).find(x => x.length === 9 && byPh[x]);
     // שם מוכל (≥2 מילים) — מועמדים לפי מילה משותפת, ואז בדיקת הכלה
     const cont = () => { for (const w of new Set(leadNameWords(l.name))) { const hit = (byWord[w] || []).find(c => _nameStrongMatch(c.name, l.name)); if (hit) return hit; } return null; };
     const c = k ? byPh[k] : (byName[leadNameKey(l.name)] || cont());
-    if (c) _lcc.push({ l, c, why: k ? 'טלפון' : 'שם' });
+    if (c) _lcc.push({ l, c, why: k ? 'טלפון' : 'שם', kind: 'cust' });
   });
-  const modal = document.getElementById('viewModal');
-  modal.innerHTML = `<h3>🧹 לידים שכבר קיימים כלקוח (${_lcc.length})</h3>
-    ${_lcc.length ? `<p class="muted" style="font-size:.85rem">סמן את מה למחוק. התאמה לפי <b>טלפון</b> בטוחה; לפי <b>שם</b> — כדאי לעבור (ייתכן עסק אחר באותו שם). לידים שהומרו ללקוח לא מופיעים כאן. המחיקה סופית, כולל ציר הזמן של הליד.</p>
-    <label style="font-size:.85rem;cursor:pointer"><input type="checkbox" checked onchange="document.querySelectorAll('.lccChk').forEach(x=>x.checked=this.checked)"> סמן הכל</label>
-    <div class="table-wrap" style="max-height:55vh;overflow:auto;margin-top:6px"><table class="data"><thead><tr><th></th><th>ליד</th><th>סוכן</th><th>סטטוס</th><th>לקוח קיים</th><th>לפי</th></tr></thead><tbody>
-    ${_lcc.map((x, i) => `<tr><td><input type="checkbox" class="lccChk" data-i="${i}" checked></td>
+  const custIds = new Set(_lcc.map(x => x.l.id));
+  lead2.filter(x => !custIds.has(x.l.id)).forEach(x => _lcc.push(x));
+  const whyPill = w => w === 'טלפון' ? '<span class="pill green">טלפון</span>' : '<span class="pill amber">שם</span>';
+  // טלפון — מסומן מראש; שם — לא (לעבור לפני מחיקה)
+  const rowHtml = (x, i) => `<tr><td><input type="checkbox" class="lccChk" data-i="${i}" ${x.why === 'טלפון' ? 'checked' : ''}></td>
       <td><b>${esc(x.l.name)}</b>${x.l.phone ? ` <span dir="ltr" class="muted">${esc(x.l.phone)}</span>` : ''}</td>
       <td>${esc(nameOf('agents', x.l.agent_id)) || '<span class="muted">מאגר</span>'}</td>
       <td>${pill('lead', x.l.status)}</td>
-      <td>${esc(x.c.name)}${x.c.phone ? ` <span dir="ltr" class="muted">${esc(x.c.phone)}</span>` : ''}</td>
-      <td>${x.why === 'טלפון' ? '<span class="pill green">טלפון</span>' : '<span class="pill amber">שם</span>'}</td></tr>`).join('')}
-    </tbody></table></div>` : '<p class="muted">אין לידים שקיימים גם כלקוח 👍</p>'}
+      <td>${x.kind === 'cust'
+        ? esc(x.c.name) + (x.c.phone ? ` <span dir="ltr" class="muted">${esc(x.c.phone)}</span>` : '')
+        : esc(x.o.name) + (x.o.phone ? ` <span dir="ltr" class="muted">${esc(x.o.phone)}</span>` : '') + ' · ' + (esc(nameOf('agents', x.o.agent_id)) || 'מאגר')}</td>
+      <td>${whyPill(x.why)}</td></tr>`;
+  const table = (kind, title, col) => {
+    const rows = _lcc.map((x, i) => [x, i]).filter(([x]) => x.kind === kind);
+    if (!rows.length) return '';
+    return `<h4 style="margin:14px 0 6px">${title} (${rows.length})</h4>
+    <div class="table-wrap" style="max-height:40vh;overflow:auto"><table class="data"><thead><tr><th></th><th>ליד (למחיקה)</th><th>סוכן</th><th>סטטוס</th><th>${col}</th><th>לפי</th></tr></thead><tbody>
+    ${rows.map(([x, i]) => rowHtml(x, i)).join('')}</tbody></table></div>`;
+  };
+  const modal = document.getElementById('viewModal');
+  modal.innerHTML = `<h3>🧹 לידים כפולים (${_lcc.length})</h3>
+    ${_lcc.length ? `<p class="muted" style="font-size:.85rem">התאמה לפי <b>טלפון</b> — מסומנת מראש; לפי <b>שם</b> (זהה או מוכל) — לא מסומנת, כדאי לעבור (ייתכן עסק אחר). בכפילות ליד-ליד מוצע למחוק את הליד <b>החדש</b> ולהשאיר את הוותיק. לידים שהומרו ללקוח לא מופיעים. המחיקה סופית, כולל ציר הזמן.</p>
+    ${table('cust', 'לידים שכבר קיימים כלקוח', 'לקוח קיים')}
+    ${table('lead', 'ליד שכבר קיים כליד אחר', 'הליד הוותיק (נשאר)')}` : '<p class="muted">אין לידים כפולים 👍</p>'}
     <div class="m-actions" style="margin-top:12px">
       ${_lcc.length ? `<button class="btn btn-danger" id="lccRun" onclick="leadsCustCleanupRun()">🗑 מחיקת המסומנים</button>` : ''}
       <button class="btn btn-ghost" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button>
@@ -742,7 +767,7 @@ async function leadsCustCleanup() {
 async function leadsCustCleanupRun() {
   const picked = [...document.querySelectorAll('.lccChk')].filter(x => x.checked).map(x => _lcc[Number(x.dataset.i)]);
   if (!picked.length) { toast('לא סומן אף ליד', true); return; }
-  if (!confirm(`למחוק לצמיתות ${picked.length} לידים שכבר קיימים כלקוח?\nציר הזמן שלהם יימחק. הפעולה בלתי-הפיכה.`)) return;
+  if (!confirm(`למחוק לצמיתות ${picked.length} לידים כפולים?\nציר הזמן שלהם יימחק. הפעולה בלתי-הפיכה.`)) return;
   const btn = document.getElementById('lccRun'); if (btn) btn.disabled = true;
   let ok = 0, fail = 0;
   for (const x of picked) {
