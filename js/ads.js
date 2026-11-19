@@ -198,6 +198,9 @@ else if (a.status === 'approved') routeButtons = `
 <button class="btn btn-sm btn-ghost" onclick="adRoute(${id},'to_committee')">בכל זאת לוועדה</button>`;
 else if (a.status === 'placed') routeButtons = profile.role === 'admin'
 ? `<button class="btn btn-sm" style="background:var(--ok)" onclick="adRoute(${id},'publish')">📣 סימון פורסמה (יוצר חיוב)</button>` : '';
+// מנהל: דילוג על פרוף/ועדה — מודעה חוזרת או שהלקוח כבר אישר
+if (profile.role === 'admin' && ['in_graphics', 'proof', 'committee'].includes(a.status))
+routeButtons += `<button class="btn btn-sm" style="background:var(--ok)" onclick="adApproveSkipProof(${id})">✓ אישור לשיבוץ (בלי פרוף)</button>`;
 if (!['published', 'cancelled', 'rejected'].includes(a.status))
 routeButtons += `<button class="btn btn-sm btn-danger-ghost" onclick="adRoute(${id},'cancel',true)">ביטול</button>`;
 }
@@ -266,6 +269,23 @@ toast('בוצע');
 document.getElementById('viewBack').classList.remove('open');
 openPage(currentPage);
 } catch (e) { /* toast כבר הוצג */ }
+}
+
+/* מנהל: מעבר ישיר ל"מאושרת" מגרפיקה / פרוף / ועדה, בלי סבב פרוף ואישורים.
+   קודם דרך route_ad (מתועד בשרת); אם השרת לא מתיר את המעבר מהסטטוס הזה —
+   עדכון ישיר (כמו מעברי הפרוף ב-graphics-proof.js) + רישום בהיסטוריית המודעה. */
+async function adApproveSkipProof(id) {
+  if (profile.role !== 'admin') return;
+  if (!confirm('לאשר את המודעה לשיבוץ בלי פרוף ובלי ועדה?\nהמודעה תעבור ל"מאושרת" ותופיע לשיבוץ בגיליון.')) return;
+  const note = 'אושרה לשיבוץ ידנית ע"י מנהל (בלי פרוף/ועדה)';
+  const { error } = await db.rpc('route_ad', { p_ad_id: id, p_action: 'approve', p_note: note });
+  if (error) {
+    await run(db.from('ads').update({ status: 'approved', revision_note: null }).eq('id', id));
+    try { await addInteraction('ad', id, '✓ ' + note); } catch (e) { }
+  }
+  toast('✓ המודעה אושרה לשיבוץ');
+  document.getElementById('viewBack')?.classList.remove('open');
+  openPage(currentPage);
 }
 
 /* שיבוץ לגיליון: בחירת גיליון ואז סטטוס placed */
