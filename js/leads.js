@@ -340,11 +340,20 @@ function _sameNameWords(a, b) {
   const x = leadNameWords(a), y = new Set(leadNameWords(b));
   return x.length > 0 && x.length === y.size && x.every(w => y.has(w));
 }
-/* לקוח בשם זהה — של כל סוכן (כולל שלי). מחזיר { name, agent } או null */
+/* "אותו עסק" לפי שם: זהה, או שאחד השמות מוכל כולו בשני — "דרך צדיקים" ב"דרך צדיקים
+   נסיעות לאומן" (התגלה 19.11.2026: ליד עבר כי השם לא היה זהה בדיוק). הכלה רק כשהשם
+   הקצר הוא לפחות 2 מילים משמעותיות, כדי שלקוח בשם של מילה אחת לא יחסום כל ליד עם המילה. */
+function _nameStrongMatch(a, b) {
+  if (_sameNameWords(a, b)) return true;
+  const x = [...new Set(leadNameWords(a))], y = [...new Set(leadNameWords(b))];
+  const [small, big] = x.length <= y.length ? [x, new Set(y)] : [y, new Set(x)];
+  return small.length >= 2 && small.every(w => big.has(w));
+}
+/* לקוח באותו שם (זהה או מוכל) — של כל סוכן (כולל שלי). מחזיר { name, agent } או null */
 async function customerSameName(name) {
   const words = leadNameWords(name);
   if (!words.length) return null;
-  const c = (await customersMatchingWords(words)).find(x => _sameNameWords(x.name, name));
+  const c = (await customersMatchingWords(words)).find(x => _nameStrongMatch(x.name, name));
   return c ? { name: c.name, agent: c.agent || '' } : null;
 }
 /* מפתח שם להשוואה מהירה ברשימות גדולות — סט המילים, ממוין */
@@ -355,12 +364,12 @@ async function otherAgentSameName(name) {
   const me = myAgentId();
   const myName = me ? (cache.agents.find(a => a.id === me) || {}).name : null;
   const custs = await customersMatchingWords(words);
-  const c = custs.find(x => _sameNameWords(x.name, name) && (!myName || x.agent !== myName));
+  const c = custs.find(x => _nameStrongMatch(x.name, name) && (!myName || x.agent !== myName));
   if (c) return { kind: 'לקוח', name: c.name, agent: c.agent || 'ללא סוכן' };
   try {
     const longest = words.slice().sort((p, q) => q.length - p.length)[0];
     const { data } = await db.from('leads').select('name,agent_id,status').ilike('name', '%' + longest + '%').limit(100);
-    const l = (data || []).find(x => !['won', 'lost'].includes(x.status) && x.agent_id !== me && _sameNameWords(x.name, name));
+    const l = (data || []).find(x => !['won', 'lost'].includes(x.status) && x.agent_id !== me && _nameStrongMatch(x.name, name));
     if (l) return { kind: 'ליד', name: l.name, agent: l.agent_id ? ((cache.agents.find(a => a.id === l.agent_id) || {}).name || 'סוכן אחר') : 'מאגר ללא שיוך' };
   } catch (e) { /* בלי לידים — רק בדיקת לקוחות */ }
   return null;
@@ -698,15 +707,18 @@ async function leadsCustCleanup() {
     runAll((f, t) => db.from('customers').select('id,name,phone,whatsapp').order('id').range(f, t)),
   ]);
   const ph = p => String(p || '').replace(/\D/g, '').slice(-9);
-  const byPh = {}, byName = {};
+  const byPh = {}, byName = {}, byWord = {};
   custs.forEach(c => {
     [c.phone, c.whatsapp].map(ph).filter(k => k.length === 9).forEach(k => { if (!byPh[k]) byPh[k] = c; });
     const nk = leadNameKey(c.name); if (nk && !byName[nk]) byName[nk] = c;
+    new Set(leadNameWords(c.name)).forEach(w => { (byWord[w] = byWord[w] || []).push(c); });
   });
   _lcc = [];
   leads.forEach(l => {
     const k = [l.phone, l.whatsapp].map(ph).find(x => x.length === 9 && byPh[x]);
-    const c = k ? byPh[k] : byName[leadNameKey(l.name)];
+    // שם מוכל (≥2 מילים) — מועמדים לפי מילה משותפת, ואז בדיקת הכלה
+    const cont = () => { for (const w of new Set(leadNameWords(l.name))) { const hit = (byWord[w] || []).find(c => _nameStrongMatch(c.name, l.name)); if (hit) return hit; } return null; };
+    const c = k ? byPh[k] : (byName[leadNameKey(l.name)] || cont());
     if (c) _lcc.push({ l, c, why: k ? 'טלפון' : 'שם' });
   });
   const modal = document.getElementById('viewModal');
