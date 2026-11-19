@@ -143,7 +143,7 @@ openForm('לקוח חדש', [
 { name: 'field', label: 'תחום' },
 { name: 'agent_id', label: 'סוכן', type: 'select', options: 'agents' },
 ], {}, async (rec) => {
-const data = await run(db.from('customers').insert(rec).select(await _custCols()).single());
+const data = await run(custInsert(rec));
 try { await addInteraction('customer', data.id, 'הלקוח נוצר (מהזנת גיליון)'); } catch (e) { }
 await refreshCache();
 await ieSelectCust(data.id);

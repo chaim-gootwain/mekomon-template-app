@@ -96,6 +96,24 @@ return cols.join(',');
 })().catch(() => _custAllCols);
 return _custColsReady;
 }
+/* יצירת לקוח. insert().select() ב-PostgREST מבקש מהמסד את כל עמודות השורה החדשה
+   (RETURNING *), וזה כולל את portal_token המוסתר ⇒ "permission denied for table
+   customers" (19.11.2026). לכן: RPC ‏customer_insert (security invoker — אותם כללי
+   גישה ו-RLS של המשתמש) שמחזיר רק id, ואז טעינה בעמודות המותרות.
+   מופע בלי המיגרציה — נפילה לדרך הישנה. מחזיר { data, error } כמו supabase. */
+async function custInsert(rec) {
+const r = await db.rpc('customer_insert', { p: rec });
+if (r.error) {
+  const m = String(r.error.message || '') + ' ' + String(r.error.code || '');
+  if (/PGRST202|could not find the function/i.test(m)) return await db.from('customers').insert(rec).select(await _custCols()).single();
+  return { data: null, error: r.error };
+}
+const id = Number(r.data);
+const g = await db.from('customers').select(await _custCols()).eq('id', id).limit(1);
+// סוכן בלי שיוך ללקוח לא רואה אותו בחזרה (RLS) — מחזירים את מה שנשמר
+return { data: (g.data && g.data[0]) || Object.assign({ id }, rec), error: null };
+}
+
 async function custLoadAll() {
 const cols = await _custCols();
 return await runAll((f, t) => db.from('customers').select(cols).order('name').order('id').range(f, t));
