@@ -700,10 +700,14 @@ wrap.appendChild(div);
 };
 
 async function committeeDecide(id, approve) {
-const _r = prompt(approve ? 'הערה (לא חובה):' : 'סיבת הדחייה (חובה):');
-if (_r === null) return; // ביטול הפרומפט — לא מאשרים/דוחים בטעות
-const note = _r || '';
-if (!approve && !note) return;
+// אישור — בלי חלון (חיים: סיבה מעניינת רק בפסילה); דחייה — סיבה חובה
+let note = '';
+if (!approve) {
+  const _r = prompt('סיבת הדחייה (חובה):');
+  if (_r === null) return; // ביטול הפרומפט — לא דוחים בטעות
+  note = _r.trim();
+  if (!note) { toast('בדחייה חובה לכתוב סיבה', true); return; }
+}
 await run(db.rpc('route_ad', { p_ad_id: id, p_action: approve ? 'committee_approve' : 'committee_reject', p_note: note }));
 toast(approve ? 'אושר' : 'נדחה');
 openPage('committee');
