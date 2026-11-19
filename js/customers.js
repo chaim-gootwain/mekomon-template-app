@@ -219,7 +219,7 @@ if (dups.length && !confirm(`הטלפון כבר קיים אצל "${dups[0].name
 const _nm = (rec.name || '').trim();
 const _dupC = (cache.customers || []).find(x => (x.name || '').trim() === _nm);
 if (_dupC && confirm('כבר קיים לקוח בשם "' + _nm + '".\nאישור = לפתוח את הכרטיס הקיים כדי להזין/לעדכן את הנתונים · ביטול = להוסיף כלקוח חדש נפרד')) { openCustomerCard(_dupC.id); return; }
-const data = await run(db.from('customers').insert(rec).select(await _custCols()).single());
+const data = await run(custInsert(rec));
 await addInteraction('customer', data.id, 'הלקוח נוצר');
 await refreshCache();
 toast('הלקוח נוסף');
@@ -246,7 +246,7 @@ await refreshCache();
 if (typeof onDone === 'function') await onDone(_dupC);
 return;
 }
-const data = await run(db.from('customers').insert(rec).select(await _custCols()).single());
+const data = await run(custInsert(rec));
 try { await addInteraction('customer', data.id, 'הלקוח נוצר'); } catch (e) { }
 await refreshCache();
 toast('✓ לקוח נוסף');

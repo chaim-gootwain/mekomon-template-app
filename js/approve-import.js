@@ -129,7 +129,7 @@ async function aqApprove(item) {
   try {
     let customerId = null, createdCustId = null;
     if (custVal === 'new') {
-      const { data, error } = await db.from('customers').insert({ name: title, status: 'active' }).select('id,name,status,agent_id').single();
+      const { data, error } = await custInsert({ name: title, status: 'active' });
       if (error) { toast('שגיאה ביצירת לקוח: ' + error.message, true); return; }
       customerId = data.id; createdCustId = data.id;
       if (cache.customers) cache.customers.push(data);

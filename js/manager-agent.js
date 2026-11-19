@@ -818,7 +818,7 @@ async function mgrAddCustomerApprove() {
   if (biz) rec.business_id = biz;
   const btn = document.getElementById('mgrCustBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'פותח...'; }
-  const { data, error } = await db.from('customers').insert(rec).select('id,name').single();
+  const { data, error } = await custInsert(rec);
   if (error || !data) {
     if (btn) { btn.disabled = false; btn.textContent = '✅ פתח כרטיס'; }
     toast('שגיאה בפתיחת הכרטיס: ' + (error && error.message || ''), true);

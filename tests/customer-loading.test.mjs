@@ -11,7 +11,7 @@ const ctx = vm.createContext({
   console, setTimeout, document: stub, window: stub, location: stub, navigator: stub, supabase: stub,
   localStorage: { getItem: () => null, setItem() { } },
 });
-vm.runInContext(src + '\n;globalThis.__t = { custLoad, custLoadAll, custPortalToken, setProfile: (p) => { profile = p; }, setDb: (d) => { db = d; }, setToast: (f) => { toast = f; } };', ctx);
+vm.runInContext(src + '\n;globalThis.__t = { custLoad, custLoadAll, custPortalToken, custInsert, setProfile: (p) => { profile = p; }, setDb: (d) => { db = d; }, setToast: (f) => { toast = f; } };', ctx);
 const T = ctx.__t;
 
 /* db מזויף: טבלת customers בלבד, עם השרשראות שהקוד משתמש בהן.
@@ -30,6 +30,11 @@ function fakeDb() {
   return {
     rpc(fn, args) {
       rpcCalls.push(fn);
+      if (fn === 'customer_insert') {
+        const id = ROWS.length + 1;
+        ROWS.push({ id, ...args.p, portal_token: 'tok-' + id });
+        return Promise.resolve({ data: id, error: null });
+      }
       assert.strictEqual(fn, 'get_customer_portal_token');
       const r = ROWS.find(x => x.id === args.p_customer_id);
       return Promise.resolve({ data: r ? r.portal_token : null, error: null });
@@ -113,6 +118,18 @@ await t('עמודה שחסרה במסד של המופע (updated_at): הטעינ
     assert.strictEqual((await T2.custLoad(7, { required: true })).id, 7);
     assert.strictEqual(t2.length, 0, 'בלי toast שגיאה');
   } finally { MISSING = []; }
+});
+
+await t('custInsert: יוצר דרך customer_insert ומחזיר את הלקוח בלי portal_token', async () => {
+  T.setProfile({ role: 'admin' });
+  const before = ROWS.length;
+  const { data, error } = await T.custInsert({ name: 'לקוח חדש', phone: '050' });
+  try {
+    assert.strictEqual(error, null);
+    assert.strictEqual(data.id, before + 1);
+    assert.strictEqual(data.name, 'לקוח חדש');
+    assert.ok(!('portal_token' in data));
+  } finally { ROWS.length = before; }
 });
 
 await t('לקוח שלא קיים: בלי required מחזיר undefined, בלי שגיאה', async () => {

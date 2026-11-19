@@ -264,7 +264,7 @@ async function invChatNewCustomer() {
   const name = (_icState.fields.customer_name || '').trim();
   if (!name) { invChatAskCustomerAgain(); return; }
   try {
-    const row = await run(db.from('customers').insert({ name }).select('id,name').single(), 'שגיאה בפתיחת כרטיס');
+    const row = await run(custInsert({ name }), 'שגיאה בפתיחת כרטיס');
     _icState.fields.customer_id = row.id;
     _icState.fields.customer_source = 'new';
     _icState.pending = null;

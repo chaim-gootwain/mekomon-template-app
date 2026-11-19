@@ -178,7 +178,7 @@ function piSysToggle() {
 async function _piSystemCust() {
   let c = (cache.customers || []).find(x => (x.name || '').trim() === 'מערכת (תוכן)');
   if (c) return c.id;
-  const ins = await db.from('customers').insert({ name: 'מערכת (תוכן)' }).select('id,name,agent_id,phone').single();
+  const ins = await custInsert({ name: 'מערכת (תוכן)' });
   if (ins.error) throw new Error('לקוח מערכת: ' + ins.error.message);
   if (cache.customers) cache.customers.push(ins.data);
   return ins.data.id;
@@ -202,7 +202,7 @@ async function piSubmit() {
   _piBusy = true;
   try {
     if (s && s.isNew) {
-      const ins = await db.from('customers').insert({ name: s.name }).select('id,name,agent_id,phone').single();
+      const ins = await custInsert({ name: s.name });
       if (ins.error) throw new Error('יצירת לקוח: ' + ins.error.message);
       custId = ins.data.id;
       if (cache.customers) cache.customers.push(ins.data);
