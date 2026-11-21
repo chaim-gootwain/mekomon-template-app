@@ -16,11 +16,17 @@ let _ibKind = null; // סוג המסמך שנבחר בתצוגה המקדימה 
 function _ibLabel(t) { return (t || '').trim() === 'כתבות' ? 'מידע לתושב' : (t || 'מודעה'); }
 function _ibSize(a) { try { const z = (typeof nameOf === 'function') ? nameOf('priceList', a.price_item_id) : ''; return z || ''; } catch (e) { return ''; } }
 function _ibIssueDate(issue) { const d = issue.print_date || issue.publish_date; if (!d) return ''; const p = String(d).slice(0, 10).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; }
-/* פירוט מקוצר בחשבונית — ללקוחות שסומנו בכרטיס הלקוח (settings.invoice_pages_only_customers):
-   במקום שורה לכל מודעה — שורה אחת "פרסום (עמודים)" בסכום הכולל, בלי שורת כותרת. */
+/* פירוט מקוצר בחשבונית — במופע עמנואל רק ללקוח "מועצה מקומית עמנואל":
+   שורת "גיליון X — תאריך" ואחריה שורה אחת "פרסום (עמודים)" בסכום הכולל, במקום שורה לכל מודעה. */
 const IPO_KEY = 'invoice_pages_only_customers';
 function ipoList() { try { return JSON.parse((cache.settings || {})[IPO_KEY] || '[]'); } catch (e) { return []; } }
-function isPagesOnlyCustomer(id) { return ipoList().includes(Number(id)); }
+/* מועצה מקומית עמנואל — פירוט מקוצר קבוע, לפי השם המדויק בלבד (לא לקוחות אחרים עם "עמנואל") */
+function ipoIsCouncil(id) {
+  const c = (cache.customers || []).find(x => x.id === Number(id));
+  const n = ((c && c.name) ? c.name : '').replace(/\s+/g, ' ').trim();
+  return n === 'מועצה מקומית עמנואל';
+}
+function isPagesOnlyCustomer(id) { return ipoIsCouncil(id); }
 async function togglePagesOnlyInvoice(id) {
   id = Number(id);
   const arr = ipoList(); const i = arr.indexOf(id);
@@ -42,8 +48,18 @@ function ipoLine(ads) {
   return [{ details: 'פרסום' + pg, amount: 1, price: Math.round(total * 100) / 100 }];
 }
 
+/* שורת כותרת הגיליון: "גיליון 123 — 01/10/2026" (מחיר 0) */
+function _ibHdrLine(issue) {
+  const typeTag = (issue.issue_type && issue.issue_type !== 'regular' && typeof ISSUE_TYPE_HE !== 'undefined')
+    ? ' (' + (ISSUE_TYPE_HE[issue.issue_type] || issue.issue_type) + ')' : '';
+  const dt = _ibIssueDate(issue);
+  return { details: 'גיליון ' + issue.issue_number + typeTag + (dt ? ' — ' + dt : ''), amount: 1, price: 0 };
+}
 function _ibItems(ads, issue) {
-  if (ads.length && isPagesOnlyCustomer(ads[0].customer_id)) return ipoLine(ads);
+  if (ads.length && isPagesOnlyCustomer(ads[0].customer_id)) {
+    const ln = ipoLine(ads);
+    return ln.length ? [_ibHdrLine(issue), ...ln] : [];
+  }
   const num = issue.issue_number;
   const adLines = ads.map(a => ({
     details: _ibLabel(a.title) + (_ibSize(a) ? ' · ' + _ibSize(a) : '') + (a.page_number ? ' — עמוד ' + a.page_number : ''),
@@ -115,7 +131,7 @@ async function issueBillingOpen(issueId) {
       if (isLast) monthCloseBtn = `<button class="btn btn-sm" style="background:@@COLOR_BRAND@@;color:#fff" onclick="monthlyBillingReview('${ym}')">🗓️ סוף חודש — חיוב חודשי (אישור אחד-אחד)</button>`;
     }
   } catch (e) { }
-  // גזירים שכבר נשלחו אוטומטית (במופע שבו עובד סוכן ששולח גזירים — settings.clips_sent_<issueId> = "cid,cid,…")
+  // גזירים שכבר נשלחו (ידנית או ע"י בני) — settings.clips_sent_<issueId> = "cid,cid,…"
   // → במקום כפתור "גזיר" מוצג "נשלח ✓", כדי שלקוח לא יקבל את אותו גזיר פעמיים
   const clipsSent = new Set();
   try {
@@ -134,7 +150,7 @@ async function issueBillingOpen(issueId) {
         <td>${r.isCenter ? `<button class="btn btn-sm" style="background:@@COLOR_BRAND@@;color:#fff" onclick="ecCatsModal(${issueId}, ${r.cid})" title="סיווג כל מודעה: רגיל / חברתי כלכלי">🏷️ קטגוריות${r.social ? ' · ' + r.social + ' חברתי' : ''}</button> ` : ''}${r.monthly
       ? `${r.monthlyDone ? '<span class="pill green" title="החשבונית החודשית של חודש זה כבר הופקה">🧾 חשבונית חודשית הופקה ✓</span>' : '<span class="pill amber">חיוב חודשי</span>'} <button class="btn btn-sm btn-ghost" onclick="issueBillingSetMonthly(${issueId}, ${r.cid})">בטל חודשי</button>`
       : `${r.done ? '<span class="pill green">חויב ✓</span>' : `<button class="btn btn-sm" onclick="issueBillingPreview(${issueId}, ${r.cid})">תצוגה והפקה</button> <button class="btn btn-sm btn-ghost" style="color:var(--ok)" onclick="issueBillingPaidMenu(${issueId}, ${r.cid})" title="שולם — ללא חשבונית או חשבונית מס קבלה">💰 שולם</button> <button class="btn btn-sm btn-ghost" onclick="issueBillingMarkInvoiced(${issueId}, ${r.cid})" title="סמן שחשבונית כבר הופקה — בלי להפיק ובלי לרשום חוב">🧾 סמן הופקה</button>`} <button class="btn btn-sm btn-ghost" onclick="issueBillingSetMonthly(${issueId}, ${r.cid})">🔁 חודשי</button>`}
-          ${clipsSent.has(r.cid) ? '<span class="pill green" title="הגזיר נשלח ללקוח אוטומטית">📎 גזיר נשלח ✓</span>' : `<button class="btn btn-sm btn-ghost" onclick="issueSendClip(${issueId}, ${r.cid})">📎 גזיר</button>`} <button class="btn btn-sm btn-ghost" onclick="adProofOpen(${issueId}, ${r.cid})">🖼️ הוכחת פרסום</button></td>
+          ${clipsSent.has(r.cid) ? '<span class="pill green" title="הגזיר נשלח ללקוח (ידנית או אוטומטית ע״י בני)">📎 גזיר נשלח ✓</span>' : `<button class="btn btn-sm btn-ghost" onclick="issueSendClip(${issueId}, ${r.cid})">📎 גזיר</button>`} <button class="btn btn-sm btn-ghost" onclick="adProofOpen(${issueId}, ${r.cid})">🖼️ הוכחת פרסום</button></td>
       </tr>`).join('')}
     </tbody></table></div>` : '<p class="empty" style="margin-top:10px">אין מודעות בגיליון זה לחיוב</p>'}
     <div class="m-actions" style="margin-top:12px;flex-wrap:wrap">
@@ -163,10 +179,12 @@ async function issueBillingPreview(issueId, customerId) {
   const _ibEdCell = (adId) => _ibCanEdit
     ? `<td style="text-align:left"><button class="btn btn-sm btn-ghost" title="עריכת המודעה (מחיר, גודל, תיאור)" onclick="adEdit(${adId}, function(){ issueBillingPreview(${issueId}, ${customerId}); })">✎ עריכה</button></td>`
     : '<td></td>';
-  const _ibHdr = _ibItems(ads, issue)[0]; // שורת כותרת הגיליון (מחיר 0)
-  const hdrRow = isPagesOnlyCustomer(customerId)
-    ? `<tr><td colspan="4" class="muted" style="font-size:.82rem">🧾 פירוט מקוצר — בחשבונית תופיע שורה אחת: <b>${esc(_ibHdr ? _ibHdr.details : 'פרסום')}</b></td></tr>`
-    : `<tr><td>${esc(_ibHdr ? _ibHdr.details : 'גיליון ' + issue.issue_number)}</td><td></td><td></td><td></td></tr>`;
+  const _ibAll = _ibItems(ads, issue);
+  const _ibHdr = _ibAll[0]; // שורת כותרת הגיליון (מחיר 0)
+  const hdrRow = `<tr><td>${esc(_ibHdr ? _ibHdr.details : 'גיליון ' + issue.issue_number)}</td><td></td><td></td><td></td></tr>`
+    + (isPagesOnlyCustomer(customerId)
+      ? `<tr><td colspan="4" class="muted" style="font-size:.82rem">🧾 פירוט מקוצר — בחשבונית: <b>${esc(_ibHdr ? _ibHdr.details : '')}</b> ואחריה <b>${esc(_ibAll[1] ? _ibAll[1].details : 'פרסום')}</b></td></tr>`
+      : '');
   const adRows = ads.map(a => {
     const p = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
     const lbl = _ibLabel(a.title) + (_ibSize(a) ? ' · ' + _ibSize(a) : '') + (a.page_number ? ' — עמוד ' + a.page_number : '');
@@ -300,7 +318,7 @@ async function issueBillingReceipt(issueId, customerId) {
   const ads = await run(db.from('ads').select('*').eq('issue_id', issueId).eq('customer_id', customerId).not('status', 'in', '("cancelled","rejected")'));
   const items = _ibItems(ads, issue);
   if (!items.length) { toast('אין מודעות עם מחיר לחיוב', true); return; }
-  const cust = (cache.customers || []).find(c => c.id === customerId) || await custLoad(customerId);
+  const cust = (cache.customers || []).find(c => c.id === customerId) || (await run(db.from('customers').select('*').eq('id', customerId).limit(1)))[0];
   if (!cust) { toast('לקוח לא נמצא', true); return; }
   document.getElementById('viewBack')?.classList.remove('open');
   if (typeof invOpenModal === 'function') {
@@ -308,7 +326,7 @@ async function issueBillingReceipt(issueId, customerId) {
   } else { toast('מודל החשבונית לא זמין', true); }
 }
 
-/* רישום "גזיר נשלח" ללקוח בגיליון (settings.clips_sent_<issueId>) — כדי שלא יישלח שוב, ידנית או אוטומטית */
+/* רישום "גזיר נשלח" ללקוח בגיליון (settings.clips_sent_<issueId>) — כדי שבני לא ישלח שוב */
 async function issueMarkClipSent(issueId, customerId) {
   try {
     const key = 'clips_sent_' + issueId;
@@ -349,7 +367,6 @@ async function issueSendClip(issueId, customerId) {
       const r = await orig.apply(this, arguments);
       try {
         if (typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role)) {
-          /* עדיפות לתפריט "כספים" בסרגל החדש; נפילה חזרה ל-actions הישן */
           const menu = document.getElementById('fpMenuMoney');
           const target = menu || document.querySelector('.page-head .actions');
           if (target && !document.getElementById('ibBtn')) {
@@ -367,3 +384,26 @@ async function issueSendClip(issueId, customerId) {
     window.openFlatplan = wrapped;
   }
 })();
+
+/* ===== מיילים לפי קטגוריה (מרכז קהילתי) — נוסף ע"י Claude ===== */
+const EC_EMAIL_KEY = { regular: 'emanuel_center_email_regular', social: 'emanuel_center_email_social' };
+function ecEmailOf(cat){ return (((cache.settings||{})[EC_EMAIL_KEY[cat]]) || '').trim(); }
+async function ecSetEmail(cat, val){
+  const k = EC_EMAIL_KEY[cat]; const v = (val||'').trim();
+  await db.from('settings').upsert({ key: k, value: v }, { onConflict: 'key' });
+  if (cache.settings) cache.settings[k] = v;
+}
+const EC_EMAIL_FIELDS = [
+  { type:'section', label:'מיילים לפי קטגוריה' },
+  { name:'email_regular', label:'מייל קטגוריה כללית (רגיל)' },
+  { name:'email_social',  label:'מייל קטגוריה חברתית כלכלית' },
+];
+function ecEmailsModal(cid){
+  const rec = { email_regular: ecEmailOf('regular'), email_social: ecEmailOf('social') };
+  openForm('מיילים לפי קטגוריה — מרכז קהילתי', EC_EMAIL_FIELDS, rec, async (r)=>{
+    await ecSetEmail('regular', r.email_regular);
+    await ecSetEmail('social',  r.email_social);
+    toast('נשמר ✔');
+    if (typeof openCustomerCard==='function') openCustomerCard(cid);
+  });
+}
