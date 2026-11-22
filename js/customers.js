@@ -382,6 +382,7 @@ ${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" oncl
 ${typeof auditShow === 'function' ? `<button class="btn" onclick="ccMenuClose();auditShow('customers', ${id}, '${escJs(c.name)}')">🕘 היסטוריית שינויים</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerStatusChange(${id})">🔄 שינוי סטטוס</button>
 <button class="btn" onclick="custPortalShow()">🔗 קישור פורטל</button>
+${profile.role === 'admin' ? `<button class="btn" onclick="ccMenuClose();custMergeInto(${id})">🔗 איחוד לקוח כפול לתוך הכרטיס הזה</button>` : ''}
 ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-danger-ghost" onclick="ccMenuClose();customerDelete(${id})">🗑 מחיקת לקוח</button>` : ''}
 </div>
 </div>
