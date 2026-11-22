@@ -200,6 +200,7 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
     orderRef: opts.orderRef || '',
     lines: _lines,
     adIds: (Array.isArray(opts.adIds) && opts.adIds.length) ? opts.adIds.slice() : null,
+    onDone: typeof opts.onDone === 'function' ? opts.onDone : null, // הפקה רצופה — חזרה לקורא במקום לכרטיס
     contractId: opts.contractId || null, // חשבונית על חוזה שלם → סימון "חויב מראש"
     srcLabel2: opts.label || null,
     vatInc: (opts.vatInc != null ? opts.vatInc : (isPayment ? true : false)), method: 'cash', date: '',
@@ -424,8 +425,10 @@ async function invSubmit() {
     '\nסה"כ לתשלום: ' + money(_tb.total) +
     '\nתאריך המסמך: ' + (s.docDate || today()) +
     '\n\nלהפיק? (לאחר ההפקה לא ניתן לבטל בקלות)')) return;
+  const _onDone = s.onDone;
   invCloseModal();
-  await invCall(body);
+  await invCall(body, { stay: !!_onDone });
+  if (_onDone) { try { await _onDone(); } catch (e) { console.error('invoice onDone', e); } }
 }
 
 async function invCredit(docId) {
@@ -610,7 +613,9 @@ async function invFreshTxn(txn) {
   } catch (e) { return txn; }
 }
 
-async function invCall(body) {
+/* opts.stay — הפקה רצופה (חיוב הגיליון): לא קופצים לכרטיס הלקוח אחרי ההפקה,
+   רק הודעת אישור + התראה אם ללקוח אין מייל, והקורא חוזר לרשימה ללקוח הבא */
+async function invCall(body, opts = {}) {
   toast('מפיק מסמך...');
   try {
     if (body.transaction_id) body.transaction_id = await invFreshTxn(body.transaction_id);
@@ -619,11 +624,18 @@ async function invCall(body) {
       let msg = 'שגיאה';
       try { if (error.context && typeof error.context.json === 'function') { const j = await error.context.json(); msg = j.detail || j.error || msg; } } catch (e) { }
       toast('נכשל: ' + msg, true);
-      if (body.customer_id) openCustomerCard(body.customer_id);
+      if (body.customer_id && !opts.stay) openCustomerCard(body.customer_id);
       return;
     }
     if (data && data.ok) {
-      toast('✅ הופק מסמך ' + (data.document && data.document.doc_number ? data.document.doc_number : '') + ' — ה-PDF יהיה מוכן בעוד רגע');
+      const _num = (data.document && data.document.doc_number) ? data.document.doc_number : '';
+      if (opts.stay) {
+        const _c = (cache.customers || []).find(x => x.id === Number(body.customer_id)) || {};
+        const _em = String(_c.email || '').trim();
+        const _auto = String((cache.settings || {}).ezcount_autosend || '') === '1';
+        if (!_em) toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + ' · ⚠ ללקוח אין מייל — המסמך לא נשלח אליו', true);
+        else toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + (_auto ? ' · נשלח במייל ל-' + _em : ''));
+      } else toast('✅ הופק מסמך ' + _num + ' — ה-PDF יהיה מוכן בעוד רגע');
       if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
       // מסמך תשלום המשויך למסמך מקור (parent) — מסמנים את המקור כסגור,
       // כדי ש"לקוח שילם" בצ'אט לא יציע אותו שוב (קבלה כפולה). עד עכשיו
@@ -647,7 +659,7 @@ async function invCall(body) {
     } else {
       toast('נכשל: ' + (data && data.error ? data.error : ''), true);
     }
-    if (body.customer_id) openCustomerCard(body.customer_id);
+    if (body.customer_id && !opts.stay) openCustomerCard(body.customer_id);
     return data;
   } catch (e) { toast('שגיאה: ' + e, true); }
 }

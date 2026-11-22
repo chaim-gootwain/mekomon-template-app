@@ -218,7 +218,9 @@ async function issueBillingIssue(issueId, customerId) {
     transaction_id: 'emu-iss' + issueId + '-cust' + customerId + '-' + docKind,
     comment: 'גיליון ' + issue.issue_number,
     ad_ids: ads.map(a => a.id),
-  });
+  }, { stay: true });
+  // נשארים בחיוב הגיליון (בלי לקפוץ לכרטיס הלקוח) — הרשימה מתעדכנת, ממשיכים ללקוח הבא
+  await issueBillingOpen(issueId);
 }
 
 /* רישום כשולם — בלי הפקת חשבונית ב-EZcount (מזומן / שולם במקום אחר) */
@@ -304,7 +306,7 @@ async function issueBillingReceipt(issueId, customerId) {
   if (!cust) { toast('לקוח לא נמצא', true); return; }
   document.getElementById('viewBack')?.classList.remove('open');
   if (typeof invOpenModal === 'function') {
-    await invOpenModal(cust, 'invoice_receipt', true, { lines: items, issueId });
+    await invOpenModal(cust, 'invoice_receipt', true, { lines: items, issueId, onDone: () => issueBillingOpen(issueId) });
   } else { toast('מודל החשבונית לא זמין', true); }
 }
 
