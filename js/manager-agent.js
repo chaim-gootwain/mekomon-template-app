@@ -293,6 +293,9 @@ async function mgrCallAgent() {
     } else if (r.data.proposal.name === 'propose_add_task') {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'add_task' };
       await mgrProposeTask(r.data.proposal);
+    } else if (r.data.proposal.name === 'propose_pay_proformas') {
+      _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'pay_proformas' };
+      await mgrProposePayProformas(r.data.proposal);
     } else if (['propose_issue_document', 'propose_pay_existing', 'propose_new_deal'].includes(r.data.proposal.name)) {
       _mgrState.pending = { tool_use_id: r.data.proposal.tool_use_id, kind: 'invoice' };
       await mgrOpenProposal(r.data.proposal);
@@ -945,6 +948,158 @@ async function mgrSendDocumentCancel() {
    אותם כללים של custChargeCancel (כפתור ה-✕ בכרטסת): רק חיוב פתוח,
    בלי תשלומים רשומים (אחרת — זיכוי), מסמכי EZcount לא נגעים; רק
    ספר החוב מתוקן, עם הערה וציר זמן. */
+/* ---------- מס-קבלה אחת על כמה חשבונות עסקה (כרטיס אישור) ----------
+   הסכומים מהמערכת (documents.total, ובהיעדרו — החיוב בכרטסת עם #doc:<מספר>).
+   הקישור ב-EZcount: parent עם כל ה-UUID-ים מופרדים בפסיק. אם EZcount דוחה —
+   לא מופק כלום, ואפשר לבטל בכרטיס את "קישור ב-EZcount" ולהפיק שוב (אותו
+   transaction_id — אין כפילות). בכרטסת התשלום נסגר על החיובים של העסקאות
+   האלה בלבד (target_charge_ids), והעסקאות מסומנות סגורות במערכת. */
+let _mgrMp = null;
+function _mgrMpHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
+async function mgrProposePayProformas(p) {
+  const inp = p.input || {};
+  const cid = Number(inp.customer_id) || 0;
+  const want = [...new Set((inp.doc_numbers || []).map(x => String(x).replace(/\D/g, '')).filter(Boolean))].slice(0, 40);
+  const fail = async (why) => {
+    icSayErr(esc(why));
+    await mgrResolveProposal(p.tool_use_id, 'הכרטיס לא נפתח: ' + why);
+  };
+  if (!cid) { await fail('חסר מזהה לקוח.'); return; }
+  if (!want.length) { await fail('לא הועברו מספרי חשבונות עסקה.'); return; }
+  mgrSetBusy(true);
+  const wait = icSay('מאתר ' + want.length + ' חשבונות עסקה... ⏳');
+  const res = await invChatFindOpenProformas(cid);
+  let charges = [];
+  try { charges = (await db.from('charges').select('id,amount,status,notes').eq('customer_id', cid).ilike('notes', '%#doc:%')).data || []; } catch (e) { }
+  wait && wait.remove();
+  mgrSetBusy(false);
+  if (res.err) { await fail('שגיאה בשליפת המסמכים: ' + res.err); return; }
+  const rows = want.map(num => {
+    const d = (res.rows || []).find(x => String(x.doc_number || '').trim() === num);
+    if (!d) return { num, block: 'לא נמצא פתוח (סגור / לא של הלקוח / לא קיים)' };
+    const chs = charges.filter(c => typeof _icHasDocTag === 'function' && _icHasDocTag(c.notes, num) && !['paid', 'cancelled'].includes(c.status));
+    const amount = Number(d.total) > 0 ? Number(d.total) : chs.reduce((s, c) => s + Number(c.amount || 0), 0);
+    if (!(amount > 0)) return { num, block: 'אין סכום במערכת' };
+    return { num, docId: d.id, uuid: _icProformaUuid(d), amount: Math.round(amount * 100) / 100, chargeIds: chs.map(c => c.id), on: true };
+  });
+  const ok = rows.filter(r => !r.block);
+  if (!ok.length) { await fail('אף חשבון עסקה לא נמצא פתוח: ' + rows.map(r => r.num + ' — ' + r.block).join(' · ')); return; }
+  const pm = ['credit', 'cash', 'transfer', 'check'].includes(inp.payment_method) ? inp.payment_method : '';
+  _mgrMp = { toolUseId: p.tool_use_id, cid, name: String(inp.customer_name || ''), rows,
+    f: { payment_method: pm }, date: /^\d{4}-\d{2}-\d{2}$/.test(String(inp.doc_date || '')) ? inp.doc_date : today(),
+    comment: String(inp.comment || '').trim() };
+  mgrMpRender();
+}
+function mgrMpTotal() { return Math.round(_mgrMp.rows.filter(r => !r.block && r.on).reduce((s, r) => s + r.amount, 0) * 100) / 100; }
+function mgrMpRender() {
+  const s = _mgrMp; if (!s) return;
+  document.getElementById('mgrMpCard')?.remove();
+  const f = s.f;
+  const card = document.createElement('div');
+  card.className = 'ic-card';
+  card.id = 'mgrMpCard';
+  card.innerHTML = `
+    <div class="hd">🧾 חשבונית מס-קבלה על כמה חשבונות עסקה — לאישור</div>
+    <div class="ic-warn">מסמך אחד, שורה לכל עסקה. הסכומים מהמערכת (כולל מע"מ). בכרטסת התשלום נסגר על העסקאות המסומנות בלבד.</div>
+    <div class="field"><label>לקוח</label><input type="text" value="${esc(s.name)}" disabled></div>
+    <div class="table-wrap" style="max-height:260px;overflow:auto"><table class="data"><thead>
+      <tr><th></th><th>חשבון עסקה</th><th>סכום</th></tr></thead>
+      <tbody>${s.rows.map((r, i) => `<tr>
+        <td>${r.block ? '⛔' : `<input type="checkbox" ${r.on ? 'checked' : ''} onchange="_mgrMp.rows[${i}].on=this.checked;mgrMpRender()">`}</td>
+        <td dir="ltr">${esc(r.num)}</td>
+        <td>${r.block ? '<span class="muted">' + esc(r.block) + '</span>' : money(r.amount)}</td>
+      </tr>`).join('')}</tbody></table></div>
+    <div class="grid2" style="margin-top:8px">
+      <div class="field"><label>אמצעי תשלום</label><select onchange="_mgrMp.f.payment_method=this.value;mgrMpRender()">
+        <option value="">— בחר —</option>
+        ${INV_PAY_METHODS.map(m => `<option value="${m.v}" ${m.v === f.payment_method ? 'selected' : ''}>${m.t}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>תאריך המסמך</label><input type="date" value="${esc(s.date)}" onchange="_mgrMp.date=this.value"></div>
+    </div>
+    ${f.payment_method === 'check' ? `<div class="grid2">
+      <div class="field"><label>שם הבנק</label><select onchange="_mgrMp.f.check_bank=this.value"><option value="">— בחר בנק —</option>${INV_BANKS.map(b => `<option ${b === f.check_bank ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></div>
+      <div class="field"><label>מס' צ׳ק</label><input value="${esc(f.check_num || '')}" oninput="_mgrMp.f.check_num=this.value"></div>
+      <div class="field"><label>סניף (אופציונלי)</label><input value="${esc(f.check_branch || '')}" oninput="_mgrMp.f.check_branch=this.value"></div>
+      <div class="field"><label>חשבון (אופציונלי)</label><input value="${esc(f.check_account || '')}" oninput="_mgrMp.f.check_account=this.value"></div>
+      <div class="field"><label>תאריך פירעון (אופציונלי)</label><input type="date" value="${esc(f.check_due || '')}" onchange="_mgrMp.f.check_due=this.value"></div>
+    </div>` : ''}
+    <div class="field"><label>הערה בגוף המסמך (אופציונלי)</label><input type="text" value="${esc(s.comment)}" onchange="_mgrMp.comment=this.value"></div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:.85rem;margin-top:6px"><input type="checkbox" id="mgrMpLink" ${s.noLink ? '' : 'checked'} onchange="_mgrMp.noLink=!this.checked"> קישור ב-EZcount לכל חשבונות העסקה (סוגר אותם גם שם)</label>
+    <div class="ic-sum"><div class="row tot"><span>סה"כ המס-קבלה (${s.rows.filter(r => !r.block && r.on).length} עסקאות)</span><span>${money(mgrMpTotal())}</span></div></div>
+    <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn" id="mgrMpBtn" onclick="mgrPayProformasApprove()">✅ אשר והפק מס-קבלה</button>
+      <button class="btn btn-ghost" onclick="mgrPayProformasCancel()">בטל</button>
+    </div>`;
+  document.getElementById('icLog').appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+async function mgrPayProformasApprove() {
+  const s = _mgrMp; if (!s) return;
+  const sel = s.rows.filter(r => !r.block && r.on);
+  if (!sel.length) { toast('לא נבחרה אף עסקה', true); return; }
+  if (!s.f.payment_method) { toast('בחר אמצעי תשלום', true); return; }
+  const gross = mgrMpTotal();
+  const dstr = /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : today();
+  const payment = { method: s.f.payment_method, sum: gross, date: (typeof _ezDate === 'function' ? _ezDate(dstr) : dstr) };
+  if (!invChatApplyCheck(s.f, payment)) return;
+  const nums = sel.map(r => r.num).sort();
+  const uuids = sel.map(r => r.uuid).filter(Boolean);
+  const body = {
+    customer_id: s.cid,
+    doc_kind: 'invoice_receipt',
+    items: sel.map(r => ({ details: 'תשלום עבור חשבון עסקה ' + r.num, amount: 1, price: r.amount })),
+    vat_included: true,
+    doc_date: dstr,
+    pay_date: dstr,
+    payment,
+    transaction_id: ('emu-mp-c' + s.cid + '-n' + nums.length + '-' + _mgrMpHash(nums.join(','))).slice(0, 45),
+    target_charge_ids: [...new Set(sel.flatMap(r => r.chargeIds))],
+  };
+  if (!s.noLink && uuids.length) body.parent = uuids.join(',');
+  if (s.comment) body.comment = s.comment.slice(0, 300);
+  const btn = document.getElementById('mgrMpBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'מפיק...'; }
+  mgrSetBusy(true);
+  const r = await invChatFn('ezcount-doc', body);
+  mgrSetBusy(false);
+  const doc = r.data && r.data.document;
+  if (r.data && r.data.status === 'pending_allocation') {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והפק מס-קבלה'; }
+    icSayErr('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount והשלם ידנית.');
+    return;
+  }
+  if (r.errMsg || !r.data || !r.data.ok || !doc) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ אשר והפק מס-קבלה'; }
+    icSayErr('ההפקה נכשלה: ' + esc(r.errMsg || 'שגיאה') + '<div class="muted" style="font-size:.78rem;margin-top:4px">שום מסמך לא הופק.' +
+      (body.parent ? ' אם השגיאה קשורה לקישור — בטל בכרטיס את "קישור ב-EZcount" ונסה שוב.' : '') + '</div>');
+    return;
+  }
+  const settledAt = new Date().toISOString();
+  for (const x of sel) {
+    try { await db.from('documents').update({ settled_at: settledAt, settled_by_doc: doc.doc_number ? String(doc.doc_number) : null }).eq('id', x.docId); } catch (e) { }
+  }
+  if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, doc); } catch (e) { console.error('ledger', e); } }
+  try { await addInteraction('customer', s.cid, '🧾 מס-קבלה ' + (doc.doc_number || '') + ' על ' + sel.length + ' חשבונות עסקה (' + nums.join(', ') + ') — ' + money(gross)); } catch (e) { }
+  document.getElementById('mgrMpCard')?.remove();
+  icSayOk('✅ הופקה <b>חשבונית מס-קבלה</b>' + (doc.doc_number ? ' <b dir="ltr">' + esc(String(doc.doc_number)) + '</b>' : '') +
+    ' ל<b>' + esc(s.name) + '</b> על ' + sel.length + ' חשבונות עסקה · סה"כ <b>' + money(gross) + '</b>' +
+    (doc.pdf_url ? `<div class="ic-choices"><a class="btn btn-sm" href="${esc(doc.pdf_url)}" target="_blank" rel="noopener">📄 פתח PDF</a></div>` : ''));
+  const skipped = s.rows.filter(x => x.block);
+  const id = s.toolUseId;
+  _mgrMp = null;
+  await mgrResolveProposal(id, 'אושר והופק בפועל: חשבונית מס-קבלה ' + (doc.doc_number || '') + ' על ' + money(gross) + ' — עסקאות ' + nums.join(', ') +
+    (body.parent ? ' (קושרו ב-EZcount)' : ' (בלי קישור ב-EZcount)') + '.' +
+    (skipped.length ? ' לא נכללו: ' + skipped.map(x => x.num + ' — ' + x.block).join(', ') + '.' : ''));
+}
+async function mgrPayProformasCancel() {
+  const s = _mgrMp; if (!s) return;
+  document.getElementById('mgrMpCard')?.remove();
+  icSay('בוטל — לא הופק מסמך.');
+  const id = s.toolUseId;
+  _mgrMp = null;
+  await mgrResolveProposal(id, 'המשתמש ביטל — לא הופק מסמך.');
+}
+
 /* ---------- רישום חיוב ידני / חוב ישן (כרטיס אישור) ----------
    אותה כתיבה כמו "+ חיוב ידני" במסך הגבייה (insert ל-charges, RLS אוכף).
    תאריך החיוב קובע את סדר סגירת התשלומים — לחוב ישן מזינים את התאריך
