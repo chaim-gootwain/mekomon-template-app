@@ -200,6 +200,7 @@ async function invOpenModal(c, kind, isPayment, opts = {}) {
     orderRef: opts.orderRef || '',
     lines: _lines,
     adIds: (Array.isArray(opts.adIds) && opts.adIds.length) ? opts.adIds.slice() : null,
+    payLink: 'amount', // קישור לתשלום באשראי על המסמך: amount (סכום המסמך) / balance (כל היתרה) / none
     onDone: typeof opts.onDone === 'function' ? opts.onDone : null, // הפקה רצופה — חזרה לקורא במקום לכרטיס
     contractId: opts.contractId || null, // חשבונית על חוזה שלם → סימון "חויב מראש"
     srcLabel2: opts.label || null,
@@ -287,6 +288,12 @@ function invRenderModal() {
       <select onchange="invSetKind(this.value)">
         <option value="proforma" ${s.kind === 'proforma' ? 'selected' : ''}>חשבון עסקה</option>
         <option value="tax_invoice" ${s.kind === 'tax_invoice' ? 'selected' : ''}>חשבונית מס</option>
+      </select></div>
+      <div class="field"><label>💳 קישור לתשלום באשראי (על המסמך ובמייל)</label>
+      <select onchange="_invState.payLink=this.value">
+        <option value="amount" ${s.payLink === 'amount' ? 'selected' : ''}>על סכום המסמך</option>
+        <option value="balance" ${s.payLink === 'balance' ? 'selected' : ''}>על כל היתרה הפתוחה</option>
+        <option value="none" ${s.payLink === 'none' ? 'selected' : ''}>בלי קישור</option>
       </select></div>` : (!s.parentUuid ? `<div class="field"><label>סוג מסמך</label>
       <select onchange="invSetKind(this.value)">
         <option value="invoice_receipt" ${s.kind === 'invoice_receipt' ? 'selected' : ''}>חשבונית מס קבלה (תשלום מיידי)</option>
@@ -425,6 +432,7 @@ async function invSubmit() {
     '\nסה"כ לתשלום: ' + money(_tb.total) +
     '\nתאריך המסמך: ' + (s.docDate || today()) +
     '\n\nלהפיק? (לאחר ההפקה לא ניתן לבטל בקלות)')) return;
+  if (!s.isPayment) body.pay_link = s.payLink || 'amount';
   const _onDone = s.onDone;
   invCloseModal();
   await invCall(body, { stay: !!_onDone });
@@ -613,9 +621,30 @@ async function invFreshTxn(txn) {
   } catch (e) { return txn; }
 }
 
+/* קישור לתשלום באשראי למסמך חיוב (חשבון עסקה / חשבונית מס), דרך נקודת הקצה pay-link
+   של המופע (mgrPayLinkMint). body.pay_link: 'amount' (ברירת מחדל — סכום המסמך כולל מע"מ),
+   'balance' (כל היתרה הפתוחה), 'none'. מסמך תשלום / מופע בלי סליקה / סוכן ללקוח לא שלו — בלי קישור. */
+async function invPayLinkFor(body) {
+  const mode = body.pay_link || 'amount';
+  if (mode === 'none' || !['proforma', 'tax_invoice'].includes(body.doc_kind) || !body.customer_id) return null;
+  if (typeof mgrPayLinkMint !== 'function') return null;
+  try {
+    let amt = 0;
+    if (mode === 'amount') {
+      const base = (body.items || []).reduce((t, it) => t + (Number(it.amount) || 0) * (Number(it.price) || 0), 0);
+      amt = Math.round((body.vat_included ? base : base * (1 + _invVatRate())) * 100) / 100;
+      if (!(amt > 0)) return null;
+    }
+    const r = await mgrPayLinkMint(Number(body.customer_id), amt, amt > 0 ? { note: String(body.comment || '').slice(0, 120) } : {});
+    if (r && r.link && r.link.url) return r.link.url;
+    if (r && r.err) console.warn('pay-link', r.err);
+  } catch (e) { console.warn('pay-link', e); }
+  return null;
+}
+
 /* ללקוח אין מייל: חלון קטן — הזנת מייל, שמירה בכרטיס הלקוח ושליחת המסמך שהופק
    (send-email עם attach_document_id — מוריד את ה-PDF בשרת). "דלג" — ממשיכים בלי. */
-function invAskEmailAndSend(cid, doc, kind) {
+function invAskEmailAndSend(cid, doc, kind, payUrl) {
   return new Promise(resolve => {
     const c = (cache.customers || []).find(x => x.id === cid) || {};
     const label = (DOC_KIND_HE[kind] || 'מסמך') + (doc.doc_number ? ' ' + doc.doc_number : '');
@@ -648,7 +677,7 @@ function invAskEmailAndSend(cid, doc, kind) {
         const { data, error } = await db.functions.invoke('send-email', { body: {
           to: em, customer_id: cid, attach_document_id: doc.id,
           subject: label + ' — @@PAPER_NAME@@',
-          body: 'שלום ' + (c.name || '') + ',\nמצורף ' + label + '.\nתודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@',
+          body: 'שלום ' + (c.name || '') + ',\nמצורף ' + label + '.\n' + (payUrl ? 'לתשלום מאובטח באשראי: ' + payUrl + '\n' : '') + 'תודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@',
         } });
         if (error || !data || !data.ok) {
           let m = '';
@@ -672,7 +701,14 @@ async function invCall(body, opts = {}) {
   toast('מפיק מסמך...');
   try {
     if (body.transaction_id) body.transaction_id = await invFreshTxn(body.transaction_id);
+    // קישור לתשלום באשראי — מודפס בהערות המסמך (מגיע ללקוח גם במייל של EZcount)
+    const _origComment = body.comment;
+    const _payUrl = await invPayLinkFor(body);
+    if (_payUrl) body.comment = (body.comment ? body.comment + ' · ' : '') + 'לתשלום מאובטח באשראי: ' + _payUrl;
+    const _payMode = body.pay_link; delete body.pay_link;
     const { data, error } = await db.functions.invoke('ezcount-doc', { body });
+    // ספר החוב / התיאור הפנימי — בלי הקישור
+    body.comment = _origComment; if (_payMode) body.pay_link = _payMode;
     if (error) {
       let msg = 'שגיאה';
       try { if (error.context && typeof error.context.json === 'function') { const j = await error.context.json(); msg = j.detail || j.error || msg; } } catch (e) { }
@@ -687,8 +723,9 @@ async function invCall(body, opts = {}) {
         const _c = (cache.customers || []).find(x => x.id === Number(body.customer_id)) || {};
         const _em = String(_c.email || '').trim();
         const _auto = String((cache.settings || {}).ezcount_autosend || '') === '1';
-        if (!_em) { _needEmail = true; toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + ' · ⚠ ללקוח אין מייל — המסמך לא נשלח אליו', true); }
-        else toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + (_auto ? ' · נשלח במייל ל-' + _em : ''));
+        const _pl = _payUrl ? ' · כולל קישור לתשלום באשראי' : '';
+        if (!_em) { _needEmail = true; toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + _pl + ' · ⚠ ללקוח אין מייל — המסמך לא נשלח אליו', true); }
+        else toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + (_auto ? ' · נשלח במייל ל-' + _em : '') + _pl);
       } else toast('✅ הופק מסמך ' + _num + ' — ה-PDF יהיה מוכן בעוד רגע');
       if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
       // מסמך תשלום המשויך למסמך מקור (parent) — מסמנים את המקור כסגור,
@@ -709,7 +746,7 @@ async function invCall(body, opts = {}) {
       // חשבונית על חוזה שלם: גם דגל "חויב מראש" (מודעות עתידיות מהחוזה ייוולדו מסומנות)
       try { await invLinkAdsToDoc(data.document, body.ad_ids, body.contract_ref || null); } catch (e) { console.error('mark invoiced', e); }
       // הפקה רצופה ללקוח בלי מייל — הזדמנות להוסיף מייל ולשלוח את המסמך מיד
-      if (_needEmail && data.document && data.document.id) await invAskEmailAndSend(Number(body.customer_id), data.document, body.doc_kind);
+      if (_needEmail && data.document && data.document.id) await invAskEmailAndSend(Number(body.customer_id), data.document, body.doc_kind, _payUrl);
     } else if (data && data.status === 'pending_allocation') {
       toast('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount', true);
     } else {
