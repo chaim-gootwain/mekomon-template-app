@@ -349,6 +349,13 @@ function _nameStrongMatch(a, b) {
   const [small, big] = x.length <= y.length ? [x, new Set(y)] : [y, new Set(x)];
   return small.length >= 2 && small.every(w => big.has(w));
 }
+/* לידים/לקוחות עם טלפון "קרוב" (RPC ‏phone_near_matches). בלי המיגרציה — רשימה ריקה */
+async function leadPhoneNear(phone) {
+  try {
+    const { data, error } = await db.rpc('phone_near_matches', { p_phone: phone });
+    return error ? [] : (data || []);
+  } catch (e) { return []; }
+}
 /* לקוח באותו שם (זהה או מוכל) — של כל סוכן (כולל שלי). מחזיר { name, agent } או null */
 async function customerSameName(name) {
   const words = leadNameWords(name);
@@ -441,6 +448,14 @@ function leadQuickAdd() {
           throw new Error('duplicate-other-cancel');
         }
       }
+    }
+    /* טלפון "קרוב" (אותו מספר חוץ מהספרות האחרונות — קו אחר של אותו עסק) — התראה עם הפרטים */
+    if (rec.phone) {
+      const near = await leadPhoneNear(rec.phone);
+      if (near.length && !confirm(
+        `שים לב: יש במערכת טלפון כמעט זהה (${rec.phone}) — ייתכן שזה אותו עסק בקו אחר:\n` +
+        near.map(n => `• ${n.kind === 'lead' ? 'ליד' : 'לקוח'} "${n.name}"${n.phone ? ' · ' + n.phone : ''} · ${n.agent_name || (n.kind === 'lead' ? 'מאגר ללא שיוך' : 'ללא סוכן')}`).join('\n') +
+        '\n\nלהוסיף את הליד בכל זאת?')) throw new Error('near-phone-cancel');
     }
     /* כבר לקוח (שם זהה, של כל סוכן) — לא פותחים עליו ליד */
     const _asCust = await customerSameName(rec.name);
