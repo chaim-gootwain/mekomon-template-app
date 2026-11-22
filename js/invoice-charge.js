@@ -162,7 +162,8 @@ async function applyInvoiceToLedger(body, doc) {
       const _adIds = (body.ad_ids || []).map(Number).filter(n => n > 0);
       if (_adIds.length) {
         try {
-          const _adCh = (await db.from('charges').select('id,notes').eq('customer_id', cid).in('ad_id', _adIds).eq('status', 'pending')).data || [];
+          // גם 'overdue': חיוב מודעה שעבר מועדו (billing.js מסמן) — אחרת נשאר כפול (לרנר נחמה, 22.11.2026)
+          const _adCh = (await db.from('charges').select('id,notes').eq('customer_id', cid).in('ad_id', _adIds).in('status', ['pending', 'overdue'])).data || [];
           for (const r of _adCh) {
             const _p = (await db.from('payments').select('id').eq('charge_id', r.id).limit(1)).data || [];
             if (_p.length) continue;
