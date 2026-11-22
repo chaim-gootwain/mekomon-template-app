@@ -613,6 +613,59 @@ async function invFreshTxn(txn) {
   } catch (e) { return txn; }
 }
 
+/* ללקוח אין מייל: חלון קטן — הזנת מייל, שמירה בכרטיס הלקוח ושליחת המסמך שהופק
+   (send-email עם attach_document_id — מוריד את ה-PDF בשרת). "דלג" — ממשיכים בלי. */
+function invAskEmailAndSend(cid, doc, kind) {
+  return new Promise(resolve => {
+    const c = (cache.customers || []).find(x => x.id === cid) || {};
+    const label = (DOC_KIND_HE[kind] || 'מסמך') + (doc.doc_number ? ' ' + doc.doc_number : '');
+    document.getElementById('invMailOv')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'invMailOv';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:16px';
+    ov.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <h3 style="margin:0 0 6px">✉️ ללקוח אין מייל</h3>
+      <p style="font-size:.9rem;margin:0 0 10px">${esc(label)} הופק ל<b>${esc(c.name || 'לקוח')}</b>, אבל אין לו מייל בכרטיס. הזן מייל — הוא יישמר בכרטיס והמסמך יישלח אליו עכשיו.</p>
+      <input type="email" id="invMailInp" dir="ltr" placeholder="name@example.com" style="width:100%">
+      <div class="m-actions" style="justify-content:flex-start;margin-top:12px">
+        <button class="btn" id="invMailBtn">💾 שמור ושלח</button>
+        <button class="btn btn-ghost" id="invMailSkip">דלג</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const done = () => { ov.remove(); resolve(); };
+    ov.querySelector('#invMailSkip').onclick = done;
+    const inp = ov.querySelector('#invMailInp');
+    setTimeout(() => inp.focus(), 50);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') ov.querySelector('#invMailBtn').click(); });
+    ov.querySelector('#invMailBtn').onclick = async () => {
+      const em = String(inp.value || '').trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { toast('כתובת מייל לא תקינה', true); return; }
+      const btn = ov.querySelector('#invMailBtn'); btn.disabled = true; btn.textContent = 'שולח...';
+      try {
+        const up = await db.from('customers').update({ email: em }).eq('id', cid);
+        if (up.error) throw up.error;
+        if (c.id) c.email = em;
+        const { data, error } = await db.functions.invoke('send-email', { body: {
+          to: em, customer_id: cid, attach_document_id: doc.id,
+          subject: label + ' — @@PAPER_NAME@@',
+          body: 'שלום ' + (c.name || '') + ',\nמצורף ' + label + '.\nתודה רבה, @@PAPER_NAME@@ · @@PAPER_PHONE@@',
+        } });
+        if (error || !data || !data.ok) {
+          let m = '';
+          try { if (error && error.context && typeof error.context.json === 'function') { const j = await error.context.json(); m = j.detail || j.error || ''; } } catch (e) { }
+          throw new Error(m || (data && (data.detail || data.error)) || 'שליחת המייל נכשלה');
+        }
+        try { await addInteraction('customer', cid, '✉️ ' + label + ' נשלח במייל ל-' + em + ' (המייל נוסף לכרטיס)'); } catch (e) { }
+        toast('✅ המייל נשמר בכרטיס ו' + label + ' נשלח ל-' + em);
+        done();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = '💾 שמור ושלח';
+        toast('נכשל: ' + String(e && e.message || e), true);
+      }
+    };
+  });
+}
+
 /* opts.stay — הפקה רצופה (חיוב הגיליון): לא קופצים לכרטיס הלקוח אחרי ההפקה,
    רק הודעת אישור + התראה אם ללקוח אין מייל, והקורא חוזר לרשימה ללקוח הבא */
 async function invCall(body, opts = {}) {
@@ -629,11 +682,12 @@ async function invCall(body, opts = {}) {
     }
     if (data && data.ok) {
       const _num = (data.document && data.document.doc_number) ? data.document.doc_number : '';
+      let _needEmail = false;
       if (opts.stay) {
         const _c = (cache.customers || []).find(x => x.id === Number(body.customer_id)) || {};
         const _em = String(_c.email || '').trim();
         const _auto = String((cache.settings || {}).ezcount_autosend || '') === '1';
-        if (!_em) toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + ' · ⚠ ללקוח אין מייל — המסמך לא נשלח אליו', true);
+        if (!_em) { _needEmail = true; toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + ' · ⚠ ללקוח אין מייל — המסמך לא נשלח אליו', true); }
         else toast('✅ הופק מסמך ' + _num + ' ל' + (_c.name || 'לקוח') + (_auto ? ' · נשלח במייל ל-' + _em : ''));
       } else toast('✅ הופק מסמך ' + _num + ' — ה-PDF יהיה מוכן בעוד רגע');
       if (typeof applyInvoiceToLedger === 'function') { try { await applyInvoiceToLedger(body, data.document); } catch (e) { console.error('ledger sync', e); toast('⚠ שגיאה בסנכרון ספר החוב — בדוק כרטסת הלקוח ידנית', true); } }
@@ -654,6 +708,8 @@ async function invCall(body, opts = {}) {
       // סימון המודעות "חשבונית הופקה" + שמירת הקישור על המסמך (לשחזור בביטול).
       // חשבונית על חוזה שלם: גם דגל "חויב מראש" (מודעות עתידיות מהחוזה ייוולדו מסומנות)
       try { await invLinkAdsToDoc(data.document, body.ad_ids, body.contract_ref || null); } catch (e) { console.error('mark invoiced', e); }
+      // הפקה רצופה ללקוח בלי מייל — הזדמנות להוסיף מייל ולשלוח את המסמך מיד
+      if (_needEmail && data.document && data.document.id) await invAskEmailAndSend(Number(body.customer_id), data.document, body.doc_kind);
     } else if (data && data.status === 'pending_allocation') {
       toast('ממתין למספר הקצאה מרשות המסים — בדוק ב-EZcount', true);
     } else {
