@@ -99,3 +99,29 @@ async function _mgDo(gi) {
 }
 
 function _mgClose() { const ov = document.getElementById('mergeOverlay'); if (ov) ov.remove(); }
+
+/* איחוד ידני מכרטיס לקוח: הלקוח הפתוח נשמר, ובוחרים את הכפול שיאוחד לתוכו.
+   לכפילויות שהסריקה לא מזהה (שם שונה / בלי טלפון — "קידישיק" מול "קידישיק שיווק 2010").
+   merge_customers (מיגרציה 2026-11-22_merge_customers_v2) מעביר את כל ההפניות ומוחק את הכפול. */
+function custMergeInto(keepId) {
+  if (profile.role !== 'admin') { toast('רק מנהל יכול לאחד לקוחות', true); return; }
+  const keepName = nameOf('customers', keepId) || ('#' + keepId);
+  document.getElementById('viewBack')?.classList.remove('open');
+  openForm('איחוד לקוח כפול לתוך "' + keepName + '"', [
+    { type: 'html', html: `<div style="grid-column:1/-1;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;font-size:.85rem">
+      הכרטיס <b>${esc(keepName)}</b> נשמר. כל המודעות, החיובים, התשלומים, החוזים, המסמכים, המשימות והיסטוריית הלקוח הכפול יועברו אליו,
+      שדות ריקים כאן יושלמו מהכפול, והכפול יימחק. <b>פעולה בלתי-הפיכה.</b></div>` },
+    { name: 'dup_id', label: 'הלקוח הכפול (יימחק)', type: 'customer', required: true },
+  ], {}, async (rec) => {
+    const dupId = Number(rec.dup_id);
+    if (!dupId || dupId === Number(keepId)) { toast('בחר לקוח אחר מהכרטיס הזה', true); throw new Error('same'); }
+    const dupName = nameOf('customers', dupId) || ('#' + dupId);
+    if (!confirm(`לאחד את "${dupName}" לתוך "${keepName}"?\n\n"${dupName}" יימחק, וכל מה שהיה שלו יעבור אל "${keepName}".\nפעולה בלתי-הפיכה.`)) throw new Error('cancel');
+    await run(db.rpc('merge_customers', { p_keep: Number(keepId), p_dup: dupId }), 'האיחוד נכשל');
+    toast(`✓ "${dupName}" אוחד לתוך "${keepName}"`);
+    try { if (typeof _customers !== 'undefined') _customers = await custLoadAll(); } catch (e) { }
+    await refreshCache();
+    setTimeout(() => openCustomerCard(Number(keepId)), 50);
+  });
+}
+
