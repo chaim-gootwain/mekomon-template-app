@@ -56,6 +56,7 @@ const SYSTEM_STABLE = `אתה "סוכן המקומון" — העוזר האיש�
 - מע"מ: "+" צמוד לסכום ("250+") או "+ מע\"מ" → המחיר לפני מע"מ (price_includes_vat=false). "כולל מע\"מ" → true. לא צוין → false (לפני מע"מ; הכרטיס מציג זאת לאישור).
 - אמצעי תשלום: אשראי → credit · מזומן → cash · העברה → transfer · צ'ק/שיק → check. קבלה ומס-קבלה מחייבות אמצעי תשלום.
 - כמויות ומחירים גם במילים ("פעמיים"=2, "חמש מאות"=500).
+- מס-קבלה אחת על כמה חשבונות עסקה ("תוציא מס-קבלה ותקשר לה את 90048, 90124...") → search_customers ואז ישר propose_pay_proformas עם כל המספרים. אל תקרא כל מסמך בנפרד — הכרטיס מביא את הסכומים בעצמו ומסמן מה לא נמצא/כבר סגור.
 - "לקוח שילם" בלי סכום חדש → propose_pay_existing (הסכום יילקח מחשבון העסקה הפתוח שלו במערכת). אם ננקב סכום מפורש להפקה — זו הפקה רגילה (propose_issue_document).
 - תשלום על חיוב מסוים ("שילם את החוב הישן", "קבלה על ח.ע. 10217"): כש-propose_pay_existing לא מוצא את העסקה (ישנה/הופקה מחוץ למסלול) — get_customer_status למצוא את charge_id, ואז propose_issue_document (receipt או tax_invoice_receipt) עם target_charge_ids=[charge_id] ו-target_label. התשלום יירד בכרטסת בדיוק מהחיובים האלה; בלי target_charge_ids הוא נפרס מהחוב הישן לחדש. בתיאור השורה כתוב על מה התשלום.
 - חיוב חודשי: "מי מוגדר בחיוב חודשי" → get_monthly_billing_customers; ללקוח בודד — monthly_billing ב-get_customer_status. לקוח חודשי מדולג בחיוב הגיליון ומחויב במרוכז בסוף החודש. אין לך כלי להפעיל/לבטל חיוב חודשי — זה נעשה מכרטיס הלקוח במסך; אמור זאת כשמבקשים.
@@ -410,6 +411,22 @@ const TOOLS = [
         payment_method: { type: 'string', enum: ['credit', 'cash', 'transfer', 'check'], description: 'אם המנהל ציין; אחרת השמט' }
       },
       required: ['customer_id', 'customer_name']
+    }
+  },
+  {
+    name: 'propose_pay_proformas',
+    description: 'הצעת חשבונית מס-קבלה אחת שסוגרת כמה חשבונות עסקה פתוחים ביחד (תשלום אחד על כמה עסקאות). מקבל את מספרי חשבונות העסקה — הסכומים נלקחים מהמערכת, אין צורך לקרוא כל מסמך. הכרטיס מציג שורה לכל עסקה, סה"כ, ואמצעי תשלום; התשלום נרשם בכרטסת על החיובים של העסקאות האלה בלבד. מחייב לקוח קיים.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'number' },
+        customer_name: { type: 'string' },
+        doc_numbers: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 40, description: 'מספרי חשבונות העסקה כפי שהמנהל נתן (למשל ["90048","90124"])' },
+        payment_method: { type: 'string', enum: ['credit', 'cash', 'transfer', 'check'], description: 'אם המנהל ציין; אחרת השמט' },
+        doc_date: { type: 'string', description: 'תאריך המסמך YYYY-MM-DD — רק אם המנהל ביקש תאריך שאינו היום' },
+        comment: { type: 'string', description: 'הערה בגוף המסמך (אופציונלי)' }
+      },
+      required: ['customer_id', 'customer_name', 'doc_numbers']
     }
   },
   {
