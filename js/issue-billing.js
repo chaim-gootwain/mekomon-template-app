@@ -11,7 +11,8 @@ issue-billing.js — לולאת מודעה ← חשבונית (צד ניהול)
 
 // תאריכים ניתנים לעריכה בהפקה ממסך החיוב: תאריך המסמך (ברירת מחדל = תאריך הגיליון/יעד הדפוס) + תאריך התשלום
 let _ibDates = { doc: '', pay: '' };
-let _ibKind = null; // סוג המסמך שנבחר בתצוגה המקדימה (חשבון עסקה / חשבונית מס)
+let _ibKind = null;
+let _ibPay = 'amount'; // קישור לתשלום באשראי על המסמך: amount / balance / none // סוג המסמך שנבחר בתצוגה המקדימה (חשבון עסקה / חשבונית מס)
 
 function _ibLabel(t) { return (t || '').trim() === 'כתבות' ? 'מידע לתושב' : (t || 'מודעה'); }
 function _ibSize(a) { try { const z = (typeof nameOf === 'function') ? nameOf('priceList', a.price_item_id) : ''; return z || ''; } catch (e) { return ''; } }
@@ -154,6 +155,7 @@ async function issueBillingPreview(issueId, customerId) {
   const total = items.reduce((s, it) => s + it.amount * it.price, 0);
   const docKind = _ibDocKind(customerId);
   _ibKind = docKind; // ברירת מחדל לסוג המסמך לפי הלקוח
+  _ibPay = 'amount';
   // ברירות מחדל לתאריכים: תאריך המסמך = תאריך הגיליון (יעד הדפוס), תאריך התשלום = היום
   _ibDates = { doc: (issue.print_date || issue.publish_date || today()).slice(0, 10), pay: today() };
   // עריכה ישירה של שורת מודעה מהתצוגה המקדימה — מחיר/הנחה/גודל/תיאור. אחרי
@@ -185,6 +187,12 @@ async function issueBillingPreview(issueId, customerId) {
       <select onchange="_ibKind=this.value">
         <option value="proforma" ${docKind === 'proforma' ? 'selected' : ''}>חשבון עסקה</option>
         <option value="tax_invoice" ${docKind === 'tax_invoice' ? 'selected' : ''}>חשבונית מס</option>
+      </select></div>
+    <div class="field"><label>💳 קישור לתשלום באשראי (על המסמך ובמייל)</label>
+      <select onchange="_ibPay=this.value">
+        <option value="amount" selected>על סכום החשבונית</option>
+        <option value="balance">על כל היתרה הפתוחה</option>
+        <option value="none">בלי קישור</option>
       </select></div>
     <div class="grid2" style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="field"><label>תאריך המסמך</label>
@@ -218,6 +226,7 @@ async function issueBillingIssue(issueId, customerId) {
     transaction_id: 'emu-iss' + issueId + '-cust' + customerId + '-' + docKind,
     comment: 'גיליון ' + issue.issue_number,
     ad_ids: ads.map(a => a.id),
+    pay_link: _ibPay || 'amount',
   }, { stay: true });
   // נשארים בחיוב הגיליון (בלי לקפוץ לכרטיס הלקוח) — הרשימה מתעדכנת, ממשיכים ללקוח הבא
   await issueBillingOpen(issueId);
