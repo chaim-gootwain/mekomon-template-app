@@ -426,13 +426,15 @@ async function issueBillingSetMonthly(issueId, customerId) {
             div.style.cssText = 'margin-top:12px;padding:10px;border:1px solid var(--line,#e5e7eb);border-radius:10px;background:#fbfdff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap';
             div.innerHTML = `<span><b>אופן חיוב:</b> ${on ? '<span class="pill amber">חודשי — חשבונית אחת בסוף החודש</span>' : 'לפי גיליון'}</span>
               <button id="mbToggle" class="btn btn-sm ${on ? 'btn-ghost' : ''}" onclick="toggleMonthlyBilling(${id})">${on ? 'בטל חיוב חודשי' : '🔁 הפוך לחיוב חודשי'}</button>`;
-            modal.appendChild(div);
+            // בתוך לשונית "כספים" (אם קיימת), אחרת בתחתית הכרטיס
+            const host = document.getElementById('ccBilling') || modal;
+            host.appendChild(div);
             const po = isPagesOnlyCustomer(id);
             const div2 = document.createElement('div');
             div2.style.cssText = div.style.cssText;
             div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
               <button class="btn btn-sm ${po ? 'btn-ghost' : ''}" onclick="togglePagesOnlyInvoice(${id})">${po ? 'חזרה לפירוט מלא' : '🧾 פירוט מקוצר'}</button>`;
-            modal.appendChild(div2);
+            host.appendChild(div2);
           }
         }
       } catch (e) { console.error('monthly-billing', e); }
