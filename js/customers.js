@@ -310,20 +310,17 @@ const portalUrl = location.href.replace(/index\.html.*$/, '').replace(/\/$/, '')
 
 const modal = document.getElementById('viewModal');
 modal.innerHTML = `
-<h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span>${(c.crm_status && c.crm_status !== 'active' && CRM_STATUS[c.crm_status]) ? ` <span class="pill ${CRM_STATUS[c.crm_status][1]}">${CRM_STATUS[c.crm_status][0]}</span>` : ''}${(() => { const ag = c.agency_id && (cache.agencies || []).find(a => a.id === c.agency_id); return ag ? ` <span class="pill blue" title="לקוח דרך סוכנות">🏢 ${esc(ag.name)}</span>` : ''; })()}</h3>
+<div class="cc-head"><h3>${esc(c.name)} <span class="pill ${st[1]}">${st[0]}</span>${(c.crm_status && c.crm_status !== 'active' && CRM_STATUS[c.crm_status]) ? ` <span class="pill ${CRM_STATUS[c.crm_status][1]}">${CRM_STATUS[c.crm_status][0]}</span>` : ''}${(() => { const ag = c.agency_id && (cache.agencies || []).find(a => a.id === c.agency_id); return ag ? ` <span class="pill blue" title="לקוח דרך סוכנות">🏢 ${esc(ag.name)}</span>` : ''; })()}</h3>
+${(c.tags && c.tags.length) || canWrite ? `<span class="cc-tags">${(c.tags || []).map(t => `<span class="ctag"${canWrite ? ` onclick="custEditTags(${id})" title="עריכת תגיות"` : ''}>${esc(t)}</span>`).join('')}${canWrite ? `<button class="cc-addtag" onclick="custEditTags(${id})">+ תגית</button>` : ''}</span>` : ''}
+<span style="flex:1"></span>
+<button class="btn btn-sm btn-ghost" onclick="custToggleDetails(this)">כל הפרטים ▾</button>
+</div>
 ${c.status !== 'active' && c.status_reason ? `<p style="color:var(--danger);font-size:.85rem;margin-top:-10px">סיבה: ${esc(c.status_reason)}</p>` : ''}
 ${(canWrite && !(c.business_id && String(c.business_id).trim())) ? `<div style="background:#fdecec;border:1px solid #f5b5b5;color:#b91c1c;border-radius:9px;padding:8px 12px;margin:6px 0;font-size:.86rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">⚠ חסר <b>ח.פ / עוסק</b> — יש להשלים לפני הפקת חשבונית. <button class="btn btn-sm" style="background:var(--brand)" onclick="customerEdit(${id})">✎ השלמת ח.פ</button></div>` : ''}
-${canWrite ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px">
-<span style="font-size:.8rem;color:#64748b">תגיות:</span>
-${(typeof custTagChips === 'function' ? custTagChips(c.tags) : '')}
-<button class="btn btn-sm btn-ghost" onclick="custEditTags(${id})">✎ עריכת תגיות</button>
-</div>` : ''}
-
-<div style="font-size:.9rem;color:#334155;margin:2px 0 6px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-<span dir="ltr">📞 ${esc(c.phone) || '—'}</span>
-<span>סוכן: ${esc(nameOf('agents', c.agent_id)) || '—'}</span>
-<span>${PAY_TERMS[c.payment_terms] || ''}</span>
-<button class="btn btn-sm btn-ghost" onclick="custToggleDetails(this)">כל הפרטים ▾</button>
+<div class="cc-meta">
+${c.phone ? `<span dir="ltr">📞 ${esc(c.phone)}</span>` : (canWrite ? `<button class="cc-add" onclick="custEditFocus(${id},'phone')"><b>+</b> הוסף טלפון</button>` : '')}
+${nameOf('agents', c.agent_id) ? `<span>סוכן: <b>${esc(nameOf('agents', c.agent_id))}</b></span>` : (canWrite ? `<button class="cc-add" onclick="custEditFocus(${id},'agent_id')"><b>+</b> הוסף סוכן</button>` : '')}
+${PAY_TERMS[c.payment_terms] ? `<span>תנאי תשלום: <b>${PAY_TERMS[c.payment_terms]}</b></span>` : ''}
 </div>
 <div id="ccGrid" class="grid3 hidden" style="font-size:.9rem">
 <div><label>איש קשר</label><b>${esc(c.contact_person) || '—'}</b></div>
@@ -347,19 +344,29 @@ ${canMoney ? `
 <div style="font-size:1.7rem;font-weight:800;color:${debt > 0 ? '#b91c1c' : '#15803d'}">${money(debt) || '₪0'}</div>
 <div style="font-size:.76rem;color:#475569;margin-top:2px">${openCh.length} חיובים פתוחים${overdueAmt > 0 ? ` · <b style="color:#b91c1c">${money(overdueAmt)} באיחור</b>` : ''}${creditLimit > 0 ? ` · מסגרת ${money(creditLimit)}${overLimit ? ' <b style="color:#b91c1c">חריגה!</b>' : ''}` : ''}</div>
 </div>
-<div class="cc-kpi" style="flex:1;min-width:120px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:12px;text-align:center;display:flex;flex-direction:column;justify-content:center"><div style="font-size:1.25rem;font-weight:800;color:#0369a1">${money(adRevenue)}</div><div style="font-size:.72rem;color:#475569">הכנסות ממודעות</div></div>
-<div class="cc-kpi" style="flex:1;min-width:100px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;padding:12px;text-align:center;display:flex;flex-direction:column;justify-content:center"><div style="font-size:1.25rem;font-weight:800;color:#7e22ce">${issuesSet.size}</div><div style="font-size:.72rem;color:#475569">גיליונות</div></div>
+<div class="cc-kpi" style="flex:1;min-width:160px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;justify-content:center;gap:2px"><div style="font-size:.78rem;color:#64748b">הכנסות ממודעות</div><div style="display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap"><span style="font-size:1.35rem;font-weight:800;color:#0369a1">${money(adRevenue) || '₪0'}</span><span style="font-size:.88rem;font-weight:700;color:#7e22ce">${issuesSet.size} גיליונות</span></div></div>
 </div>
-${nextIssue ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:${bookedNext ? '#f0fdf4' : '#fffbeb'};border:1px solid ${bookedNext ? '#bbf7d0' : '#fde68a'};color:${bookedNext ? '#15803d' : '#92400e'}">${bookedNext ? '✓ מוזמן לגיליון הקרוב' : '⚠ טרם הזמין לגיליון הקרוב'} — גיליון ${nextIssue.issue_number}${nextIssue.publish_date ? ' (' + heDate(nextIssue.publish_date) + ')' : ''}</div>` : ''}
-${churnRisk ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">⚠ <b>בסיכון נטישה</b> — לא פרסם ${churnGapCount} גיליונות ברצף</div>` : ''}
+${(() => {
+  // גיליון קרוב + סיכון נטישה: כששניהם חלים — שורה אחת עם כפתור להוספת מודעה לגיליון הקרוב
+  const notBooked = !!(nextIssue && !bookedNext);
+  const nextTxt = nextIssue ? 'גיליון ' + nextIssue.issue_number + (nextIssue.publish_date ? ' (' + heDate(nextIssue.publish_date) + ')' : '') : '';
+  const addBtn = (notBooked && canWrite) ? `<button class="btn btn-sm" style="margin-inline-start:auto" onclick="adAdd({customer_id:${id}, issue_id:${nextIssue.id}})">+ מודעה לגיליון ${nextIssue.issue_number}</button>` : '';
+  const box = (bg, bd, fg, html) => `<div class="cc-alert" style="background:${bg};border:1px solid ${bd};color:${fg}">${html}</div>`;
+  if (churnRisk && notBooked) return box('#fef2f2', '#fecaca', '#991b1b', `<span>⚠ <b>בסיכון נטישה</b> — לא פרסם ${churnGapCount} גיליונות ברצף · טרם הזמין ל${nextTxt}</span>${addBtn}`);
+  let out = '';
+  if (nextIssue) out += bookedNext
+    ? box('#f0fdf4', '#bbf7d0', '#15803d', `<span>✓ מוזמן לגיליון הקרוב — ${nextTxt}</span>`)
+    : box('#fffbeb', '#fde68a', '#92400e', `<span>⚠ טרם הזמין לגיליון הקרוב — ${nextTxt}</span>${addBtn}`);
+  if (churnRisk) out += box('#fef2f2', '#fecaca', '#991b1b', `<span>⚠ <b>בסיכון נטישה</b> — לא פרסם ${churnGapCount} גיליונות ברצף</span>`);
+  return out;
+})()}
 ${overLimit ? `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">⛔ <b>חריגה ממסגרת אשראי</b> — חוב ${money(debt)} מתוך מסגרת ${money(creditLimit)}</div>` : ''}
 ${(() => { const b = (payments || []).filter(p => p.bounced); if (!b.length) return ''; const last = b[0]; return `<div style="margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">↩️ <b>צ'ק שחזר</b> — ${b.length === 1 ? money(last.amount) : b.length + ' תשלומים בסך ' + money(b.reduce((s, p) => s + Number(p.amount || 0), 0))}${last.bounced_date ? ' · אחרון: ' + heDate(last.bounced_date) : ''}${last.bounced_reason ? ' · ' + esc(last.bounced_reason) : ''}</div>`; })()}
 ` : ''}
 ${canWrite ? `<div class="cc-toolbar">
-<button class="cc-tbtn cc-primary" data-tip="מודעה לגיליון" aria-label="מודעה לגיליון" onclick="adAdd({customer_id:${id}})">${_ccIco('plus')}</button>
-<span class="cc-tsep"></span>
+<button class="cc-tbtn cc-lbl cc-primary" onclick="adAdd({customer_id:${id}})">${_ccIco('plus')}מודעה חדשה</button>
 <div class="cc-mwrap">
-<button class="cc-tbtn" data-tip="חשבונית ומסמכים" aria-label="חשבונית ומסמכים" onclick="ccMenu(event,'ccInvMenu')">${_ccIco('doc')}<span class="cc-cx"></span></button>
+<button class="cc-tbtn cc-lbl" onclick="ccMenu(event,'ccInvMenu')">${_ccIco('doc')}מסמכים <span class="cc-caret">▾</span></button>
 <div id="ccInvMenu" class="cc-menu hidden">
 <button class="btn" onclick="ccMenuClose();invIssueOrder(${id})">🧾 הפקת חשבונית</button>
 <button class="btn" onclick="ccMenuClose();invIssueReceiptDirect(${id})">🧾 חשבונית מס קבלה${debt > 0 ? ' <span class="pill red" style="font-size:.66rem">חוב פתוח</span>' : ''}</button>
@@ -372,7 +379,7 @@ ${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<butto
 </div>
 </div>
 <div class="cc-mwrap">
-<button class="cc-tbtn" data-tip="עוד פעולות" aria-label="עוד פעולות" onclick="ccMenu(event,'ccMoreMenu')">${_ccIco('dots')}<span class="cc-cx"></span></button>
+<button class="cc-tbtn cc-lbl" onclick="ccMenu(event,'ccMoreMenu')">פעולות <span class="cc-caret">▾</span></button>
 <div id="ccMoreMenu" class="cc-menu hidden">
 ${phoneBtn(c.phone, 'customer', id)}
 ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(c.whatsapp || c.phone)}">💬 וואטסאפ</a>` : ''}
@@ -387,7 +394,7 @@ ${profile.role === 'admin' ? `<div class="cc-msep"></div><button class="btn btn-
 </div>
 </div>
 <span style="flex:1"></span>
-<button class="cc-tbtn cc-danger" data-tip="סגירה" aria-label="סגירה" onclick="document.getElementById('viewBack').classList.remove('open')">${_ccIco('x')}</button>
+<button class="cc-tbtn cc-close" data-tip="סגירת הכרטיס" aria-label="סגירת הכרטיס" onclick="document.getElementById('viewBack').classList.remove('open')">${_ccIco('x')}</button>
 </div>
 <div id="ccPortalBox" class="hidden" style="margin-top:8px">
 ${_portalToken
@@ -399,35 +406,41 @@ ${_portalToken
   : `<p style="color:var(--danger);font-size:.86rem;margin:4px 0">שגיאה בטעינת קישור הפורטל - נסה לרענן</p>`}
 </div>` : `<div class="m-actions"><button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">סגירה</button></div>`}
 
-<div class="tabs" style="margin-top:16px">
-<button class="active" onclick="custTab(this,'ccAds')">מודעות (${ads.length})</button>
-${canMoney ? `<button onclick="custTab(this,'ccContracts')">חוזים (${contracts.length})</button>
-<button onclick="custTab(this,'ccMoney')">💰 כספים (${charges.length + payments.length})</button>` : ''}
-<button onclick="custTab(this,'ccContacts')">אנשי קשר (${((c.contacts)||[]).length})</button>
-${['admin', 'sales'].includes(profile.role) ? `<button onclick="custTab(this,'ccExtra')">📎 קבצים ומשימות</button>` : ''}
-<button onclick="custTab(this,'ccTimeline')">ציר זמן</button>
+<div class="tabs cc-tabs" style="margin-top:16px">
+<button class="active" onclick="custTab(this,'ccAds')">מודעות<span class="cc-tcnt">${ads.length}</span></button>
+${canMoney ? `<button onclick="custTab(this,'ccMoney')">כספים<span class="cc-tcnt">${charges.length + payments.length}</span></button>` : ''}
+${['admin', 'sales'].includes(profile.role) ? `<button onclick="custTab(this,'ccExtra')">קבצים ומשימות</button>` : ''}
+<div class="cc-mwrap cc-tmore">
+<button id="ccTabMore" onclick="ccMenu(event,'ccTabMenu')">עוד ▾</button>
+<div id="ccTabMenu" class="cc-menu hidden">
+<button class="btn" onclick="ccMenuClose();custTab(document.getElementById('ccTabMore'),'ccTimeline','ציר זמן')">ציר זמן</button>
+<button class="btn" onclick="ccMenuClose();custTab(document.getElementById('ccTabMore'),'ccContacts','אנשי קשר')">אנשי קשר <span class="muted">(${((c.contacts) || []).length})</span></button>
+</div>
+</div>
 </div>
 
 <div id="ccAds" class="cc-tab">
 ${custAdsGroupedHtml(ads, id)}
 </div>
 ${canMoney ? `
-<div id="ccContracts" class="cc-tab hidden">
-${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th><th></th></tr></thead><tbody>
-${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}${ct.is_standing_order ? ' <span class="pill amber" title="הוראת קבע חודשית">🔁 הו"ק</span>' : ''}</td>
-<td id="ctUsed${ct.id}">—</td><td>${money(ct.total_price)}</td>
-<td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td>
-<td>${(typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role) && typeof contractInvoice === 'function') ? `<button class="btn btn-sm" onclick="event.stopPropagation(); contractInvoice(${ct.id})" title="הפק חשבונית על החבילה">🧾 הפק</button>` : ''}</td></tr>`).join('')}
-</tbody></table></div>` : '<p class="muted">אין חוזים</p>'}
-${contracts.filter(ct => Array.isArray(ct.payment_plan) && ct.payment_plan.length).map(ct => `<div style="margin-top:14px"><b>לוח תשלומים — ${esc(nameOf('priceList', ct.price_item_id))}</b>${(typeof dealPlanHtml==='function'?dealPlanHtml(ct):'')}</div>`).join('')}
-</div>
 <div id="ccMoney" class="cc-tab hidden">
-<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.9rem;margin-bottom:12px;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:10px 12px">
+<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.9rem;margin-bottom:14px;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:10px 12px">
 <span>יתרת חוב: <b style="color:${debt > 0 ? '#b91c1c' : '#15803d'}">${money(debt) || '₪0'}</b></span>
 <span>סה"כ חויב: <b>${money(totalCharged)}</b></span>
 <span>שולם: <b>${money(totalPaid)}</b></span>
 <span>${openCh.length} חיובים פתוחים</span>
 </div>
+<div id="ccContracts">
+<div style="margin:0 0 6px"><b>חבילות</b>${contracts.length ? ` <span class="muted">(${contracts.length})</span>` : ''}</div>
+${contracts.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>חבילה</th><th>נוצל</th><th>מחיר</th><th>מצב</th><th></th></tr></thead><tbody>
+${contracts.map(ct => `<tr><td>${esc(nameOf('priceList', ct.price_item_id))} × ${ct.total_inserts}${ct.is_standing_order ? ' <span class="pill amber" title="הוראת קבע חודשית">🔁 הו"ק</span>' : ''}</td>
+<td id="ctUsed${ct.id}">—</td><td>${money(ct.total_price)}</td>
+<td>${ct.active ? '<span class="pill green">פעיל</span>' : '<span class="pill">הסתיים</span>'}</td>
+<td>${(typeof invoicesOn === 'function' && invoicesOn() && ['admin', 'sales'].includes(profile.role) && typeof contractInvoice === 'function') ? `<button class="btn btn-sm" onclick="event.stopPropagation(); contractInvoice(${ct.id})" title="הפק חשבונית על החבילה">🧾 הפק</button>` : ''}</td></tr>`).join('')}
+</tbody></table></div>` : '<p class="muted" style="margin:0">אין חבילות</p>'}
+${contracts.filter(ct => Array.isArray(ct.payment_plan) && ct.payment_plan.length).map(ct => `<div style="margin-top:14px"><b>לוח תשלומים — ${esc(nameOf('priceList', ct.price_item_id))}</b>${(typeof dealPlanHtml==='function'?dealPlanHtml(ct):'')}</div>`).join('')}
+</div>
+<div id="ccBilling" style="margin-top:14px"></div>
 <div id="ccInvoices"></div>
 <div style="margin:16px 0 6px"><b>כרטסת (חיובים ותשלומים)</b></div>
 ${_custLedgerHtml(charges, payments, ads)}
@@ -451,9 +464,19 @@ cel.innerHTML = `${_used} מתוך ${_tot}` + (_done ? ` <span class="pill red" 
 }
 }
 
-function custTab(btn, id) {
-btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+/* מעבר לשונית. לשוניות מתפריט "עוד" מסמנות את כפתור "עוד" כפעיל ומציגות עליו את שמן (label) */
+function custTab(btn, id, label) {
+const bar = btn.closest('.tabs') || btn.parentElement;
+bar.querySelectorAll(':scope > button, :scope > .cc-tmore > button').forEach(b => b.classList.toggle('active', b === btn));
+const more = document.getElementById('ccTabMore');
+if (more) more.textContent = (btn === more && label) ? label + ' ▾' : 'עוד ▾';
 document.querySelectorAll('.cc-tab').forEach(t => t.classList.toggle('hidden', t.id !== id));
+}
+
+/* "+ הוסף טלפון / סוכן" בכרטיס — פותח את טופס עריכת הלקוח (עם בדיקות הכפילות הרגילות) וממקד את השדה */
+async function custEditFocus(id, field) {
+await customerEdit(id);
+setTimeout(() => { const el = document.getElementById('f_' + field); if (el) { el.scrollIntoView({ block: 'center' }); el.focus(); } }, 80);
 }
 
 /* נירמול טלפון לפורמט בינ"ל לוואטסאפ */
@@ -618,9 +641,13 @@ function custAdsGroupedHtml(ads, custId) {
     return `<div class="cc-ab-grp${hid}">${head}${rows}</div>`;
   }).join('');
   const moreCount = keys.length - RECENT;
+  // שורת הסיכום בקוביה הסגורה: הגיליון האחרון שבו פורסם (הסכום ומספר הגיליונות כבר מופיעים בכרטיסים למעלה)
+  const lastKey = keys.find(k => k && groups[k].some(a => !['cancelled', 'rejected'].includes(a.status)));
+  const lastIss = lastKey ? (cache.issues || []).find(i => i.id === lastKey) : null;
+  const sumTxt = lastIss ? `אחרונה: גיליון ${esc(String(lastIss.issue_number))}${lastIss.publish_date ? ' · ' + heDate(lastIss.publish_date) : ''}` : `${keys.length} גיליונות · סה"כ <b>${money(total)}</b>`;
   return `<div class="cc-adsbox" id="ccAdsBox">
     ${hd(`<span class="cc-ab-cnt">${liveAll.length}</span>`)}
-    <div class="cc-ab-sum">${keys.length} גיליונות · סה"כ <b>${money(total)}</b></div>
+    <div class="cc-ab-sum">${sumTxt}</div>
     <div class="cc-ab-body">
       ${body}
       ${moreCount > 0 ? `<button class="cc-ab-more" onclick="ccAdsToggleMore(this)">▾ הצג עוד ${moreCount} גיליונות</button>` : ''}
@@ -871,6 +898,26 @@ st.textContent = `
 .cc-menu .btn:hover{background:#eef0fb!important}
 .cc-menu .btn-danger-ghost{color:#dc2626!important}
 .cc-menu .cc-msep{height:1px;background:var(--line,#eef0f5);margin:5px 4px}
+.cc-head{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin-bottom:6px}
+.cc-head h3{margin:0}
+.cc-tags{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cc-tags .ctag[onclick]{cursor:pointer}
+.cc-addtag{background:none;border:1px dashed #cbd2e0;color:#64748b;border-radius:99px;padding:2px 10px;font-size:.78rem;cursor:pointer;line-height:1.5}
+.cc-addtag:hover{border-color:var(--brand);color:var(--brand)}
+.cc-meta{font-size:.9rem;color:#475569;margin:2px 0 10px;display:flex;gap:6px 18px;flex-wrap:wrap;align-items:center}
+.cc-meta b{color:#1e293b;font-weight:600}
+.cc-add{background:none;border:0;padding:0;color:#64748b;font-size:.88rem;cursor:pointer}
+.cc-add b{color:var(--brand)}
+.cc-add:hover{color:var(--brand);text-decoration:underline}
+.cc-alert{margin:-4px 0 10px;font-size:.85rem;padding:8px 10px;border-radius:8px;display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.cc-tbtn.cc-lbl{width:auto;padding:0 14px;gap:7px;display:inline-flex;align-items:center;font-weight:600;font-size:.88rem;color:#1e2340;white-space:nowrap}
+.cc-tbtn.cc-lbl.cc-primary{color:#fff}
+.cc-tbtn.cc-lbl svg{width:17px;height:17px}
+.cc-caret{font-size:.7rem;opacity:.6}
+.cc-tbtn.cc-close{color:#64748b}
+.cc-tcnt{display:inline-block;margin-inline-start:6px;font-size:.72rem;font-weight:700;background:#f1f3f8;color:#64748b;border-radius:99px;padding:0 7px;line-height:1.6;font-variant-numeric:tabular-nums}
+.tabs button.active .cc-tcnt{background:#eef0fb;color:var(--brand)}
+@media (max-width:480px){.cc-tabs>button,.cc-tabs>.cc-tmore>button{padding:9px 9px}}
 .cc-adsbox{width:min(320px,100%);border:1px solid var(--line,#e6e8ef);border-radius:12px;background:#fbfcfe;overflow:hidden}
 .cc-ab-hd{display:flex;align-items:center;gap:8px;padding:11px 13px;cursor:pointer;user-select:none;background:#fff}
 .cc-ab-hd:hover{background:#f7f9ff}
