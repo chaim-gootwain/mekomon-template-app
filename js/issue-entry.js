@@ -55,6 +55,7 @@ ${canWrite ? `<div class="card card-pad" style="margin-bottom:16px">
 </div>
 <div class="field"><label>גודל (מהמחירון)</label>
 <select id="ieSize" onchange="ieSizeChange()"><option value="">— בחר —</option>${priceOpts}</select></div>
+<div class="field" id="ieCatField"${_ieCatHtml() ? '' : ' hidden'}>${_ieCatHtml()}</div>
 <div class="field"><label>מחיר (₪)</label><input id="iePrice" type="number" dir="ltr"></div>
 <div class="field"><label>שם/כותרת המודעה (ריק = שם הלקוח)</label><input id="ieTitle" placeholder="ברירת מחדל: שם הלקוח"></div>
 <div class="field"><label>עמוד (שיבוץ — אופציונלי)</label><input id="iePage" type="number" dir="ltr" placeholder="ריק = לא משובץ"></div>
@@ -108,8 +109,20 @@ box.innerHTML = list.length ? list.map(c => `<div class="search-item" style="pad
 : `<div style="padding:8px 10px" class="muted">אין תוצאה — <a style="cursor:pointer;color:var(--brand)" onclick="ieNewCustomer('${esc(q).replace(/'/g, '')}')">פתח/י לקוח חדש</a></div>`;
 }
 
+/* שדה "סוג לחשבונית" — רק ללקוח שהחשבונית החודשית שלו מפוצלת לפי סוגי מודעות (monthly-billing.js) */
+function _ieCatHtml() {
+if (!_ieCust || typeof ecCatFieldHtml !== 'function') return '';
+const sz = Number((document.getElementById('ieSize') || {}).value) || null;
+return ecCatFieldHtml(_ieCust.id, sz, 'ieCat');
+}
+function _ieCatPaint() {
+const f = document.getElementById('ieCatField'); if (!f) return;
+const h = _ieCatHtml(); f.innerHTML = h; f.hidden = !h;
+}
+
 async function ieSelectCust(id) {
 _ieCust = (cache.customers || []).find(c => c.id === id) || null;
+_ieCatPaint();
 _ieCharges = null; _ieContract = null; _ieContractUsed = 0;
 const box = document.getElementById('ieCustBox'); if (box) box.innerHTML = _ieCustPickerHtml();
 try { _ieCharges = await run(db.from('charges').select('status').eq('customer_id', id)); } catch (e) { _ieCharges = []; }
@@ -129,7 +142,7 @@ if (tot && used >= tot) return `<span class="pill red" title="העסקה נוצ�
 return `<span class="pill blue" title="פרסומים שנוצלו מתוך העסקה">📄 עסקה: ${used}/${tot}</span>`;
 }
 
-function ieClearCust() { _ieCust = null; _ieCharges = null; _ieContract = null; _ieContractUsed = 0; const box = document.getElementById('ieCustBox'); if (box) box.innerHTML = _ieCustPickerHtml(); }
+function ieClearCust() { _ieCust = null; _ieCharges = null; _ieContract = null; _ieContractUsed = 0; _ieCatPaint(); const box = document.getElementById('ieCustBox'); if (box) box.innerHTML = _ieCustPickerHtml(); }
 
 function ieNewCustomer(preName) {
 /* פותח את חלון "לקוח חדש" המלא (ח.פ, שם לחשבונית, כתובת וכו') כדי שלא נצטרך להשלים פרטים בזמן החשבונית */
@@ -153,6 +166,7 @@ toast('✓ לקוח נוסף ונבחר');
 
 /* ----- מחיר אוטומטי לפי גודל ----- */
 function ieSizeChange() {
+_ieCatPaint(); // הסוג המוצע תלוי בגודל (סוג המודעה האחרונה של הלקוח באותו גודל)
 const sel = document.getElementById('ieSize'); const pr = document.getElementById('iePrice');
 if (!sel || !pr) return;
 const item = (cache.priceList || []).find(p => p.id === Number(sel.value));
@@ -208,6 +222,7 @@ if (String(e1.message || e1).includes('deal_stage')) { const r2 = { ...rec }; de
 else throw e1;
 }
 try { await addInteraction('customer', _ieCust.id, `מודעה לגיליון ${_ieIssue.issue_number} (${nameOf('priceList', sizeId)}) — ${dealStageLabel(stage)}${page ? ' · עמוד ' + page : ''}`); } catch (e) { }
+if (typeof ecSaveCatFromField === 'function') await ecSaveCatFromField('ieCat', data.id, _ieCust.id, sizeId);
 _ieAds.unshift(data);
 if (_contractId) _ieContractUsed++;
 toast('✓ המודעה נוספה' + (_contractId ? ' · עסקה ' + _ieContractUsed + '/' + (_ieContract.total_inserts || '?') : ''));
