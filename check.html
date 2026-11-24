@@ -26,7 +26,7 @@
   <div id="nojs" class="nojs">
     ❌ אם אתה רואה רק את ההודעה הזו (והשורות למטה נשארות אפורות) —
     הסינון חוסם הרצת JavaScript באתר הזה לגמרי.
-    יש לבקש מספק הסינון לאשר את כתובת האתר הזה (כפי שהיא מופיעה בשורת הכתובת למעלה).
+    יש לבקש מספק הסינון לאשר את האתר: imanuel-sheli.netlify.app
   </div>
 
   <div class="row"><span>1. הרצת קוד בדף (JavaScript)</span><span class="st wait" id="t-js">ממתין…</span></div>
@@ -116,8 +116,8 @@
     } else {
       v.className = 'v-bad';
       var need = [];
-      if (!results.vendor || !results.bundle || !results.css) need.push(location.host + ' (האתר עצמו — כולל קובצי קוד ועיצוב)');
-      if (!results.db) need.push((function(){ try { return new URL('@@SUPABASE_URL@@').host; } catch (e) { return 'supabase.co'; } })() + ' (מסד הנתונים)');
+      if (!results.vendor || !results.bundle || !results.css) need.push('imanuel-sheli.netlify.app (האתר עצמו — כולל קובצי קוד ועיצוב)');
+      if (!results.db) need.push('hkbstegusfdjtkjxkmjc.supabase.co (מסד הנתונים)');
       v.textContent = '❌ נמצאה חסימה. יש לבקש מספק הסינון לאשר במלואן את הכתובות: ' + need.join(' וגם ') + '. צלם מסך זה ושלח.';
     }
   });
