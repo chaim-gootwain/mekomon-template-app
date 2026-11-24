@@ -88,6 +88,15 @@ renderTable(document.getElementById('adsTable'), rows, [
 
 /* --- הוספה ידנית --- */
 // תיאור המודעה = שם הלקוח כברירת מחדל; מתעדכן בהחלפת לקוח כל עוד לא נערך ידנית
+/* שדה "סוג לחשבונית" בטופס המודעה — רק ללקוח שהחשבונית החודשית שלו מפוצלת לפי סוגי מודעות */
+function _adCatHtml(cid, sizeId, cur) { return (cid && typeof ecCatFieldHtml === 'function') ? ecCatFieldHtml(cid, sizeId, 'adCat', cur) : ''; }
+function _adCatRefresh(cid) {
+const box = document.getElementById('adCatBox'); if (!box) return;
+const sz = Number((document.getElementById('f_price_item_id') || {}).value) || null;
+box.innerHTML = _adCatHtml(cid, sz);
+}
+function _adPickCustomer(id) { _adTitleFromCustomer(id); _adCatRefresh(id); }
+
 function _adTitleFromCustomer(id) {
 const t = document.getElementById('f_title'); if (!t) return;
 if (t.value.trim() && t.value !== t.dataset.auto && !(cache.customers || []).some(c => c.name === t.value)) return;
@@ -99,9 +108,10 @@ prefill = { ...(prefill || {}) };
 opts = opts || {};
 if (prefill.customer_id && !prefill.title) prefill.title = nameOf('customers', prefill.customer_id) || '';
 openForm('מודעה חדשה', [
-{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true, onpick: _adTitleFromCustomer },
+{ name: 'customer_id', label: 'לקוח', type: 'customer', required: true, onpick: _adPickCustomer },
 { name: 'title', label: 'תיאור המודעה', required: true },
 { name: 'price_item_id', label: 'גודל (מהמחירון)', type: 'select', options: 'priceList' },
+{ type: 'html', html: '<div id="adCatBox">' + _adCatHtml(prefill.customer_id, prefill.price_item_id) + '</div>' },
 { name: 'issue_id', label: 'גיליון יעד', type: 'select', options: 'issues', default: nextIssueId(), required: true, placeholder: '— בחר גיליון —' },
 { name: 'requested_placement', label: 'מיקום מבוקש' },
 { name: 'price', label: 'מחיר (₪, ריק = לפי המחירון)', type: 'number' },
@@ -139,6 +149,7 @@ if (!rec.graphics_note) delete rec.graphics_note;
 let data;
 try { data = await db.from('ads').insert(rec).select().single().then(r => { if (r.error) throw r.error; return r.data; }); }
 catch (e) { const r2 = { ...rec }; delete r2.content_text; delete r2.graphics_note; data = await run(db.from('ads').insert(r2).select().single()); }
+if (typeof ecSaveCatFromField === 'function') await ecSaveCatFromField('adCat', data.id, rec.customer_id, rec.price_item_id);
 // העלאת קובץ המודעה מהלקוח אם צורף
 try {
 const _f = document.getElementById('adNewFile');
@@ -314,8 +325,9 @@ if (!a) { toast('המודעה לא נמצאה', true); return; }
 document.getElementById('viewBack').classList.remove('open');
 openForm('עריכת מודעה', [
 { name: 'title', label: 'תיאור', required: true },
-{ name: 'customer_id', label: 'לקוח', type: 'customer' },
+{ name: 'customer_id', label: 'לקוח', type: 'customer', onpick: _adCatRefresh },
 { name: 'price_item_id', label: 'גודל', type: 'select', options: 'priceList' },
+{ type: 'html', html: '<div id="adCatBox">' + _adCatHtml(a.customer_id, a.price_item_id, (typeof ecCatOfAd === 'function') ? ecCatOfAd(a) : '') + '</div>' },
 { name: 'issue_id', label: 'גיליון', type: 'select', options: 'issues' },
 { name: 'requested_placement', label: 'מיקום מבוקש' },
 { name: 'price', label: 'מחיר (₪)', type: 'number' },
@@ -339,6 +351,7 @@ if (rec.customer_id && Number(rec.customer_id) !== Number(a.customer_id) && ['in
   if (reset) rec.deal_stage = 'agreed';
 }
 await run(db.from('ads').update(rec).eq('id', id));
+if (typeof ecSaveCatFromField === 'function') await ecSaveCatFromField('adCat', id, rec.customer_id || a.customer_id, rec.price_item_id || a.price_item_id);
 if (rec.customer_id && Number(rec.customer_id) !== Number(a.customer_id) && typeof addInteraction === 'function') {
   try { await addInteraction('customer', Number(rec.customer_id), '↪️ הועברה מודעה מ' + (nameOf('customers', a.customer_id) || 'לקוח אחר') + (rec.deal_stage === 'agreed' && ['invoiced', 'paid'].includes(a.deal_stage) ? ' (סימון החיוב אופס ל"סוכם")' : '')); } catch (e) { }
 }

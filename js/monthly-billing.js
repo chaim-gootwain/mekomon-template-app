@@ -20,9 +20,12 @@ function _mbTxn(ym, cid, kind, cat) {
   const full = pre + kind + (cat ? '-' + cat : '');
   if (full.length <= 45) return full;
   const kk = { proforma: 'p', tax_invoice: 'ti', invoice_receipt: 'ir', receipt: 'r', credit: 'cr' }[kind] || kind;
-  const cc = cat ? (cat === 'social' ? 's' : cat === 'regular' ? 'r' : String(cat).slice(0, 3)) : '';
+  const cc = _mbCatShort(cat);
   return (pre + kk + (cc ? '-' + cc : '')).slice(0, 45);
 }
+
+/* קיצור הסוג במזהה העסקה: רגיל/חברתי — r/s (כמו עד היום); סוגים חדשים (c1…c99) — כמו שהם */
+function _mbCatShort(cat) { return cat ? (cat === 'social' ? 's' : cat === 'regular' ? 'r' : String(cat).slice(0, 3)) : ''; }
 
 function mbList() { try { return JSON.parse((cache.settings || {})[MB_KEY] || '[]'); } catch (e) { return []; } }
 function isMonthlyCustomer(id) { return mbList().includes(Number(id)); }
@@ -40,88 +43,148 @@ async function toggleMonthlyBilling(id) {
   if (typeof openCustomerCard === 'function') openCustomerCard(id);
 }
 
-/* ---- פיצול חשבונית חודשית ל-2 קטגוריות (רגיל / חברתי כלכלי) ----
-   ללקוחות שסומנו בכרטיס הלקוח (settings.cat_split_customers = [id,…]).
-   הסיווג הוא ברמת המודעה הבודדת — באותו שבוע יכולות להיות מודעות משתי הקטגוריות.
+/* ---- פיצול החשבונית החודשית לפי סוגי מודעות ----
+   ללקוחות שסומנו בכרטיס הלקוח (settings.cat_split_customers = [id,…]) מופקת חשבונית
+   נפרדת לכל סוג מודעה. הסוגים מוגדרים לכל לקוח בנפרד (settings.cat_defs_<cid> =
+   [{"k":"c1","he":"…"},…]); לקוח בלי הגדרה מקבל את ברירת המחדל רגיל / חברתי כלכלי.
+   הסוג נבחר בהכנסת המודעה; מודעה בלי סוג מקבלת את סוג המודעה האחרונה של הלקוח
+   באותו גודל, ואפשר לתקן במסך החיוב החודשי (🏷️ סיווג).
    (EC_KEY — שם מפתח היסטורי של מפת הסיווג; לא לשנות, יש בו נתונים) */
 const EC_KEY = 'emanuel_center_cat';
 const EC_SPLIT_KEY = 'cat_split_customers';
-const EC_CAT_HE = { regular: 'רגיל', social: 'חברתי כלכלי' };
+const EC_DEFAULT_CATS = [{ k: 'regular', he: 'רגיל' }, { k: 'social', he: 'חברתי כלכלי' }];
+const EC_MAX_CATS = 6;
 function ecSplitList() { try { const a = JSON.parse((cache.settings || {})[EC_SPLIT_KEY] || '[]'); return Array.isArray(a) ? a.map(Number) : []; } catch (e) { return []; } }
 function ecIsCenter(cid) { return ecSplitList().includes(Number(cid)); }
+function _ecDefsKey(cid) { return 'cat_defs_' + Number(cid); }
+function _ecStoredCats(cid) { try { const a = JSON.parse((cache.settings || {})[_ecDefsKey(cid)] || 'null'); return Array.isArray(a) ? a.filter(x => x && x.k && String(x.he || '').trim()) : null; } catch (e) { return null; } }
+function ecCats(cid) { const a = _ecStoredCats(cid); return (a && a.length) ? a : EC_DEFAULT_CATS; }
+function ecCatKeys(cid) { return ecCats(cid).map(c => c.k); }
+function ecCatLabel(cid, k) { const c = ecCats(cid).find(x => x.k === k); return c ? c.he : (k === 'regular' ? 'רגיל' : String(k || '')); }
+/* תוספת לכותרת/הערת החשבונית: הסוג "רגיל" של ברירת המחדל בלי תוספת (כמו עד היום) */
+function _ecSfx(cid, k, isSplit) { return (isSplit && k !== 'regular') ? ecCatLabel(cid, k) : ''; }
 async function ecToggleSplit(cid) {
   cid = Number(cid);
   const arr = ecSplitList(); const i = arr.indexOf(cid);
-  if (i >= 0) {
-    if (!confirm('לבטל את פיצול החשבונית לקטגוריות ללקוח הזה?\nמהחיוב החודשי הבא תופק לו חשבונית אחת.')) return;
+  const turningOn = i < 0;
+  if (!turningOn) {
+    if (!confirm('לבטל את פיצול החשבונית לפי סוגי מודעות ללקוח הזה?\nמהחיוב החודשי הבא תופק לו חשבונית אחת.')) return;
     arr.splice(i, 1);
   } else arr.push(cid);
   const v = JSON.stringify(arr);
   await db.from('settings').upsert({ key: EC_SPLIT_KEY, value: v }, { onConflict: 'key' });
   if (cache.settings) cache.settings[EC_SPLIT_KEY] = v;
-  toast(arr.includes(cid) ? '🏷️ פיצול לקטגוריות הופעל — הגדר/י מייל לכל קטגוריה' : 'פיצול לקטגוריות בוטל');
+  if (turningOn) { toast('🏷️ פיצול לפי סוגי מודעות הופעל — הגדר/י את הסוגים'); ecCatsEdit(cid, true); return; }
+  toast('פיצול לפי סוגי מודעות בוטל');
   if (typeof openCustomerCard === 'function') openCustomerCard(cid);
 }
-/* מייל לכל קטגוריה, לכל לקוח בנפרד: settings.cat_emails_<cid> = {"regular":"…","social":"…"} */
+/* מייל לכל סוג, לכל לקוח בנפרד: settings.cat_emails_<cid> = {"<k>":"…"}. ריק = המייל הרגיל של הלקוח */
 function _ecEmailsKey(cid) { return 'cat_emails_' + Number(cid); }
 function ecEmails(cid) { try { const o = JSON.parse((cache.settings || {})[_ecEmailsKey(cid)] || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (e) { return {}; } }
 function ecEmailOf(cid, cat) { return String(ecEmails(cid)[cat] || '').trim(); }
-function ecEmailsModal(cid) {
-  const cur = ecEmails(cid);
-  openForm('מיילים לפי קטגוריה — ' + (nameOf('customers', cid) || ''), [
-    { type: 'section', label: 'לאן נשלחים החשבונית והגזירים של כל קטגוריה' },
-    { name: 'regular', label: 'מייל קטגוריה רגילה', dir: 'ltr' },
-    { name: 'social', label: 'מייל קטגוריה חברתית כלכלית', dir: 'ltr' },
-  ], { regular: cur.regular || '', social: cur.social || '' }, async (r) => {
-    const v = JSON.stringify({ regular: String(r.regular || '').trim(), social: String(r.social || '').trim() });
-    await db.from('settings').upsert({ key: _ecEmailsKey(cid), value: v }, { onConflict: 'key' });
-    if (cache.settings) cache.settings[_ecEmailsKey(cid)] = v;
-    toast('✓ המיילים נשמרו');
+/* עריכת הסוגים והמיילים של הלקוח. fresh = הופעל עכשיו: לקוח בלי סוגים שמורים מתחיל משורות ריקות */
+function ecCatsEdit(cid, fresh) {
+  cid = Number(cid);
+  const stored = _ecStoredCats(cid);
+  const cats = (stored && stored.length) ? stored : (fresh ? [] : EC_DEFAULT_CATS);
+  const em = ecEmails(cid);
+  const fields = [{ type: 'section', label: 'סוגי המודעות — חשבונית נפרדת לכל סוג (לפחות 2)' }];
+  const vals = {};
+  for (let n = 1; n <= EC_MAX_CATS; n++) {
+    fields.push({ name: 'name_' + n, label: 'סוג ' + n + ' — שם' });
+    fields.push({ name: 'email_' + n, label: 'סוג ' + n + ' — מייל (ריק = המייל של הלקוח)', dir: 'ltr' });
+    const c = cats[n - 1];
+    vals['name_' + n] = c ? c.he : '';
+    vals['email_' + n] = c ? (em[c.k] || '') : '';
+  }
+  openForm('סוגי מודעות לחשבונית — ' + (nameOf('customers', cid) || ''), fields, vals, async (r) => {
+    const used = new Set(cats.map(c => c.k));
+    const nextKey = () => { for (let n = 1; n < 100; n++) { const k = 'c' + n; if (!used.has(k)) { used.add(k); return k; } } return 'c99'; };
+    const defs = [], emails = {};
+    for (let n = 1; n <= EC_MAX_CATS; n++) {
+      const he = String(r['name_' + n] || '').trim();
+      if (!he) continue;
+      const k = cats[n - 1] ? cats[n - 1].k : nextKey();
+      defs.push({ k, he });
+      const e = String(r['email_' + n] || '').trim();
+      if (e) emails[k] = e;
+    }
+    if (defs.length < 2) { toast('צריך לפחות 2 סוגים כדי לפצל את החשבונית', true); throw new Error('cats<2'); }
+    if (new Set(defs.map(d => d.he)).size !== defs.length) { toast('שני סוגים באותו שם — שנה/י אחד מהם', true); throw new Error('dup'); }
+    const dv = JSON.stringify(defs), ev = JSON.stringify(emails);
+    await db.from('settings').upsert([{ key: _ecDefsKey(cid), value: dv }, { key: _ecEmailsKey(cid), value: ev }], { onConflict: 'key' });
+    if (cache.settings) { cache.settings[_ecDefsKey(cid)] = dv; cache.settings[_ecEmailsKey(cid)] = ev; }
+    toast('✓ סוגי המודעות נשמרו');
     if (typeof openCustomerCard === 'function') openCustomerCard(cid);
   });
 }
 function ecMap() { try { return JSON.parse((cache.settings || {})[EC_KEY] || '{}'); } catch (e) { return {}; } }
-function ecCatOfAd(adId) { return ecMap()['ad' + adId] || 'regular'; }
-async function ecSetCatAd(adId, cat) {
+/* הסוג שמוצע למודעה חדשה: סוג המודעה האחרונה של הלקוח באותו גודל, אחרת הסוג הראשון */
+function ecCatGuess(cid, sizeId) {
+  const keys = ecCatKeys(cid);
+  const g = ecMap()['last' + Number(cid) + '_' + (Number(sizeId) || 0)];
+  return keys.includes(g) ? g : keys[0];
+}
+/* הסוג של מודעה. מקבל אובייקט מודעה (עדיף — אז מודעה בלי סיווג מקבלת את ההצעה) או מזהה */
+function ecCatOfAd(a) {
+  const obj = (a && typeof a === 'object') ? a : null;
+  const k = ecMap()['ad' + (obj ? obj.id : a)];
+  if (obj && obj.customer_id) { const keys = ecCatKeys(obj.customer_id); return keys.includes(k) ? k : ecCatGuess(obj.customer_id, obj.price_item_id); }
+  return k || 'regular';
+}
+async function ecSetCatAd(adId, cat, cid, sizeId) {
   const m = ecMap(); m['ad' + adId] = cat;
+  if (cid) m['last' + Number(cid) + '_' + (Number(sizeId) || 0)] = cat;
   const v = JSON.stringify(m);
   await db.from('settings').upsert({ key: EC_KEY, value: v }, { onConflict: 'key' });
   if (cache.settings) cache.settings[EC_KEY] = v;
-  if (typeof toast === 'function') toast('סווג: ' + (EC_CAT_HE[cat] || cat));
 }
-/* חלון סיווג מודעות (רגיל / חברתי כלכלי) לכל מודעה בנפרד — נפתח מכפתור בשורת הלקוח */
-async function ecCatsModal(issueId, customerId) {
-  const iss = (cache.issues || []).find(i => i.id === issueId) || {};
-  const ads = (await db.from('ads').select('*').eq('issue_id', issueId).eq('customer_id', customerId).not('status', 'in', '("cancelled","rejected")')).data || [];
+/* שדה "סוג לחשבונית" לטופסי הכנסת מודעה — רק ללקוח מפוצל; אחרת ריק */
+function ecCatFieldHtml(cid, sizeId, selId, cur) {
+  cid = Number(cid);
+  if (!cid || !ecIsCenter(cid)) return '';
+  const sel = cur && ecCatKeys(cid).includes(cur) ? cur : ecCatGuess(cid, sizeId);
+  return `<label>סוג לחשבונית (חשבונית נפרדת לכל סוג)</label><select id="${selId}">${ecCats(cid).map(c => `<option value="${esc(c.k)}" ${c.k === sel ? 'selected' : ''}>${esc(c.he)}</option>`).join('')}</select>`;
+}
+/* שמירת הסוג שנבחר בטופס (אם השדה מוצג) */
+async function ecSaveCatFromField(selId, adId, cid, sizeId) {
+  const el = document.getElementById(selId);
+  if (!el || !el.value || !ecIsCenter(cid)) return;
+  try { await ecSetCatAd(adId, el.value, cid, sizeId); } catch (e) { console.error('ad category', e); }
+}
+/* חלון סיווג מודעות החודש של לקוח — מתוך מסך החיוב החודשי, לתיקון לפני הפקה */
+function ecCatsModalMonth(ym, cid) {
+  if (!_mbCtx || _mbCtx.ym !== ym) return;
   const lbl = (typeof _ibLabel === 'function') ? _ibLabel : (t => t || 'מודעה');
-  const priced = ads.filter(a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
+  const ads = _mbCtx.ads.filter(a => a.customer_id === cid && _mbBillable(a) && Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0)) > 0);
+  const cats = ecCats(cid);
   document.getElementById('ecOv')?.remove();
   const ov = document.createElement('div');
   ov.id = 'ecOv';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:99999';
-  ov.addEventListener('click', e => { if (e.target === ov) ecCatsClose(issueId); });
-  const rows = priced.map(a => {
-    const cur = ecCatOfAd(a.id);
+  ov.addEventListener('click', e => { if (e.target === ov) ecCatsCloseMonth(ym); });
+  const rows = ads.map(a => {
+    const cur = ecCatOfAd(a);
+    const iss = _mbCtx.issMap[a.issue_id] || {};
     const sz = (typeof nameOf === 'function' ? nameOf('priceList', a.price_item_id) : '') || '';
     const price = Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
     return `<tr>
-      <td style="text-align:right">${esc(lbl(a.title))}${sz ? ' · ' + esc(sz) : ''}${a.page_number ? ' — עמ׳ ' + a.page_number : ''}</td>
+      <td style="text-align:right">${esc(lbl(a.title))}${sz ? ' · ' + esc(sz) : ''}<br><span class="muted" style="font-size:.78rem">גיליון ${esc(String(iss.issue_number || ''))}${a.page_number ? ' · עמ׳ ' + a.page_number : ''}</span></td>
       <td style="white-space:nowrap">${money(price)}</td>
-      <td><select onchange="ecSetCatAd(${a.id}, this.value)" style="padding:3px 6px;border-radius:6px;border:1px solid #d1d5db">
-        <option value="regular" ${cur === 'regular' ? 'selected' : ''}>רגיל</option>
-        <option value="social" ${cur === 'social' ? 'selected' : ''}>חברתי כלכלי</option></select></td></tr>`;
+      <td><select onchange="ecSetCatAd(${a.id}, this.value, ${cid}, ${Number(a.price_item_id) || 0})" style="padding:3px 6px;border-radius:6px;border:1px solid #d1d5db">
+        ${cats.map(c => `<option value="${esc(c.k)}" ${c.k === cur ? 'selected' : ''}>${esc(c.he)}</option>`).join('')}</select></td></tr>`;
   }).join('');
-  ov.innerHTML = `<div style="background:#fff;border-radius:14px;padding:18px;max-width:580px;width:92%;max-height:84vh;overflow:auto;direction:rtl">
-    <h3 style="margin:0 0 4px">🏷️ קטגוריות מודעות — ${esc(nameOf('customers', customerId))}</h3>
-    <p class="muted" style="font-size:.83rem;margin:0 0 10px">גיליון ${iss.issue_number || ''} · בחר/י קטגוריה לכל מודעה בנפרד. הבחירה נשמרת אוטומטית ומפצלת את החשבונית החודשית.</p>
-    ${priced.length ? `<table class="data" style="width:100%"><thead><tr><th>מודעה</th><th>מחיר</th><th>קטגוריה</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="empty">אין מודעות עם מחיר בגיליון זה</p>'}
-    <div style="margin-top:14px;text-align:left"><button class="btn" onclick="ecCatsClose(${issueId})">סגור</button></div>
+  ov.innerHTML = `<div style="background:#fff;border-radius:14px;padding:18px;max-width:620px;width:92%;max-height:84vh;overflow:auto;direction:rtl">
+    <h3 style="margin:0 0 4px">🏷️ סוגי מודעות — ${esc(nameOf('customers', cid))}</h3>
+    <p class="muted" style="font-size:.83rem;margin:0 0 10px">חיוב חודשי ${ym} · כל סוג מקבל חשבונית נפרדת. הבחירה נשמרת מיד.</p>
+    ${ads.length ? `<table class="data" style="width:100%"><thead><tr><th>מודעה</th><th>מחיר</th><th>סוג</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="empty">אין מודעות פתוחות לחיוב החודש</p>'}
+    <div style="margin-top:14px;text-align:left"><button class="btn" onclick="ecCatsCloseMonth('${ym}')">סגור ורענן</button></div>
   </div>`;
   document.body.appendChild(ov);
 }
-function ecCatsClose(issueId) {
+function ecCatsCloseMonth(ym) {
   document.getElementById('ecOv')?.remove();
-  if (typeof issueBillingOpen === 'function') issueBillingOpen(issueId);
+  monthlyBillingReview(ym);
 }
 
 /* תאריך המסמך לחשבונית החודשית = היום האחרון בחודש; אם יוצא בשבת — יומיים קודם (חמישי) */
@@ -162,7 +225,7 @@ function _mbBillable(a) { return !['invoiced', 'paid'].includes(a.deal_stage); }
    החודשית, ונגזר מהמודעות עצמן — לחיצה כפולה על אותה השלמה לא מפיקה מסמך שני */
 function _mbSuppTxn(ym, cid, kind, cat, ads) {
   const kk = { proforma: 'p', tax_invoice: 'ti', invoice_receipt: 'ir', receipt: 'r' }[kind] || kind;
-  const cc = cat ? (cat === 'social' ? 's' : 'r') : '';
+  const cc = _mbCatShort(cat);
   const ids = ads.map(a => a.id).sort((a, b) => a - b);
   return ('emu-monthly-' + ym + '-cust' + cid + '-x' + ids[0] + 'n' + ids.length + '-' + kk + (cc ? '-' + cc : '')).slice(0, 45);
 }
@@ -209,20 +272,20 @@ async function monthlyBillingRun(ym) {
     if (!cAds.length) continue;
     const cust = (cache.customers || []).find(c => c.id === cid) || {};
     const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
-    // לקוח עם פיצול לקטגוריות (מסומן בכרטיס) → 2 חשבוניות; שאר הלקוחות → חשבונית אחת כרגיל
+    // לקוח עם פיצול לפי סוגי מודעות (מסומן בכרטיס) → חשבונית לכל סוג; שאר הלקוחות → חשבונית אחת כרגיל
     const isCenter = ecIsCenter(cid);
-    const groups = isCenter
-      ? { regular: cAds.filter(a => ecCatOfAd(a.id) === 'regular'), social: cAds.filter(a => ecCatOfAd(a.id) === 'social') }
-      : { regular: cAds };
+    const groups = {};
+    if (isCenter) ecCatKeys(cid).forEach(k => { groups[k] = cAds.filter(a => ecCatOfAd(a) === k); });
+    else groups.regular = cAds;
     for (const gk of Object.keys(groups)) {
       const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(groups[gk], issMap) : groups[gk].map(mkLine).filter(it => it.price > 0);
       if (!lines.length) continue;
       if (_mbIsDone(done, ym, cid, isCenter ? gk : '')) continue; // כבר חויב החודש
-      const isSocial = gk === 'social';
-      const header = 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : '');
+      const sfx = _ecSfx(cid, gk, isCenter);
+      const header = 'חיוב חודשי — ' + ym + (sfx ? ' — ' + sfx : '');
       const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
       const txn = _mbTxn(ym, cid, docKind, isCenter ? gk : '');
-      await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: docDate, transaction_id: txn, comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: groups[gk].map(a => a.id) });
+      await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: docDate, transaction_id: txn, comment: 'חיוב חודשי ' + ym + (sfx ? ' (' + sfx + ')' : ''), ad_ids: groups[gk].map(a => a.id) });
       count++;
     }
   }
@@ -324,9 +387,10 @@ async function monthlyBillingReview(ym) {
     const cust = (cache.customers || []).find(c => c.id === cid) || {};
     const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
     const isCenter = ecIsCenter(cid);
-    const groups = isCenter ? ['regular', 'social'] : ['regular'];
+    const groups = isCenter ? ecCatKeys(cid) : ['regular'];
+    let _first = true;
     for (const gk of groups) {
-      const gAds = isCenter ? cAds.filter(a => ecCatOfAd(a.id) === gk) : cAds;
+      const gAds = isCenter ? cAds.filter(a => ecCatOfAd(a) === gk) : cAds;
       const _net = a => Math.max(0, (Number(a.price) || 0) - (Number(a.discount) || 0));
       const openAds = gAds.filter(_mbBillable);
       const total = openAds.reduce((s, a) => s + _net(a), 0);
@@ -338,12 +402,12 @@ async function monthlyBillingReview(ym) {
       // חויב במלואו = אין מודעה פתוחה. יש חשבונית חודשית ועדיין מודעות פתוחות → חיוב השלמה
       const _isDone = !(total > 0);
       const _cRec = (cache.customers || []).find(c => c.id === cid) || {};
-      rows.push({ cid, gk, isCenter, isSocial: gk === 'social', total, count: openAds.length, billedCount: gAds.length - openAds.length, txn, done: _isDone, supp: _docDone && !_isDone, name: nameOf('customers', cid), email: (_cRec.email || '').trim() });
+      rows.push({ cid, gk, isCenter, catHe: isCenter ? ecCatLabel(cid, gk) : '', catIdx: groups.indexOf(gk), firstOfCust: (() => { const f = _first; _first = false; return f; })(), total, count: openAds.length, billedCount: gAds.length - openAds.length, txn, done: _isDone, supp: _docDone && !_isDone, name: nameOf('customers', cid), email: (_cRec.email || '').trim() });
     }
   }
-  rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he') || a.gk.localeCompare(b.gk));
+  rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he') || a.cid - b.cid || a.catIdx - b.catIdx);
   const listRows = rows.map(r => `<tr>
-      <td><b>${esc(r.name)}</b>${r.isCenter ? ` <span style="font-size:.78rem;color:${r.isSocial ? '@@COLOR_BRAND@@' : '#6b7280'}">· ${r.isSocial ? 'חברתי כלכלי' : 'רגיל'}</span>` : ''}</td>
+      <td><b>${esc(r.name)}</b>${r.isCenter ? ` <span style="font-size:.78rem;color:${r.catIdx ? '@@COLOR_BRAND@@' : '#6b7280'}">· ${esc(r.catHe)}</span>` : ''}${(r.isCenter && r.firstOfCust) ? ` <button class="btn btn-sm btn-ghost" style="padding:1px 7px;font-size:.75rem" onclick="ecCatsModalMonth('${ym}', ${r.cid})" title="בדיקה ותיקון של סוג כל מודעה לפני ההפקה">🏷️ סיווג</button>` : ''}</td>
       <td>${r.count}${r.billedCount ? ` <span class="muted" style="font-size:.78rem">(+${r.billedCount} חויבו)</span>` : ''}</td>
       <td>${money(r.total)}</td>
       <td>${r.done ? '<span class="pill green">חויב ✓</span>' : r.supp
@@ -369,16 +433,15 @@ async function monthlyBillingPreviewOne(ym, cid, gk) {
   const ctx = _mbCtx; if (!ctx) return;
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
-  const cAds = ctx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk) && _mbBillable(a));
+  const cAds = ctx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a) === gk) && _mbBillable(a));
   const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(cAds, ctx.issMap) : cAds.map(a => _mbLine(a, ctx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
   const total = lines.reduce((s, it) => s + it.amount * it.price, 0);
   const _supp = _mbIsDone(ctx.done, ym, cid, isCenter ? gk : '');
-  const isSocial = gk === 'social';
   const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
   _mbKind = docKind; // ברירת מחדל לסוג המסמך
   document.getElementById('viewModal').innerHTML = `
-    <h3>תצוגה מקדימה — ${esc(nameOf('customers', cid))}${isCenter ? (isSocial ? ' · חברתי כלכלי' : ' · רגיל') : ''}</h3>
+    <h3>תצוגה מקדימה — ${esc(nameOf('customers', cid))}${isCenter ? ' · ' + esc(ecCatLabel(cid, gk)) : ''}</h3>
     <p class="muted" style="font-size:.85rem">חיוב חודשי ${ym} · תאריך המסמך: ${_mbDocDate(ym)}</p>
     ${_supp ? `<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:.85rem">➕ <b>חיוב השלמה</b> — ללקוח כבר הופקה חשבונית חודשית ל-${ym}. כאן רק המודעות שנוספו אחריה ועוד לא חויבו.</div>` : ''}
     <div class="table-wrap" style="margin-top:8px"><table class="data">
@@ -403,10 +466,10 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   if (!_mbCtx || _mbCtx.ym !== ym) { await monthlyBillingReview(ym); }
   const cust = (cache.customers || []).find(c => c.id === cid) || {};
   const isCenter = ecIsCenter(cid);
-  const cAds = _mbCtx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a.id) === gk) && _mbBillable(a));
+  const cAds = _mbCtx.ads.filter(a => a.customer_id === cid && (!isCenter || ecCatOfAd(a) === gk) && _mbBillable(a));
   const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(cAds, _mbCtx.issMap) : cAds.map(a => _mbLine(a, _mbCtx.issMap)).filter(it => it.price > 0);
   if (!lines.length) { toast('אין מה לחייב', true); return; }
-  const isSocial = gk === 'social';
+  const sfx = _ecSfx(cid, gk, isCenter);
   const docKind = _mbKind || (cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma');
   // בדיקה טרייה מול המסד ממש לפני ההפקה — גם בסוג מסמך אחר וגם ממכשיר אחר.
   // כבר הופקה חשבונית חודשית → זה חיוב השלמה: רק המודעות הפתוחות, במזהה עסקה נפרד
@@ -421,31 +484,33 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
       return;
     }
   }
-  const header = (_supp ? 'חיוב השלמה — ' : 'חיוב חודשי — ') + ym + (isSocial ? ' — חברתי כלכלי' : '');
+  const header = (_supp ? 'חיוב השלמה — ' : 'חיוב חודשי — ') + ym + (sfx ? ' — ' + sfx : '');
   const items = isPagesOnlyCustomer(cid) ? lines : [{ details: header, amount: 1, price: 0 }, ...lines];
   const txn = _supp ? _mbSuppTxn(ym, cid, docKind, isCenter ? gk : '', cAds) : _mbTxn(ym, cid, docKind, isCenter ? gk : '');
   document.getElementById('viewBack').classList.remove('open');
-  const _doc = await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: (_supp ? 'חיוב השלמה ' : 'חיוב חודשי ') + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: cAds.map(a => a.id) });
+  const _doc = await invCall({ customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: _mbDocDate(ym), transaction_id: txn, comment: (_supp ? 'חיוב השלמה ' : 'חיוב חודשי ') + ym + (sfx ? ' (' + sfx + ')' : ''), ad_ids: cAds.map(a => a.id) });
   if (_supp) { await monthlyBillingReview(ym); return; } // הגזירים החודשיים כבר נשלחו בהפקה החודשית
   // ההפקה נכשלה — לא שולחים ללקוח גזירים על חשבונית שלא קיימת
   if (!(_doc && _doc.ok)) { await monthlyBillingReview(ym); return; }
   try {
     if (isCenter) {
-      // פיצול לקטגוריות: מייל נפרד לכל קטגוריה, לכתובת שהוגדרה לה בכרטיס — עם הגזירים שלה ומספר החשבונית
-      const _catHe = EC_CAT_HE[gk] || gk;
+      // פיצול לפי סוגי מודעות: מייל לכל סוג עם הגזירים שלו ומספר החשבונית — לכתובת של הסוג,
+      // ואם לא הוגדרה לו כתובת — למייל הרגיל של הלקוח
+      const _catHe = ecCatLabel(cid, gk);
       const _to = ecEmailOf(cid, gk);
       const _catAds = cAds.map(a => a.id);
       const _issueIds = [...new Set(cAds.map(a => a.issue_id))];
       const _catKey = cid + '|' + ym + '|' + gk;
-      if (!_to) {
-        toast('⚠️ קטגוריה ' + _catHe + ': לא הוגדר מייל — החשבונית הופקה אך לא נשלח מייל', true);
-      } else if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_catKey)) {
+      if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_catKey)) {
         _mbClipsSent.add(_catKey);
-        toast('מכין מייל לקטגוריה ' + _catHe + '...');
+        toast('מכין מייל לסוג ' + _catHe + '...');
         const _num = _doc.document && _doc.document.doc_number ? _doc.document.doc_number : '';
-        const _r = await adProofSendMonth(cid, _issueIds, ym, { to_email: _to, ad_ids: _catAds, category_he: _catHe, note: 'חשבונית' + (_num ? " מס' " + _num : '') + ' — קטגוריה: ' + _catHe, invoice: _doc.document ? { doc_number: _doc.document.doc_number, doc_uuid: _doc.document.doc_uuid } : null });
-        if (_r && _r.emailed) toast('✅ נשלח מייל לקטגוריה ' + _catHe);
-        else toast('ℹ️ קטגוריה ' + _catHe + ': המייל לא אושר' + (_r && _r.emailError ? ' — ' + _r.emailError : '') + ' — בדוק', true);
+        const _o = { ad_ids: _catAds, category_he: _catHe, note: 'חשבונית' + (_num ? " מס' " + _num : '') + ' — ' + _catHe, invoice: _doc.document ? { doc_number: _doc.document.doc_number, doc_uuid: _doc.document.doc_uuid } : null };
+        if (_to) _o.to_email = _to;
+        const _r = await adProofSendMonth(cid, _issueIds, ym, _o);
+        if (_r && _r.emailed) toast('✅ נשלח מייל — ' + _catHe);
+        else if (_r && _r.downloaded && !_r.email) toast('ℹ️ ' + _catHe + ': אין מייל ללקוח — הורדתי לך את הגזירים');
+        else toast('ℹ️ ' + _catHe + ': המייל לא אושר' + (_r && _r.emailError ? ' — ' + _r.emailError : '') + ' — בדוק', true);
       }
     } else {
       // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד)
@@ -500,19 +565,21 @@ async function issueBillingSetMonthly(issueId, customerId) {
             div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "גיליון X — תאריך" + "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
               <button class="btn btn-sm ${po ? 'btn-ghost' : ''}" onclick="togglePagesOnlyInvoice(${id})">${po ? 'חזרה לפירוט מלא' : '🧾 פירוט מקוצר'}</button>`;
             host.appendChild(div2);
-            // פיצול לקטגוריות: שורה בלשונית כספים כשפעיל; כשכבוי — רק פריט בתפריט "פעולות"
+            // פיצול לפי סוגי מודעות: שורה בלשונית כספים כשפעיל; כשכבוי — רק פריט בתפריט "פעולות"
             if (ecIsCenter(id)) {
               const em = ecEmails(id);
-              const emTxt = ['regular', 'social'].map(k => EC_CAT_HE[k] + ': ' + (em[k] ? `<span dir="ltr">${esc(em[k])}</span>` : '<b style="color:#b91c1c">חסר מייל</b>')).join(' · ');
+              const cats = ecCats(id);
+              const chips = cats.map(c => `<span class="pill amber">${esc(c.he)}</span>`).join(' ');
+              const emTxt = cats.map(c => esc(c.he) + ': ' + (em[c.k] ? `<span dir="ltr">${esc(em[c.k])}</span>` : 'המייל של הלקוח')).join(' · ');
               const div3 = document.createElement('div');
               div3.style.cssText = div.style.cssText;
-              div3.innerHTML = `<span><b>חשבונית לפי קטגוריות:</b> <span class="pill amber">רגיל / חברתי כלכלי</span><br><span style="font-size:.82rem;color:#64748b">${emTxt}</span></span>
-                <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecEmailsModal(${id})">✉️ מיילים</button><button class="btn btn-sm btn-ghost" onclick="ecToggleSplit(${id})">ביטול פיצול</button></span>`;
+              div3.innerHTML = `<span><b>חשבונית נפרדת לכל סוג מודעה:</b> ${chips}<br><span style="font-size:.82rem;color:#64748b">${emTxt}</span></span>
+                <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecCatsEdit(${id})">✏️ סוגים ומיילים</button><button class="btn btn-sm btn-ghost" onclick="ecToggleSplit(${id})">ביטול פיצול</button></span>`;
               host.appendChild(div3);
             } else {
               const menu = document.getElementById('ccMoreMenu');
               if (menu && !document.getElementById('ecSplitBtn')) {
-                const btn = `<button id="ecSplitBtn" class="btn" onclick="ccMenuClose();ecToggleSplit(${id})">🏷️ פיצול חשבונית לקטגוריות</button>`;
+                const btn = `<button id="ecSplitBtn" class="btn" onclick="ccMenuClose();ecToggleSplit(${id})">🏷️ חשבונית נפרדת לכל סוג מודעה</button>`;
                 const sep = menu.querySelector('.cc-msep'); // מעל קו ההפרדה של "מחיקת לקוח"
                 if (sep) sep.insertAdjacentHTML('beforebegin', btn); else menu.insertAdjacentHTML('beforeend', btn);
               }

@@ -109,8 +109,6 @@ async function issueBillingOpen(issueId) {
       cid, count: cAds.length, total, done: doneSet.has(cid),
       monthly: (typeof isMonthlyCustomer === 'function' && isMonthlyCustomer(cid)),
       monthlyDone: monthlyDoneSet.has(cid),
-      isCenter: (typeof ecIsCenter === 'function' && ecIsCenter(cid)),
-      social: (typeof ecCatOfAd === 'function') ? cAds.filter(a => ecCatOfAd(a.id) === 'social').length : 0,
     };
   }).filter(r => r.monthly || r.total > 0)  // לא מציגים לקוחות בסכום ₪0 (מודעות מערכת/חינם) — אין להם חשבונית
     .sort((a, b) => b.total - a.total);
@@ -143,7 +141,7 @@ async function issueBillingOpen(issueId) {
         <td><b>${esc(nameOf('customers', r.cid))}</b></td>
         <td>${r.count}</td>
         <td>${money(r.total)}</td>
-        <td>${r.isCenter ? `<button class="btn btn-sm" style="background:@@COLOR_BRAND@@;color:#fff" onclick="ecCatsModal(${issueId}, ${r.cid})" title="סיווג כל מודעה: רגיל / חברתי כלכלי">🏷️ קטגוריות${r.social ? ' · ' + r.social + ' חברתי' : ''}</button> ` : ''}${r.monthly
+        <td>${r.monthly
       ? `${r.monthlyDone ? '<span class="pill green" title="החשבונית החודשית של חודש זה כבר הופקה">🧾 חשבונית חודשית הופקה ✓</span>' : '<span class="pill amber">חיוב חודשי</span>'} <button class="btn btn-sm btn-ghost" onclick="issueBillingSetMonthly(${issueId}, ${r.cid})">בטל חודשי</button>`
       : `${r.done ? '<span class="pill green">חויב ✓</span>' : `<button class="btn btn-sm" onclick="issueBillingPreview(${issueId}, ${r.cid})">תצוגה והפקה</button> <button class="btn btn-sm btn-ghost" style="color:var(--ok)" onclick="issueBillingPaidMenu(${issueId}, ${r.cid})" title="שולם — ללא חשבונית או חשבונית מס קבלה">💰 שולם</button> <button class="btn btn-sm btn-ghost" onclick="issueBillingMarkInvoiced(${issueId}, ${r.cid})" title="סמן שחשבונית כבר הופקה — בלי להפיק ובלי לרשום חוב">🧾 סמן הופקה</button>`} <button class="btn btn-sm btn-ghost" onclick="issueBillingSetMonthly(${issueId}, ${r.cid})">🔁 חודשי</button>`}
           ${clipsSent.has(r.cid) ? '<span class="pill green" title="הגזיר נשלח ללקוח אוטומטית">📎 גזיר נשלח ✓</span>' : `<button class="btn btn-sm btn-ghost" onclick="issueSendClip(${issueId}, ${r.cid})">📎 גזיר</button>`} <button class="btn btn-sm btn-ghost" onclick="adProofOpen(${issueId}, ${r.cid})">🖼️ הוכחת פרסום</button></td>

@@ -157,25 +157,26 @@ async function _aiRunMonthly(issue, custs, res) {
     const cAds = (ads || []).filter(a => a.customer_id === cid);
     if (!cAds.length) continue;
     const isCenter = typeof ecIsCenter === 'function' && ecIsCenter(cid);
-    const groups = isCenter ? ['regular', 'social'] : ['regular'];
+    const groups = isCenter ? ecCatKeys(cid) : ['regular'];
     for (const gk of groups) {
-      const gName = name + (isCenter ? ' · ' + (gk === 'social' ? 'חברתי כלכלי' : 'רגיל') : '');
-      const open = cAds.filter(a => (!isCenter || ecCatOfAd(a.id) === gk) && _aiOpen(a));
+      const catHe = isCenter ? ecCatLabel(cid, gk) : '';
+      const sfx = isCenter ? _ecSfx(cid, gk, true) : '';
+      const gName = name + (isCenter ? ' · ' + catHe : '');
+      const open = cAds.filter(a => (!isCenter || ecCatOfAd(a) === gk) && _aiOpen(a));
       if (!open.length) continue;
       const meta = { k: 'm' + ym + '-c' + cid + (isCenter ? '-' + gk : ''), what: 'חודשי ' + ym, ad_ids: open.map(a => a.id) };
       if (_mbIsDone(doneSet, ym, cid, isCenter ? gk : '')) { res.push({ ...meta, cid, name: gName, st: 'skip', why: 'כבר הופקה חשבונית חודשית — מודעות שנוספו אחריה לטיפול ידני (השלמה)' }); continue; }
-      const toEmail = (isCenter && typeof ecEmailOf === 'function') ? (ecEmailOf.length >= 2 ? ecEmailOf(cid, gk) : ecEmailOf(gk)) : '';
+      const toEmail = isCenter ? ecEmailOf(cid, gk) : '';
       if (!_aiEmailOk(toEmail || cust.email)) { res.push({ ...meta, cid, name: gName, st: 'skip', why: 'אין מייל' }); continue; }
       const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(open, issMap) : open.map(a => _mbLine(a, issMap)).filter(it => it.price > 0);
       if (!lines.length) continue;
-      const isSocial = gk === 'social';
-      const items = isPagesOnlyCustomer(cid) ? lines : [{ details: 'חיוב חודשי — ' + ym + (isSocial ? ' — חברתי כלכלי' : ''), amount: 1, price: 0 }, ...lines];
+      const items = isPagesOnlyCustomer(cid) ? lines : [{ details: 'חיוב חודשי — ' + ym + (sfx ? ' — ' + sfx : ''), amount: 1, price: 0 }, ...lines];
       const docKind = _ibDocKind(cid);
       const total = lines.reduce((s, it) => s + it.amount * it.price, 0);
       const data = await invCall({
         customer_id: cid, doc_kind: docKind, items, vat_included: false, doc_date: docDate,
         transaction_id: _mbTxn(ym, cid, docKind, isCenter ? gk : ''),
-        comment: 'חיוב חודשי ' + ym + (isSocial ? ' (חברתי כלכלי)' : ''), ad_ids: open.map(a => a.id), pay_link: 'amount',
+        comment: 'חיוב חודשי ' + ym + (sfx ? ' (' + sfx + ')' : ''), ad_ids: open.map(a => a.id), pay_link: 'amount',
       }, { stay: true });
       // מייל אחד ללקוח: גזירי החודש + החשבונית מצורפת (כמו בחיוב החודשי הידני)
       let mail = null;
@@ -185,7 +186,7 @@ async function _aiRunMonthly(issue, custs, res) {
           const o = { note: 'חשבונית' + (doc.doc_number ? " מס' " + doc.doc_number : '') + (data.pay_url ? ' · לתשלום מאובטח באשראי: ' + data.pay_url : '') };
           // EZcount כבר שולח את המסמך כשהשליחה האוטומטית שלו דולקת — אז לא מצרפים אותו שוב
           if (String((cache.settings || {}).ezcount_autosend || '') !== '1') o.invoice = { doc_number: doc.doc_number, doc_uuid: doc.doc_uuid };
-          if (isCenter) Object.assign(o, { to_email: toEmail || cust.email, ad_ids: open.map(a => a.id), category_he: isSocial ? 'חברתי כלכלי' : 'כללי' });
+          if (isCenter) Object.assign(o, { to_email: toEmail || cust.email, ad_ids: open.map(a => a.id), category_he: catHe });
           const r = await adProofSendMonth(cid, [...new Set(cAds.map(a => a.issue_id))], ym, o);
           mail = (r && r.emailed) ? { ok: true } : { ok: false, err: (r && r.emailError) || 'המייל לא אושר' };
         } catch (e) { mail = { ok: false, err: String(e && e.message || e) }; }
