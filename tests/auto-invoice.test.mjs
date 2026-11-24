@@ -22,7 +22,7 @@ function setup({ settings = {}, customers, issues, ads, docs = [] }) {
         not(c, op, v) { const bad = v.replace(/[()"]/g, '').split(','); q.rows = q.rows.filter(r => !bad.includes(r[c])); return q; },
         ilike(c, p) { const re = new RegExp('^' + p.replace(/[-]/g, '\\-').replace(/%/g, '.*') + '$', 'i'); q.rows = q.rows.filter(r => re.test(r[c] || '')); return q; },
         maybeSingle() { return Promise.resolve({ data: q.rows[0] || null, error: null }); },
-        upsert(v) { calls.upserts.push(v); return Promise.resolve({ error: null }); },
+        upsert(v) { calls.upserts.push(v); tables.settings = tables.settings.filter(x => x.key !== v.key).concat([v]); return Promise.resolve({ error: null }); },
         then(a, b) { return res().then(a, b); },
       });
       return q;
@@ -107,6 +107,19 @@ const S = () => ({ auto_invoice_customers: '[1,2,3]', monthly_billing_customers:
   const before = calls.inv.length;
   await T.autoInvoiceAfterVerify(ISS[1]);
   assert.strictEqual(calls.inv.length, before, 'no double invoicing on re-verify');
+}
+
+// 3ב. פריטים פתוחים נשמרים (בלי מייל) — והפקה מוצלחת מנקה פריט קודם
+{
+  const { T, calls, tables } = setup({ settings: S(), customers: CUST, issues: ISS, ads: mkAds() });
+  tables.settings.push({ key: 'auto_invoice_pending', value: JSON.stringify([{ k: 'iss11-c1', cid: 1, since: '2026-11-01' }, { k: 'old', cid: 9, since: '2026-11-01' }]) });
+  await T.autoInvoiceAfterVerify(ISS[1]);
+  const pend = JSON.parse(tables.settings.find(x => x.key === 'auto_invoice_pending').value);
+  const keys = pend.map(p => p.k).sort();
+  assert.deepStrictEqual(keys, ['iss11-c2', 'old'], 'c1 cleared, c2 added, unrelated kept');
+  const c2 = pend.find(p => p.k === 'iss11-c2');
+  assert.deepStrictEqual(c2.ad_ids, [4]);
+  assert.strictEqual(c2.since, '2026-11-24');
 }
 
 // 4. גיליון באמצע החודש — חודשי לא מופק; שבועי כן

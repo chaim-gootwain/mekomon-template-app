@@ -14,6 +14,9 @@ auto-invoice.js — שליחת חשבוניות אוטומטית ללקוח
   ורק מודעות שעוד לא סומנו "חשבונית הופקה"/"שולם". אימות חוזר של אותו
   גיליון לא מפיק שוב.
 - בסוף: סיכום למנהל בחלון הסיום של האימות + תיעוד בכרטיס כל לקוח.
+- מה שלא הסתדר (דולג / נכשל / המייל לא יצא) נשמר כפריט פתוח עד שמטופל
+  (settings.auto_invoice_pending) — מוצג בכרטיס הלקוח, ובמופע עם שרת תזמון
+  נשלח עליו מייל יומי למנהל.
 ============================================================ */
 
 'use strict';
@@ -94,8 +97,9 @@ async function _aiRunIssue(issue, custs, res) {
     const name = cust.name || nameOf('customers', cid);
     const open = byCust[cid].filter(_aiOpen);
     if (!open.length) continue; // אין מה לחייב (חינם / כבר חויב / חוזה ששולם מראש)
-    if (done.has(cid)) { res.push({ cid, name, st: 'skip', why: 'כבר הופקה חשבונית לגיליון — מודעות פתוחות נשארו לטיפול ידני' }); continue; }
-    if (!_aiEmailOk(cust.email)) { res.push({ cid, name, st: 'skip', why: 'אין מייל בכרטיס' }); continue; }
+    const meta = { k: 'iss' + issue.id + '-c' + cid, what: 'גיליון ' + issue.issue_number, ad_ids: open.map(a => a.id) };
+    if (done.has(cid)) { res.push({ ...meta, cid, name, st: 'skip', why: 'כבר הופקה חשבונית לגיליון — מודעות פתוחות נשארו לטיפול ידני' }); continue; }
+    if (!_aiEmailOk(cust.email)) { res.push({ ...meta, cid, name, st: 'skip', why: 'אין מייל בכרטיס' }); continue; }
     const items = _ibItems(open, issue);
     if (!items.length) continue;
     const docKind = _ibDocKind(cid);
@@ -105,18 +109,19 @@ async function _aiRunIssue(issue, custs, res) {
       transaction_id: 'emu-iss' + issue.id + '-cust' + cid + '-' + docKind,
       comment: 'גיליון ' + issue.issue_number, ad_ids: open.map(a => a.id), pay_link: 'amount',
     }, { stay: true });
-    await _aiAfterDoc(cust, name, data, docKind, total, 'גיליון ' + issue.issue_number, res);
+    await _aiAfterDoc(cust, name, data, docKind, total, 'גיליון ' + issue.issue_number, res, null, meta);
   }
 }
 
-async function _aiAfterDoc(cust, name, data, docKind, total, what, res, mail) {
+async function _aiAfterDoc(cust, name, data, docKind, total, what, res, mail, meta) {
+  meta = meta || {};
   if (!(data && data.ok && data.document)) {
-    res.push({ cid: cust.id, name, st: 'fail', why: (data && (data.error || data.status)) || 'ההפקה נכשלה' });
+    res.push({ ...meta, cid: cust.id, name, total, st: 'fail', why: (data && (data.error || data.status)) || 'ההפקה נכשלה' });
     return false;
   }
   const doc = data.document;
   const sent = mail || await _aiEmailDoc(cust, doc, docKind, data.pay_url || null);
-  res.push({ cid: cust.id, name, st: sent.ok ? 'ok' : 'nomail', num: doc.doc_number || '', total, why: sent.ok ? '' : sent.err });
+  res.push({ ...meta, doc_id: doc.id, cid: cust.id, name, st: sent.ok ? 'ok' : 'nomail', num: doc.doc_number || '', total, why: sent.ok ? '' : sent.err });
   try { await addInteraction('customer', cust.id, '⚡ חשבונית אוטומטית (' + what + ') ' + (doc.doc_number || '') + ' — ' + money(total) + (sent.ok ? ' · נשלחה ל-' + cust.email : ' · ⚠ המייל לא נשלח: ' + sent.err)); } catch (e) { }
   return true;
 }
@@ -157,9 +162,10 @@ async function _aiRunMonthly(issue, custs, res) {
       const gName = name + (isCenter ? ' · ' + (gk === 'social' ? 'חברתי כלכלי' : 'רגיל') : '');
       const open = cAds.filter(a => (!isCenter || ecCatOfAd(a.id) === gk) && _aiOpen(a));
       if (!open.length) continue;
-      if (_mbIsDone(doneSet, ym, cid, isCenter ? gk : '')) { res.push({ cid, name: gName, st: 'skip', why: 'כבר הופקה חשבונית חודשית — מודעות שנוספו אחריה לטיפול ידני (השלמה)' }); continue; }
+      const meta = { k: 'm' + ym + '-c' + cid + (isCenter ? '-' + gk : ''), what: 'חודשי ' + ym, ad_ids: open.map(a => a.id) };
+      if (_mbIsDone(doneSet, ym, cid, isCenter ? gk : '')) { res.push({ ...meta, cid, name: gName, st: 'skip', why: 'כבר הופקה חשבונית חודשית — מודעות שנוספו אחריה לטיפול ידני (השלמה)' }); continue; }
       const toEmail = (isCenter && typeof ecEmailOf === 'function') ? (ecEmailOf.length >= 2 ? ecEmailOf(cid, gk) : ecEmailOf(gk)) : '';
-      if (!_aiEmailOk(toEmail || cust.email)) { res.push({ cid, name: gName, st: 'skip', why: 'אין מייל' }); continue; }
+      if (!_aiEmailOk(toEmail || cust.email)) { res.push({ ...meta, cid, name: gName, st: 'skip', why: 'אין מייל' }); continue; }
       const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(open, issMap) : open.map(a => _mbLine(a, issMap)).filter(it => it.price > 0);
       if (!lines.length) continue;
       const isSocial = gk === 'social';
@@ -184,10 +190,49 @@ async function _aiRunMonthly(issue, custs, res) {
           mail = (r && r.emailed) ? { ok: true } : { ok: false, err: (r && r.emailError) || 'המייל לא אושר' };
         } catch (e) { mail = { ok: false, err: String(e && e.message || e) }; }
       }
-      await _aiAfterDoc(Object.assign({}, cust, { email: toEmail || cust.email }), gName, data, docKind, total, 'חודשי ' + ym, res, mail);
+      await _aiAfterDoc(Object.assign({}, cust, { email: toEmail || cust.email }), gName, data, docKind, total, 'חודשי ' + ym, res, mail, meta);
     }
   }
   return ym;
+}
+
+/* ---------- פריטים פתוחים (דולג / נכשל / המייל לא יצא) ----------
+   נשמרים ב-settings.auto_invoice_pending עד שמטופלים. במופע עם שרת תזמון
+   (עמנואל) — מייל יומי למנהל עם הרשימה; פריט שכל המודעות שלו כבר חויבו /
+   בוטלו נסגר לבד. "המייל לא יצא" נסגר ידנית בכרטיס הלקוח (✓ טופל). */
+const AI_PENDING_KEY = 'auto_invoice_pending';
+async function aiPendingLoad() {
+  try {
+    const { data } = await db.from('settings').select('value').eq('key', AI_PENDING_KEY).maybeSingle();
+    const v = data ? data.value : (cache.settings || {})[AI_PENDING_KEY];
+    const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : [];
+  } catch (e) { return []; }
+}
+async function aiPendingStore(arr) {
+  const v = JSON.stringify(arr);
+  await run(db.from('settings').upsert({ key: AI_PENDING_KEY, value: v }, { onConflict: 'key' }));
+  if (cache.settings) cache.settings[AI_PENDING_KEY] = v;
+}
+async function _aiSavePending(res) {
+  const withKey = res.filter(r => r.k);
+  if (!withKey.length) return;
+  const cur = await aiPendingLoad();
+  const byK = {}; cur.forEach(p => { if (p && p.k) byK[p.k] = p; });
+  withKey.forEach(r => {
+    if (r.st === 'ok') { delete byK[r.k]; return; }
+    const prev = byK[r.k];
+    byK[r.k] = { k: r.k, cid: r.cid, name: r.name, what: r.what, st: r.st, why: r.why || '', ad_ids: r.ad_ids || [], doc_id: r.doc_id || null, num: r.num || '', total: r.total || 0, since: (prev && prev.since) || today() };
+  });
+  await aiPendingStore(Object.values(byK));
+}
+function aiPendingFor(cid) {
+  try { return JSON.parse((cache.settings || {})[AI_PENDING_KEY] || '[]').filter(p => p && Number(p.cid) === Number(cid)); } catch (e) { return []; }
+}
+async function aiPendingDone(k, cid) {
+  if (typeof profile === 'undefined' || profile.role !== 'admin') return;
+  const arr = (await aiPendingLoad()).filter(p => p.k !== k);
+  try { await aiPendingStore(arr); toast('✓ סומן כטופל — לא תקבל עליו תזכורת'); } catch (e) { toast('שמירה נכשלה', true); }
+  if (cid && typeof openCustomerCard === 'function') openCustomerCard(cid);
 }
 
 /* הרצה מלאה לגיליון שאומת — מחזיר HTML של סיכום (או '' אם אין לקוחות אוטומטיים) */
@@ -204,6 +249,7 @@ async function autoInvoiceAfterVerify(issue) {
     await _aiRunIssue(issue, custs, res);
     ym = await _aiRunMonthly(issue, custs, res);
   } catch (e) { res.push({ cid: 0, name: '—', st: 'fail', why: String(e && e.message || e) }); }
+  try { await _aiSavePending(res); } catch (e) { console.error('auto-invoice pending', e); }
   if (!res.length) return `<div style="margin-top:12px;padding:10px;border-radius:10px;background:#f8fafc;border:1px solid var(--line,#e5e7eb);font-size:.88rem">⚡ חשבוניות אוטומטיות: אין חשבוניות חדשות להפקה בגיליון זה${ym ? ' (כולל חיוב חודשי ' + ym + ')' : ''}.</div>`;
   const ico = { ok: '✅', nomail: '⚠️', skip: '⏭️', fail: '❌' };
   const okN = res.filter(r => r.st === 'ok').length;
@@ -261,6 +307,10 @@ async function autoInvoiceAfterVerify(issue) {
               ? '<span class="pill green">פעיל — ' + (monthly ? 'חשבונית חודשית אחרי אימות הגיליון האחרון בחודש' : 'חשבונית אחרי אימות כל גיליון מול המודפס') + '</span>'
               : 'כבוי'}${!hasEm && !on ? ' <span class="muted" style="font-size:.8rem">(דרוש מייל בכרטיס)</span>' : ''}${on && !hasEm ? ' <span class="pill amber">⚠ אין מייל — לא יישלח</span>' : ''}</span>
               <button id="aiToggle" class="btn btn-sm ${on ? 'btn-ghost' : ''}" ${!on && !hasEm ? 'disabled style="opacity:.5;cursor:not-allowed" title="הוסף מייל ללקוח כדי להפעיל"' : ''} onclick="toggleAutoInvoice(${id})">${on ? 'כבה שליחה אוטומטית' : '⚡ הפעל שליחה אוטומטית'}</button>`;
+            const pend = aiPendingFor(id);
+            if (pend.length) div.insertAdjacentHTML('beforeend', '<div style="flex-basis:100%;font-size:.84rem">' + pend.map(p =>
+              `<div style="margin-top:6px;padding:6px 8px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">⚠ <b>${esc(p.what || '')}</b> — ${esc(p.st === 'nomail' ? 'מסמך ' + (p.num || '') + ' הופק, המייל לא יצא' : (p.why || 'לא הופק'))}${p.st === 'nomail' && p.why ? ' (' + esc(p.why) + ')' : ''} <span class="muted">· מאז ${esc(p.since || '')}</span>
+              <button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="aiPendingDone('${esc(p.k)}', ${id})">✓ טופל</button></div>`).join('') + '</div>');
             (document.getElementById('ccBilling') || modal).appendChild(div);
           }
         }
