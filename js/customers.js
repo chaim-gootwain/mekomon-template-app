@@ -383,7 +383,6 @@ ${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<butto
 <div id="ccMoreMenu" class="cc-menu hidden">
 ${phoneBtn(c.phone, 'customer', id)}
 ${(c.whatsapp || c.phone) ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/${_ccIntl(c.whatsapp || c.phone)}">💬 וואטסאפ</a>` : ''}
-${(typeof ecIsCenter==='function' && ecIsCenter(id)) ? `<button class="btn" onclick="ccMenuClose();ecEmailsModal(${id})">✉️ מיילים לקטגוריות</button>` : ''}
 <button class="btn" onclick="ccMenuClose();customerEdit(${id})">✎ עריכת פרטים</button>
 <button class="btn" onclick="ccMenuClose();customerAddNote(${id})">＋ הוסף הערה</button>
 ${typeof auditShow === 'function' ? `<button class="btn" onclick="ccMenuClose();auditShow('customers', ${id}, '${escJs(c.name)}')">🕘 היסטוריית שינויים</button>` : ''}
