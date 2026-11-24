@@ -401,6 +401,29 @@ async function crossAgentGuard(rec, what) {
   }
   return true;
 }
+/* בדיקות כפילות משותפות לכל דרך שבה נוצר ליד ("ליד חדש", "מפרסמים פוטנציאליים → ליד"):
+   טלפון קרוב (התראה), שם זהה/מוכל אצל לקוח (חסימה לסוכן), שם זהה/מוכל אצל לקוח/ליד של
+   סוכן אחר (חסימה לסוכן). זורק שגיאה כשנחסם או בוטל. (התגלה 24.11.2026: ליד ממפרסמים
+   פוטנציאליים עקף את כל הבדיקות האלה ונוצר אצל סוכנת שנייה.) */
+async function leadDupGuards(rec) {
+  /* טלפון "קרוב" (אותו מספר חוץ מהספרות האחרונות — קו אחר של אותו עסק) — התראה עם הפרטים */
+  if (rec.phone) {
+    const near = await leadPhoneNear(rec.phone);
+    if (near.length && !confirm(
+      `שים לב: יש במערכת טלפון כמעט זהה (${rec.phone}) — ייתכן שזה אותו עסק בקו אחר:\n` +
+      near.map(n => `• ${n.kind === 'lead' ? 'ליד' : 'לקוח'} "${n.name}"${n.phone ? ' · ' + n.phone : ''} · ${n.agent_name || (n.kind === 'lead' ? 'מאגר ללא שיוך' : 'ללא סוכן')}`).join('\n') +
+      '\n\nלהוסיף את הליד בכל זאת?')) throw new Error('near-phone-cancel');
+  }
+  /* כבר לקוח (שם זהה, של כל סוכן) — לא פותחים עליו ליד */
+  const _asCust = await customerSameName(rec.name);
+  if (_asCust) {
+    if (isSales()) { showOops(`"${esc(_asCust.name)}" כבר לקוח במערכת${_asCust.agent ? ' (אצל ' + esc(_asCust.agent) + ')' : ''}.<br><b>לא פותחים עליו ליד.</b>`); throw new Error('lead-is-customer'); }
+    if (!confirm(`"${_asCust.name}" כבר לקוח במערכת${_asCust.agent ? ' (אצל ' + _asCust.agent + ')' : ''}.\nלפתוח עליו ליד בכל זאת?`)) throw new Error('lead-is-customer-cancel');
+  }
+  /* שם זהה ללקוח/ליד של סוכן אחר — חסימה לסוכן (גם בטלפון אחר / בלי טלפון) */
+  await crossAgentGuard({ name: rec.name }, 'ליד');
+}
+
 async function leadSimilarNames(name) { return (await similarNamesFinder([name]))(name); }
 
 function leadQuickAdd() {
@@ -449,22 +472,7 @@ function leadQuickAdd() {
         }
       }
     }
-    /* טלפון "קרוב" (אותו מספר חוץ מהספרות האחרונות — קו אחר של אותו עסק) — התראה עם הפרטים */
-    if (rec.phone) {
-      const near = await leadPhoneNear(rec.phone);
-      if (near.length && !confirm(
-        `שים לב: יש במערכת טלפון כמעט זהה (${rec.phone}) — ייתכן שזה אותו עסק בקו אחר:\n` +
-        near.map(n => `• ${n.kind === 'lead' ? 'ליד' : 'לקוח'} "${n.name}"${n.phone ? ' · ' + n.phone : ''} · ${n.agent_name || (n.kind === 'lead' ? 'מאגר ללא שיוך' : 'ללא סוכן')}`).join('\n') +
-        '\n\nלהוסיף את הליד בכל זאת?')) throw new Error('near-phone-cancel');
-    }
-    /* כבר לקוח (שם זהה, של כל סוכן) — לא פותחים עליו ליד */
-    const _asCust = await customerSameName(rec.name);
-    if (_asCust) {
-      if (isSales()) { showOops(`"${esc(_asCust.name)}" כבר לקוח במערכת${_asCust.agent ? ' (אצל ' + esc(_asCust.agent) + ')' : ''}.<br><b>לא פותחים עליו ליד.</b>`); throw new Error('lead-is-customer'); }
-      if (!confirm(`"${_asCust.name}" כבר לקוח במערכת${_asCust.agent ? ' (אצל ' + _asCust.agent + ')' : ''}.\nלפתוח עליו ליד בכל זאת?`)) throw new Error('lead-is-customer-cancel');
-    }
-    /* שם זהה ללקוח/ליד של סוכן אחר — חסימה לסוכן (גם בטלפון אחר / בלי טלפון) */
-    await crossAgentGuard({ name: rec.name }, 'ליד');
+    await leadDupGuards(rec);
     /* שם דומה (טלפון שונה) — התראה בלבד, ההחלטה אצל הסוכן */
     const similar = await leadSimilarNames(rec.name);
     if (similar.length && !confirm(

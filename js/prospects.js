@@ -564,6 +564,13 @@ function psToLead(id) {
       }
       if (!confirm(`העסק כבר קיים במערכת ${what}. להוסיף ליד בכל זאת?`)) throw new Error('dup');
     }
+    // אותן בדיקות כמו "ליד חדש" (leads.js): טלפון זהה אצל סוכן אחר, טלפון קרוב, שם זהה/מוכל
+    // אצל לקוח או אצל ליד של סוכן אחר. prospect_match תופס רק שם/טלפון זהים לגמרי —
+    // ליד נוצר כך אצל סוכנת שנייה (24.11.2026).
+    if (typeof leadDupGuards === 'function') {
+      if (rec.phone && typeof crossAgentGuard === 'function') await crossAgentGuard({ phone: rec.phone }, 'ליד');
+      await leadDupGuards(rec);
+    }
     if (!isMgr) rec.agent_id = (typeof myAgentId === 'function' && myAgentId()) || null;
     const lead = await run(db.from('leads').insert({
       ...rec, source: 'חילוץ מ-PDF', source_detail: srcDetail, created_by: profile.id,
