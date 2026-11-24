@@ -753,6 +753,7 @@ async function invCall(body, opts = {}) {
       toast('נכשל: ' + (data && data.error ? data.error : ''), true);
     }
     if (body.customer_id && !opts.stay) openCustomerCard(body.customer_id);
+    if (data && _payUrl) data.pay_url = _payUrl; // לשליחה אוטומטית — הקישור לגוף המייל
     return data;
   } catch (e) { toast('שגיאה: ' + e, true); }
 }
