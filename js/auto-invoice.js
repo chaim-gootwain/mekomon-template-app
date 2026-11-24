@@ -158,7 +158,7 @@ async function _aiRunMonthly(issue, custs, res) {
       const open = cAds.filter(a => (!isCenter || ecCatOfAd(a.id) === gk) && _aiOpen(a));
       if (!open.length) continue;
       if (_mbIsDone(doneSet, ym, cid, isCenter ? gk : '')) { res.push({ cid, name: gName, st: 'skip', why: 'כבר הופקה חשבונית חודשית — מודעות שנוספו אחריה לטיפול ידני (השלמה)' }); continue; }
-      const toEmail = (isCenter && typeof ecEmailOf === 'function') ? ecEmailOf(gk) : '';
+      const toEmail = (isCenter && typeof ecEmailOf === 'function') ? (ecEmailOf.length >= 2 ? ecEmailOf(cid, gk) : ecEmailOf(gk)) : '';
       if (!_aiEmailOk(toEmail || cust.email)) { res.push({ cid, name: gName, st: 'skip', why: 'אין מייל' }); continue; }
       const lines = isPagesOnlyCustomer(cid) ? ipoMonthlyLines(open, issMap) : open.map(a => _mbLine(a, issMap)).filter(it => it.price > 0);
       if (!lines.length) continue;
