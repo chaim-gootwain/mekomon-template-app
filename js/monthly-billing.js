@@ -40,14 +40,45 @@ async function toggleMonthlyBilling(id) {
   if (typeof openCustomerCard === 'function') openCustomerCard(id);
 }
 
-/* ---- מרכז קהילתי עמנואל: פיצול חשבונית חודשית ל-2 קטגוריות (רגיל / חברתי כלכלי) ---- */
-/* הסיווג הוא ברמת המודעה הבודדת — באותו שבוע יכולות להיות מודעות משתי הקטגוריות */
+/* ---- פיצול חשבונית חודשית ל-2 קטגוריות (רגיל / חברתי כלכלי) ----
+   ללקוחות שסומנו בכרטיס הלקוח (settings.cat_split_customers = [id,…]).
+   הסיווג הוא ברמת המודעה הבודדת — באותו שבוע יכולות להיות מודעות משתי הקטגוריות.
+   (EC_KEY — שם מפתח היסטורי של מפת הסיווג; לא לשנות, יש בו נתונים) */
 const EC_KEY = 'emanuel_center_cat';
+const EC_SPLIT_KEY = 'cat_split_customers';
 const EC_CAT_HE = { regular: 'רגיל', social: 'חברתי כלכלי' };
-function ecIsCenter(cid) {
-  const c = (cache.customers || []).find(x => x.id === Number(cid));
-  const n = (c && c.name) ? c.name : '';
-  return /מרכז\s*קהילתי/.test(n) && /עמנואל/.test(n);
+function ecSplitList() { try { const a = JSON.parse((cache.settings || {})[EC_SPLIT_KEY] || '[]'); return Array.isArray(a) ? a.map(Number) : []; } catch (e) { return []; } }
+function ecIsCenter(cid) { return ecSplitList().includes(Number(cid)); }
+async function ecToggleSplit(cid) {
+  cid = Number(cid);
+  const arr = ecSplitList(); const i = arr.indexOf(cid);
+  if (i >= 0) {
+    if (!confirm('לבטל את פיצול החשבונית לקטגוריות ללקוח הזה?\nמהחיוב החודשי הבא תופק לו חשבונית אחת.')) return;
+    arr.splice(i, 1);
+  } else arr.push(cid);
+  const v = JSON.stringify(arr);
+  await db.from('settings').upsert({ key: EC_SPLIT_KEY, value: v }, { onConflict: 'key' });
+  if (cache.settings) cache.settings[EC_SPLIT_KEY] = v;
+  toast(arr.includes(cid) ? '🏷️ פיצול לקטגוריות הופעל — הגדר/י מייל לכל קטגוריה' : 'פיצול לקטגוריות בוטל');
+  if (typeof openCustomerCard === 'function') openCustomerCard(cid);
+}
+/* מייל לכל קטגוריה, לכל לקוח בנפרד: settings.cat_emails_<cid> = {"regular":"…","social":"…"} */
+function _ecEmailsKey(cid) { return 'cat_emails_' + Number(cid); }
+function ecEmails(cid) { try { const o = JSON.parse((cache.settings || {})[_ecEmailsKey(cid)] || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (e) { return {}; } }
+function ecEmailOf(cid, cat) { return String(ecEmails(cid)[cat] || '').trim(); }
+function ecEmailsModal(cid) {
+  const cur = ecEmails(cid);
+  openForm('מיילים לפי קטגוריה — ' + (nameOf('customers', cid) || ''), [
+    { type: 'section', label: 'לאן נשלחים החשבונית והגזירים של כל קטגוריה' },
+    { name: 'regular', label: 'מייל קטגוריה רגילה', dir: 'ltr' },
+    { name: 'social', label: 'מייל קטגוריה חברתית כלכלית', dir: 'ltr' },
+  ], { regular: cur.regular || '', social: cur.social || '' }, async (r) => {
+    const v = JSON.stringify({ regular: String(r.regular || '').trim(), social: String(r.social || '').trim() });
+    await db.from('settings').upsert({ key: _ecEmailsKey(cid), value: v }, { onConflict: 'key' });
+    if (cache.settings) cache.settings[_ecEmailsKey(cid)] = v;
+    toast('✓ המיילים נשמרו');
+    if (typeof openCustomerCard === 'function') openCustomerCard(cid);
+  });
 }
 function ecMap() { try { return JSON.parse((cache.settings || {})[EC_KEY] || '{}'); } catch (e) { return {}; } }
 function ecCatOfAd(adId) { return ecMap()['ad' + adId] || 'regular'; }
@@ -178,7 +209,7 @@ async function monthlyBillingRun(ym) {
     if (!cAds.length) continue;
     const cust = (cache.customers || []).find(c => c.id === cid) || {};
     const docKind = cust.order_doc_type === 'tax_invoice' ? 'tax_invoice' : 'proforma';
-    // מרכז קהילתי עמנואל → פיצול ל-2 קטגוריות; שאר הלקוחות → חשבונית אחת כרגיל
+    // לקוח עם פיצול לקטגוריות (מסומן בכרטיס) → 2 חשבוניות; שאר הלקוחות → חשבונית אחת כרגיל
     const isCenter = ecIsCenter(cid);
     const groups = isCenter
       ? { regular: cAds.filter(a => ecCatOfAd(a.id) === 'regular'), social: cAds.filter(a => ecCatOfAd(a.id) === 'social') }
@@ -398,21 +429,40 @@ async function monthlyBillingIssueOne(ym, cid, gk) {
   if (_supp) { await monthlyBillingReview(ym); return; } // הגזירים החודשיים כבר נשלחו בהפקה החודשית
   // ההפקה נכשלה — לא שולחים ללקוח גזירים על חשבונית שלא קיימת
   if (!(_doc && _doc.ok)) { await monthlyBillingReview(ym); return; }
-  // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד, גם בפיצול קטגוריות)
   try {
-    const _key = cid + '|' + ym;
-    const _allAds = (_mbCtx && _mbCtx.ads || []).filter(a => a.customer_id === cid);
-    const _issueIds = [...new Set(_allAds.map(a => a.issue_id))];
-    if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_key)) {
-      _mbClipsSent.add(_key);
-      toast('מכין גזירי החודש...');
-      const _r = await adProofSendMonth(cid, _issueIds, ym);
-      if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
-      else if (_r && _r.downloaded && !_r.email) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
-      else if (_r && _r.downloaded) toast('⚠️ שליחת המייל נכשלה' + (_r.emailError ? ' — ' + _r.emailError : '') + ' — הורדתי לך את גזירי החודש', true);
-      else toast('גזירי החודש מוכנים');
+    if (isCenter) {
+      // פיצול לקטגוריות: מייל נפרד לכל קטגוריה, לכתובת שהוגדרה לה בכרטיס — עם הגזירים שלה ומספר החשבונית
+      const _catHe = EC_CAT_HE[gk] || gk;
+      const _to = ecEmailOf(cid, gk);
+      const _catAds = cAds.map(a => a.id);
+      const _issueIds = [...new Set(cAds.map(a => a.issue_id))];
+      const _catKey = cid + '|' + ym + '|' + gk;
+      if (!_to) {
+        toast('⚠️ קטגוריה ' + _catHe + ': לא הוגדר מייל — החשבונית הופקה אך לא נשלח מייל', true);
+      } else if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_catKey)) {
+        _mbClipsSent.add(_catKey);
+        toast('מכין מייל לקטגוריה ' + _catHe + '...');
+        const _num = _doc.document && _doc.document.doc_number ? _doc.document.doc_number : '';
+        const _r = await adProofSendMonth(cid, _issueIds, ym, { to_email: _to, ad_ids: _catAds, category_he: _catHe, note: 'חשבונית' + (_num ? " מס' " + _num : '') + ' — קטגוריה: ' + _catHe, invoice: _doc.document ? { doc_number: _doc.document.doc_number, doc_uuid: _doc.document.doc_uuid } : null });
+        if (_r && _r.emailed) toast('✅ נשלח מייל לקטגוריה ' + _catHe);
+        else toast('ℹ️ קטגוריה ' + _catHe + ': המייל לא אושר' + (_r && _r.emailError ? ' — ' + _r.emailError : '') + ' — בדוק', true);
+      }
+    } else {
+      // שולח ללקוח מייל אחד עם כל גזירי הפרסום שלו מהחודש (פעם אחת בלבד)
+      const _key = cid + '|' + ym;
+      const _allAds = (_mbCtx && _mbCtx.ads || []).filter(a => a.customer_id === cid);
+      const _issueIds = [...new Set(_allAds.map(a => a.issue_id))];
+      if (typeof adProofSendMonth === 'function' && _issueIds.length && !_mbClipsSent.has(_key)) {
+        _mbClipsSent.add(_key);
+        toast('מכין גזירי החודש...');
+        const _r = await adProofSendMonth(cid, _issueIds, ym);
+        if (_r && _r.emailed) toast('✅ גזירי החודש נשלחו ללקוח במייל אחד');
+        else if (_r && _r.downloaded && !_r.email) toast('ℹ️ אין מייל ללקוח — הורדתי לך את גזירי החודש');
+        else if (_r && _r.downloaded) toast('⚠️ שליחת המייל נכשלה' + (_r.emailError ? ' — ' + _r.emailError : '') + ' — הורדתי לך את גזירי החודש', true);
+        else toast('גזירי החודש מוכנים');
+      }
     }
-  } catch (e) { toast('הערה: שליחת גזירי החודש נכשלה — ' + (e && e.message || e), true); }
+  } catch (e) { toast('הערה: שליחת מייל החודש נכשלה — ' + (e && e.message || e), true); }
   await monthlyBillingReview(ym);
 }
 
@@ -447,9 +497,26 @@ async function issueBillingSetMonthly(issueId, customerId) {
             const po = isPagesOnlyCustomer(id);
             const div2 = document.createElement('div');
             div2.style.cssText = div.style.cssText;
-            div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
+            div2.innerHTML = `<span><b>פירוט בחשבונית:</b> ${po ? '<span class="pill amber">מקוצר — "גיליון X — תאריך" + "פרסום (עמודים)"</span>' : 'מלא — שורה לכל מודעה'}</span>
               <button class="btn btn-sm ${po ? 'btn-ghost' : ''}" onclick="togglePagesOnlyInvoice(${id})">${po ? 'חזרה לפירוט מלא' : '🧾 פירוט מקוצר'}</button>`;
             host.appendChild(div2);
+            // פיצול לקטגוריות: שורה בלשונית כספים כשפעיל; כשכבוי — רק פריט בתפריט "פעולות"
+            if (ecIsCenter(id)) {
+              const em = ecEmails(id);
+              const emTxt = ['regular', 'social'].map(k => EC_CAT_HE[k] + ': ' + (em[k] ? `<span dir="ltr">${esc(em[k])}</span>` : '<b style="color:#b91c1c">חסר מייל</b>')).join(' · ');
+              const div3 = document.createElement('div');
+              div3.style.cssText = div.style.cssText;
+              div3.innerHTML = `<span><b>חשבונית לפי קטגוריות:</b> <span class="pill amber">רגיל / חברתי כלכלי</span><br><span style="font-size:.82rem;color:#64748b">${emTxt}</span></span>
+                <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecEmailsModal(${id})">✉️ מיילים</button><button class="btn btn-sm btn-ghost" onclick="ecToggleSplit(${id})">ביטול פיצול</button></span>`;
+              host.appendChild(div3);
+            } else {
+              const menu = document.getElementById('ccMoreMenu');
+              if (menu && !document.getElementById('ecSplitBtn')) {
+                const btn = `<button id="ecSplitBtn" class="btn" onclick="ccMenuClose();ecToggleSplit(${id})">🏷️ פיצול חשבונית לקטגוריות</button>`;
+                const sep = menu.querySelector('.cc-msep'); // מעל קו ההפרדה של "מחיקת לקוח"
+                if (sep) sep.insertAdjacentHTML('beforebegin', btn); else menu.insertAdjacentHTML('beforeend', btn);
+              }
+            }
           }
         }
       } catch (e) { console.error('monthly-billing', e); }
