@@ -395,7 +395,7 @@ function _pibVars(issue, page) {
 async function fpBuildPrintPdf(proof) {
   proof = proof === true;
   const title = proof ? '📝 PDF לאישור' : '📄 הרכבת PDF לדפוס';
-  if (!['admin', 'editor'].includes(profile.role)) return;
+  if (!['admin', 'editor', 'graphics'].includes(profile.role)) return;
   if (typeof _alBusyGuard === 'function' && _alBusyGuard()) return;
   const cfg = pibConfig();
   if (!cfg.master_path) { toast('לא הועלה עמוד אב — הגדרות ← הרכבת PDF לדפוס', true); return; }
@@ -862,7 +862,7 @@ ${errs.length ? `<p style="color:#b91c1c;font-size:.84rem">🔴 לא ירדו ($
 
 /* ==================== עמודי כתבות — העלאה ותצוגת שיבוץ ==================== */
 function fpEditorialUpload() {
-  if (!['admin', 'editor'].includes(profile.role)) return;
+  if (!['admin', 'editor', 'graphics'].includes(profile.role)) return;
   // השדה מחובר לדף: בספארי/אייפון שדה קובץ מנותק לא תמיד מפעיל onchange
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = 'application/pdf,.pdf'; inp.style.display = 'none';
