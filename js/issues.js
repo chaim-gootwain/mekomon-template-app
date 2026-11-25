@@ -146,8 +146,8 @@ renderTable(document.getElementById('issuesTable'), _issues, [
 { h: 'דדליין מודעות', f: r => heDateTime(r.ads_deadline) + (typeof hebDeadlineWarn === 'function' ? hebDeadlineWarn(r.ads_deadline) : '') },
 { h: 'עמודים', f: r => r.pages_count },
 { h: 'סטטוס', f: r => pill('issue', r.status) + (((r.publish_date || '') < _t && !['closed', 'published'].includes(r.status)) ? ' <span title="עבר תאריך החלוקה והגיליון לא נסגר" style="color:#b91c1c">⚠ דורש טיפול</span>' : '') },
-{ h: 'רווח', f: r => { if (!_canFin) return ''; const _rv = _revByIssue[r.id] || 0, _ct = _costByIssue[r.id] || 0; if (!_rv && !_ct) return '<span class="muted">—</span>'; const _p = _rv - _ct; return `<b style="color:${_p >= 0 ? 'var(--ok)' : 'var(--danger)'}" title="הכנסות ${money(_rv)} − עלויות ${money(_ct)} (נטו)">${money(_p)}</b>`; } },
-{ h: '', f: r => `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openIssueEntry(${r.id})">＋ הזנה</button> <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFlatplan(${r.id})">פלטפלן</button>${['admin','sales'].includes(profile.role) ? ` <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openIssueCosts(${r.id})">💸 עלויות</button>` : ''}${['admin','sales'].includes(profile.role) && typeof invoicesOn === 'function' && invoicesOn() ? ` <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();issueBillingOpen(${r.id})">🧾 חיוב</button>` : ''}` },
+...(_canFin ? [{ h: 'רווח', f: r => { if (!_canFin) return ''; const _rv = _revByIssue[r.id] || 0, _ct = _costByIssue[r.id] || 0; if (!_rv && !_ct) return '<span class="muted">—</span>'; const _p = _rv - _ct; return `<b style="color:${_p >= 0 ? 'var(--ok)' : 'var(--danger)'}" title="הכנסות ${money(_rv)} − עלויות ${money(_ct)} (נטו)">${money(_p)}</b>`; } }] : []),
+{ h: '', f: r => `${profile.role !== 'graphics' ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openIssueEntry(${r.id})">＋ הזנה</button> ` : ''}<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFlatplan(${r.id})">פלטפלן</button>${['admin','sales'].includes(profile.role) ? ` <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openIssueCosts(${r.id})">💸 עלויות</button>` : ''}${['admin','sales'].includes(profile.role) && typeof invoicesOn === 'function' && invoicesOn() ? ` <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();issueBillingOpen(${r.id})">🧾 חיוב</button>` : ''}` },
 ], { onRow: r => openFlatplan(r.id), empty: 'אין גיליונות — לחץ "יצירת גיליונות קדימה"' });
 _issuesTrends();
 recAdsAfterRender();
@@ -288,13 +288,13 @@ ${_fpDeadlineBanner()}
 ${_alPreviewBanner()}
 
 <div class="stats">
-${stat(money(soldAmount) || '₪0', 'שטח פרסום שנמכר')}
+${canSeePrices() ? stat(money(soldAmount) || '₪0', 'שטח פרסום שנמכר') : ''}
 ${stat(placedAds.length + '/' + _fpAds.length, 'מודעות משובצות')}
 ${stat(_totalAdArea.toFixed(1) + '/' + _fpIssue.pages_count + " עמ'", 'שווה-ערך עמודים מלאים · מכל ' + _fpAds.length + ' המודעות שהוזנו')}
 ${stat(_fullPages + ' מלאים · ' + _partialPages + ' חלקיים', 'עמודים משובצים בפועל')}
 ${stat(_fpIssue.pages_count - emptyPages.length + '/' + _fpIssue.pages_count, 'עמודים מאוישים')}
 ${stat(soldArea.toFixed(2) + " עמ'", 'שטח מודעות')}
-${stat(freeArea > 0.01 ? freeArea.toFixed(2) + " עמ' ≈ " + money(Math.round(freeArea * _AD_FULL_PRICE)) : '—', 'מלאי פנוי')}
+${stat(freeArea > 0.01 ? freeArea.toFixed(2) + " עמ'" + (canSeePrices() ? " ≈ " + money(Math.round(freeArea * _AD_FULL_PRICE)) : '') : '—', 'מלאי פנוי')}
 ${stat('פרסום ' + adPct + "% · מערכת " + artPages + " עמ'", 'יחס פרסום/מערכת')}
 </div>
 
@@ -805,10 +805,10 @@ ads.forEach(a => { const o = byIssue[a.issue_id] = byIssue[a.issue_id] || { rev:
 const rows = recent.map(i => {
 const o = byIssue[i.id] || { rev: 0, area: 0 };
 const fill = i.pages_count ? Math.round(o.area / i.pages_count * 100) : 0;
-return `<tr><td><b>גיליון ${i.issue_number}</b></td><td>${heDate(i.publish_date)}</td><td>${money(o.rev)}</td><td>${o.area.toFixed(2)} עמ'</td><td>${fill}%</td></tr>`;
+return `<tr><td><b>גיליון ${i.issue_number}</b></td><td>${heDate(i.publish_date)}</td>${canSeePrices() ? `<td>${money(o.rev)}</td>` : ''}<td>${o.area.toFixed(2)} עמ'</td><td>${fill}%</td></tr>`;
 }).join('');
 box.innerHTML = `<div class="card card-pad" style="margin-top:16px"><b>מגמות — 8 גיליונות אחרונים</b>
-<div class="table-wrap" style="margin-top:8px"><table class="data"><thead><tr><th>גיליון</th><th>חלוקה</th><th>הכנסת מודעות</th><th>שטח מודעות</th><th>מילוי</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+<div class="table-wrap" style="margin-top:8px"><table class="data"><thead><tr><th>גיליון</th><th>חלוקה</th>${canSeePrices() ? '<th>הכנסת מודעות</th>' : ''}<th>שטח מודעות</th><th>מילוי</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* ==================== ארכיון גיליונות ==================== */

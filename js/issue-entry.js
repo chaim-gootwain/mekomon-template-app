@@ -22,6 +22,7 @@ let _ieIssue = null, _ieAds = [], _ieCust = null, _ieCharges = null;
 let _ieContract = null, _ieContractUsed = 0;
 
 async function openIssueEntry(issueId) {
+if (profile.role === 'graphics') { toast('הזנת מודעות — לא זמין לגרפיקה', true); return; }
 _ieIssue = (typeof _issues !== 'undefined' ? _issues : []).find(i => i.id === issueId)
 || (cache.issues || []).find(i => i.id === issueId)
 || await run(db.from('issues').select('*').eq('id', issueId).single());

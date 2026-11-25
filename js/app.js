@@ -19,7 +19,7 @@ const Pages = {};
 const NAV = [
 { id: 'dash', title: 'ראשי', icon: '🏠', roles: ['admin', 'sales', 'editor', 'graphics'], group: '' },
 { id: 'leads', title: 'לידים', icon: '📞', roles: ['admin', 'sales'], group: 'מכירות' },
-{ id: 'customers', title: 'לקוחות', icon: '🏪', roles: ['admin', 'sales', 'editor', 'graphics'], group: 'מכירות' },
+{ id: 'customers', title: 'לקוחות', icon: '🏪', roles: ['admin', 'sales', 'editor'], group: 'מכירות' },
 { id: 'contracts', title: 'חוזים', icon: '📄', roles: ['admin', 'sales'], group: 'מכירות' },
 { id: 'quotes', title: 'הצעות מחיר', icon: '📋', roles: ['admin', 'sales'], group: 'מכירות' },
 { id: 'ads', title: 'מודעות', icon: '📣', roles: ['admin', 'sales', 'editor'], group: 'עיתון' },
@@ -63,6 +63,7 @@ if (profile.role === 'pending' || !profile.active) { showPendingScreen(); return
 if (profile.role === 'committee') { // לוועדה ממשק ממוקד משלה
 buildShell(); show('app'); await refreshCache(); await updateClockButton(); openPage('committee'); return;
 }
+_roleGuardsInstall();
 buildShell();
 show('app');
 await refreshCache();
@@ -89,6 +90,20 @@ setTimeout(async () => {
   try { if (typeof standingOrdersAutoCheck === 'function') await standingOrdersAutoCheck(); } catch (e) { }
   try { if (typeof icoCostsAutoCheck === 'function') await icoCostsAutoCheck(); } catch (e) { }
 }, 1200);
+}
+
+/* חסימות לפי תפקיד שחייבות לעטוף את כל המודולים — רצה אחרי שכל הקבצים נטענו.
+   גרפיקאית: אין גישה לכרטיס לקוח (גם מקישורים בפלטפלן / התראות). */
+function _roleGuardsInstall() {
+  const orig = window.openCustomerCard;
+  if (typeof orig === 'function' && !orig._roleGuarded) {
+    const guarded = function () {
+      if (profile && profile.role === 'graphics') { toast('אין לך הרשאה לכרטיס לקוח', true); return; }
+      return orig.apply(this, arguments);
+    };
+    guarded._roleGuarded = true;
+    window.openCustomerCard = guarded;
+  }
 }
 
 function show(id) {
@@ -218,6 +233,8 @@ try { localStorage.setItem('navOpenGroups', JSON.stringify(list)); } catch (e) {
 async function openPage(id) {
 const page = Pages[id];
 if (!page) { toast('הדף עדיין לא קיים: ' + id, true); return; }
+// גרפיקאית: אין גישה לדף הלקוחות — גם בקישור ישיר / קריאה מקוד (התראות, פלטפלן)
+if (id === 'customers' && profile && profile.role === 'graphics') { toast('אין לך הרשאה לדף זה', true); return; }
 currentPage = id;
 document.querySelectorAll('.sidebar nav button').forEach(b => b.classList.toggle('active', b.id === 'nav-' + id));
 const activeSec = document.getElementById('nav-' + id)?.closest('.nav-sec');
@@ -355,7 +372,7 @@ const seq = ++_searchSeq;
 const like = `%${term.replace(/[,()"]/g, ' ').trim()}%`;
 const [leads, customers, ads, articles] = await Promise.all([
 ['admin', 'sales'].includes(profile.role) ? db.from('leads').select('id,name,phone').or(`name.ilike.${like},phone.ilike.${like}`).limit(5) : { data: [] },
-db.from('customers').select('id,name,phone').or(`name.ilike.${like},phone.ilike.${like}`).limit(5),
+profile.role !== 'graphics' ? db.from('customers').select('id,name,phone').or(`name.ilike.${like},phone.ilike.${like}`).limit(5) : { data: [] },
 db.from('ads').select('id,title').ilike('title', like).limit(5),
 ['admin', 'editor'].includes(profile.role) ? db.from('articles').select('id,title').ilike('title', like).limit(5) : { data: [] },
 ]);
