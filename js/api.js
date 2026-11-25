@@ -212,6 +212,8 @@ function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, c => (
    esc לבד לא מספיק — הדפדפן מפענח &#39; חזרה לגרש לפני שה-JS מפורסר,
    ושם כמו Mike's Pizza שובר את הקוד (או מריץ קוד זדוני) */
 function escJs(v) { return esc(String(v == null ? '' : v).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ')); }
+/* מחירים מוסתרים מהגרפיקאית (גיליונות, פלטפלן, הזנה) — UI בלבד */
+function canSeePrices() { return typeof profile !== 'undefined' && !!profile && profile.role !== 'graphics'; }
 function money(v) { return v == null || v === '' ? '' : '₪' + Number(v).toLocaleString('he-IL', { maximumFractionDigits: 2 }); }
 function heDate(d) { if (!d) return ''; const s = String(d).slice(0, 10).split('-'); return `${s[2]}.${s[1]}.${s[0]}`; }
 function heDateTime(d) { if (!d) return ''; const dt = new Date(d); return dt.toLocaleDateString('he-IL') + ' ' + dt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }); }
