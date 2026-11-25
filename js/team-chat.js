@@ -208,10 +208,20 @@ function tcFixesNotify(body) {
     const who = profile.full_name || 'משתמש';
     const subject = '[בעיות לתיקון] @@PAPER_NAME@@ — ' + who;
     const text = `דיווח חדש בערוץ "בעיות לתיקון"\nמאת: ${who}\nזמן: ${new Date().toLocaleString('he-IL')}\n\n${body}`;
+    // תוצאה גלויה למשתמש — כשל שקט הסתיר תקלות במייל (25.11.2026)
+    const fail = (m) => toast('ההודעה נשמרה, אבל המייל לא נשלח: ' + m, true);
     db.functions.invoke('send-email', { body: { to, subject, body: text } })
-      .then(r => { if (r && r.error) console.warn('fixes email', r.error); })
-      .catch(e => console.warn('fixes email', e));
-  } catch (e) { console.warn('fixes email', e); }
+      .then(async r => {
+        if (r && r.error) {
+          let m = r.error.message || 'שגיאה';
+          try { const j = await r.error.context.json(); if (j && j.error) m = j.error; } catch (_e) { }
+          fail(m); return;
+        }
+        if (r && r.data && r.data.ok === false) { fail(r.data.error || 'שגיאה'); return; }
+        toast('✓ נשלח גם במייל ל-' + to);
+      })
+      .catch(e => fail(e.message || String(e)));
+  } catch (e) { toast('המייל לא נשלח: ' + (e.message || e), true); }
 }
 
 /* ---------- שליחה ---------- */
