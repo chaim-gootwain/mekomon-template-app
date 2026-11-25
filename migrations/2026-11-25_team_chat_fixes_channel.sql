@@ -26,3 +26,8 @@ create policy team_messages_insert on public.team_messages
            and channel = 'dm:' || public.my_agent_id()::text )
     )
   );
+
+-- אילוץ הערוצים בטבלה: להוסיף את 'fixes' (בלי זה השליחה נכשלת ב-team_messages_channel_check)
+alter table public.team_messages drop constraint if exists team_messages_channel_check;
+alter table public.team_messages add constraint team_messages_channel_check
+  check (channel in ('group', 'fixes') or channel like 'dm:%');
