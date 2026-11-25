@@ -183,12 +183,47 @@ async function crSendLink() {
   modal.innerHTML = `<h3>📨 קישור לשמירת כרטיס — ${esc(cust.name || '')}</h3>
     <p class="muted" style="font-size:.85rem">הלקוח מזין את הכרטיס בדף של קארדקום. בשמירה לא מתבצע חיוב — הכרטיס נשמר כטוקן לחיובים החודשיים.</p>
     <textarea id="crLinkMsg" rows="4" style="width:100%">${esc(msg)}</textarea>
+    <div class="card card-pad" style="margin-top:10px">
+      <div class="field" style="margin:0"><label>מייל הלקוח</label>
+        <input id="crLinkEmail" type="email" dir="ltr" value="${esc(cust.email || '')}" placeholder="name@example.com"></div>
+      ${cust.email ? '' : `<label style="display:flex;gap:8px;align-items:center;margin-top:6px;cursor:pointer;font-size:.85rem">
+        <input type="checkbox" id="crLinkSaveEmail" checked style="width:16px;height:16px"> לשמור את המייל בכרטיס הלקוח</label>`}
+      <button id="crLinkSendBtn" class="btn" style="margin-top:8px" onclick="crSendLinkEmail()">📧 שלח במייל עכשיו</button>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-      <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('crLinkMsg').value).then(()=>toast('הועתק ✓'))">📋 העתק</button>
-      ${intl ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/${intl}?text=${encodeURIComponent(msg)}">💬 וואטסאפ</a>` : ''}
-      ${cust.email ? `<a class="btn" href="mailto:${esc(cust.email)}?subject=${encodeURIComponent('שמירת כרטיס לחיוב חודשי')}&body=${encodeURIComponent(msg)}">✉️ מייל</a>` : ''}
+      <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById('crLinkMsg').value).then(()=>toast('הועתק ✓'))">📋 העתק</button>
+      ${intl ? `<a class="btn btn-ghost" target="_blank" rel="noopener" href="https://wa.me/${intl}?text=${encodeURIComponent(msg)}">💬 וואטסאפ</a>` : ''}
     </div>
     <div class="m-actions"><button class="btn btn-ghost" onclick="crOpen(${_crCid})">חזרה</button></div>`;
+  window._crLinkUrl = r.url;
+}
+
+/* שליחה ישירה במייל דרך מייל המערכת (send-email) — בלי לפתוח תוכנת מייל */
+async function crSendLinkEmail() {
+  const to = String(document.getElementById('crLinkEmail').value || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { toast('הזן כתובת מייל תקינה', true); return; }
+  const msg = String(document.getElementById('crLinkMsg').value || '').trim();
+  if (window._crLinkUrl && !msg.includes(window._crLinkUrl)) { toast('נוסח ההודעה חייב לכלול את הקישור', true); return; }
+  const btn = document.getElementById('crLinkSendBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'שולח...'; }
+  try {
+    const { data, error } = await db.functions.invoke('send-email', { body: { to, subject: 'שמירת כרטיס לחיוב חודשי — @@PAPER_NAME@@', body: msg, customer_id: _crCid } });
+    if (error || !data || !data.ok) throw new Error((data && (data.detail || data.error)) || (error && error.message) || 'שליחת המייל נכשלה');
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📧 שלח במייל עכשיו'; }
+    toast('המייל לא נשלח: ' + String(e && e.message || e), true); return;
+  }
+  // מייל חדש ללקוח בלי מייל — נשמר בכרטיס (אם סומן)
+  const save = document.getElementById('crLinkSaveEmail');
+  if (save && save.checked) {
+    try {
+      const { error } = await db.from('customers').update({ email: to }).eq('id', _crCid);
+      if (!error) { const c = (cache.customers || []).find(x => x.id === _crCid); if (c) c.email = to; }
+    } catch (e) { }
+  }
+  try { await addInteraction('customer', _crCid, '💳 נשלח במייל קישור לשמירת כרטיס לחיוב חודשי (' + to + ')'); } catch (e) { }
+  toast('✅ הקישור נשלח במייל ל-' + to);
+  crOpen(_crCid);
 }
 
 /* ---------- כרטיס ההגדרות ---------- */
