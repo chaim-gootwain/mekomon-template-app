@@ -39,6 +39,10 @@ color:var(--muted); font-size:.9rem; cursor:pointer; }
 border-bottom:1px solid var(--line); font-size:.9rem; flex-wrap:wrap; }
 .status-list li:last-child { border-bottom:none; }
 .pill { background:@@COLOR_LIGHT@@; color:var(--brand); border-radius:99px; padding:3px 12px; font-size:.78rem; font-weight:700; }
+.balance { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+.balance .amt { font-size:1.7rem; font-weight:800; color:#b91c1c; }
+.balance .sub { font-size:.85rem; color:var(--muted); }
+a.btn { display:block; text-align:center; text-decoration:none; margin-top:14px; }
 .center-msg { text-align:center; padding:60px 20px; color:var(--muted); }
 </style>
 </head>
@@ -61,6 +65,12 @@ border-bottom:1px solid var(--line); font-size:.9rem; flex-wrap:wrap; }
 <div class="card">
 <h2>שלום, <span id="custName"></span> 👋</h2>
 <p style="font-size:.9rem;color:var(--muted)">כאן מגישים מודעה לפרסום בעיתון. ממלאים, שולחים — ואנחנו כבר ממשיכים משם.</p>
+</div>
+
+<div class="card" id="balanceCard" style="display:none">
+<h2>יתרה לתשלום</h2>
+<div class="balance"><span class="amt" id="balanceAmt"></span><span class="sub" id="balanceSub"></span></div>
+<a class="btn" id="payBtn" style="display:none" rel="noopener">💳 לתשלום מאובטח באשראי</a>
 </div>
 
 <div class="card">
@@ -159,6 +169,8 @@ document.getElementById('proofsList').innerHTML = proofs.map(p => `<li>
 document.getElementById('proofsCard').style.display = 'block';
 }
 
+showBalance(data);
+
 const docs = data.docs || [];
 if (docs.length) {
 const money = v => '₪' + Number(v || 0).toLocaleString('he-IL', { maximumFractionDigits: 2 });
@@ -171,6 +183,26 @@ ${d.pdf ? `<a class="pill" style="text-decoration:none" href="${escapeHtml(d.pdf
 document.getElementById('docsCard').style.display = 'block';
 }
 } catch (e) { /* המיגרציה טרם רצה במופע — שקט */ }
+}
+
+/* יתרה לתשלום — רק כשיש חוב פתוח. כפתור התשלום מופיע רק במופע שיש בו סליקה
+   (פונקציית השרת portal-pay קיימת); במופע בלי סליקה — רק הסכום ומספר הטלפון. */
+async function showBalance(data) {
+const bal = Number(data.balance);
+if (!(bal > 0)) return;
+document.getElementById('balanceAmt').textContent = '₪' + bal.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const n = Number(data.open_count) || 0;
+document.getElementById('balanceSub').textContent = (n ? n + (n === 1 ? ' חיוב פתוח' : ' חיובים פתוחים') + ' · ' : '') + 'לבירור: @@PAPER_PHONE@@';
+document.getElementById('balanceCard').style.display = 'block';
+try {
+const r = await fetch('/.netlify/functions/portal-pay?check=1', { cache: 'no-store' });
+const j = r.ok ? await r.json() : null;
+if (j && j.ok) {
+const b = document.getElementById('payBtn');
+b.href = '/.netlify/functions/portal-pay?t=' + encodeURIComponent(token);
+b.style.display = 'block';
+}
+} catch (e) { /* אין סליקה במופע — בלי כפתור */ }
 }
 
 function showInvalid() {
