@@ -177,6 +177,7 @@ el.innerHTML = `
 <div class="field"><label>מספר עמודים ברירת מחדל לגיליון</label><input id="setPages" type="number" value="${esc(s.default_pages_count || s.default_pages || '32')}" dir="ltr"></div>
 <div class="field"><label>% עמלה שמבשיל בחיוב (השאר בגבייה)</label><input id="setSplit" type="number" value="${esc(s.commission_split_billing || '50')}" dir="ltr"></div>
 <div class="field"><label>תקופת "לקוח חדש" (חודשים)</label><input id="setNewMonths" type="number" value="${esc(s.new_customer_months || '3')}" dir="ltr"></div>
+<div class="field"><label>מייל להתראות "בעיות לתיקון" (צ'אט צוות; ריק = מייל העיתון)</label><input id="setFixesEmail" type="email" value="${esc(s.fixes_notify_email || '')}" dir="ltr"></div>
 </div>
 <button class="btn" onclick="settingsSave()">שמירת הגדרות</button>
 </div>
@@ -303,6 +304,7 @@ const updates = [
 { key: 'default_pages_count', value: document.getElementById('setPages').value },
 { key: 'commission_split_billing', value: document.getElementById('setSplit').value },
 { key: 'new_customer_months', value: document.getElementById('setNewMonths').value },
+{ key: 'fixes_notify_email', value: (document.getElementById('setFixesEmail').value || '').trim() },
 ];
 for (const u of updates) await run(db.from('settings').upsert(u));
 updates.forEach(u => cache.settings[u.key] = u.value);
