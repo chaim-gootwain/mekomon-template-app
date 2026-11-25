@@ -64,6 +64,7 @@ if (profile.role === 'committee') { // לוועדה ממשק ממוקד משלה
 buildShell(); show('app'); await refreshCache(); await updateClockButton(); openPage('committee'); return;
 }
 _roleGuardsInstall();
+_settingsTilesInstall();
 buildShell();
 show('app');
 await refreshCache();
@@ -104,6 +105,20 @@ function _roleGuardsInstall() {
     guarded._roleGuarded = true;
     window.openCustomerCard = guarded;
   }
+}
+
+/* דף ההגדרות כקוביות (settingsTilesApply ב-admin.js) — העטיפה החיצונית ביותר,
+   כדי שגם כרטיסים שמודולים אחרים מזריקים יהפכו לקוביות */
+function _settingsTilesInstall() {
+  const orig = Pages.settings && Pages.settings.render;
+  if (typeof orig !== 'function' || orig._tiles || typeof settingsTilesApply !== 'function') return;
+  const wrapped = async function (el) {
+    const r = await orig.apply(this, arguments);
+    try { settingsTilesApply(el); } catch (e) { console.error('settings tiles', e); }
+    return r;
+  };
+  wrapped._tiles = true;
+  Pages.settings.render = wrapped;
 }
 
 function show(id) {
