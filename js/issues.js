@@ -437,7 +437,9 @@ openForm('עריכת מודעה — ' + (nameOf('customers', a.customer_id) || '
 { name: 'deal_stage', label: 'שלב עסקה', type: 'select', options: stageOpts },
 { name: 'requested_placement', label: 'מיקום מבוקש / הערה' },
 { name: 'layout_orient', label: 'כיוון בהרכבת PDF (ללא = אוטומטי לפי הקובץ)', type: 'select', options: [{ v: 'v', t: '↕ מאונך' }, { v: 'h', t: '↔ מאוזן' }, { v: 'r', t: '⟳ מסובבת — רגלי המודעה החוצה (לפי העמוד)' }, { v: 'rr', t: '⟳ מסובבת — ראש המודעה ימינה' }, { v: 'rl', t: '⟲ מסובבת — ראש המודעה שמאלה' }] },
-], a, async (rec) => {
+].concat(a.status !== 'published' && typeof adSendToGraphics === 'function' ? [
+{ name: '_gfx_note', label: a.status === 'in_graphics' ? '🎨 הנחיה נוספת לגרפיקאית (ריק = בלי שינוי)' : '🎨 לשלוח לגרפיקה לעיצוב / תיקון — מה לעשות? (ריק = לא לשלוח)', type: 'textarea', rows: 2 },
+] : []), a, async (rec) => {
 const upd = {
 title: (rec.title || '').trim() || a.title,
 price_item_id: rec.price_item_id || a.price_item_id || null,
@@ -455,6 +457,9 @@ if (upd.page_number && a.status === 'approved') upd.status = 'placed';
 if (!upd.page_number && a.status === 'placed') upd.status = 'approved';
 await run(db.from('ads').update(upd).eq('id', id));
 Object.assign(a, upd);
+// נכתבה הנחיה לגרפיקה — המודעה עוברת לתור הגרפיקה (העמוד נשמר)
+const gfx = String(rec._gfx_note || '').trim();
+if (gfx && typeof adSendToGraphics === 'function') await adSendToGraphics(id, gfx);
 // הכיוון נשמר בנפרד: בלי העמודה (מיגרציה 2026-10-15_ads_layout_orient) שאר העריכה לא נכשלת
 const orient = rec.layout_orient || null;
 if (orient !== (a.layout_orient || null)) {
