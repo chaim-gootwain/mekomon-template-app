@@ -372,3 +372,71 @@ if (failed.length) toast('הגיבוי הסתיים אך נכשל בטבלאות
 else toast('הייצוא הושלם' + (empty.length ? ' (טבלאות ריקות דולגו: ' + empty.join(', ') + ')' : '') + ' — בדוק את תיקיית ההורדות');
 }
 /* v: invoices module */
+
+/* ==================== הגדרות כקוביות ====================
+   כל כרטיס בדף ההגדרות (כולל כרטיסים שמודולים אחרים מזריקים) הופך לקובייה
+   קטנה: אייקון + כותרת + תיאור קצר. לחיצה פותחת את הקובייה לרוחב מלא עם
+   ההגדרות עצמן; קובייה אחת פתוחה בכל פעם. הרכיבים המקוריים מועברים כמו
+   שהם (אותם id ו-onclick) — שום קוד שמירה לא משתנה.
+   מותקן ב-app.js (_settingsTilesInstall) אחרי שכל המודולים עטפו את הדף. */
+let _stOpen = null; // כותרת הקובייה הפתוחה — נשמרת גם כשהדף מצויר מחדש
+const _ST_ICONS = [
+  ['כללי', '⚙️'], ['צ\'קליסט', '✅'], ['גיבוי', '💾'], ['טלפוניה', '📞'], ['תובנות', '💡'],
+  ['חשבוניות', '🧾'], ['צ׳אט חשבוניות', '💬'], ['יומן', '📜'], ['סוכן', '🤖'], ['התראות', '🔔'],
+  ['בוקר', '🌅'], ['שיבוץ', '🧩'], ['דפוס', '🖨️'], ['הרכבה', '🖨️'],
+];
+function _stEnsureCss() {
+  if (document.getElementById('stCss')) return;
+  const s = document.createElement('style'); s.id = 'stCss';
+  s.textContent = `
+.st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;align-items:start}
+.st-grid>.card{margin:0;padding:0!important;overflow:hidden;transition:box-shadow .15s}
+.st-grid>.card:not(.st-open):hover{box-shadow:0 4px 14px rgba(15,23,42,.10)}
+.st-head{all:unset;box-sizing:border-box;display:flex;gap:12px;align-items:flex-start;width:100%;padding:14px 16px;cursor:pointer;min-height:86px}
+.st-head:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.st-ico{font-size:1.6rem;line-height:1;flex:none}
+.st-txt{flex:1;min-width:0}
+.st-ttl{font-weight:700;color:var(--brand-dark);font-size:.98rem}
+.st-sub{color:var(--muted);font-size:.78rem;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.st-chev{flex:none;color:var(--muted);transition:transform .2s;margin-top:2px}
+.st-body{display:none;padding:0 16px 16px;border-top:1px solid var(--line)}
+.st-open{grid-column:1/-1;box-shadow:0 4px 18px rgba(15,23,42,.10)}
+.st-open .st-body{display:block;padding-top:12px}
+.st-open .st-chev{transform:rotate(180deg)}
+.st-open .st-head{min-height:0;align-items:center}
+.st-open .st-sub{display:none}
+@media (max-width:600px){.st-head{min-height:0}}`;
+  document.head.appendChild(s);
+}
+function settingsTilesApply(el) {
+  if (!el || el.querySelector('.st-grid')) return;
+  const cards = [...el.children].filter(c => c.classList && c.classList.contains('card'));
+  if (!cards.length) return;
+  _stEnsureCss();
+  const grid = document.createElement('div'); grid.className = 'st-grid';
+  cards[0].before(grid);
+  cards.forEach(card => {
+    const tEl = card.querySelector(':scope > b, :scope > h3') || card.querySelector('b, h3');
+    const title = (tEl ? tEl.textContent : 'הגדרות').trim();
+    const emo = (title.match(/\p{Extended_Pictographic}️?/u) || [])[0];
+    const name = title.replace(/\p{Extended_Pictographic}️?/gu, '').trim() || title;
+    const icon = emo || ((_ST_ICONS.find(([k]) => name.includes(k)) || [])[1]) || '⚙️';
+    const pEl = card.querySelector(':scope > p.muted');
+    const sub = pEl ? pEl.textContent.trim().replace(/\s+/g, ' ') : '';
+    if (tEl && tEl.parentElement === card) tEl.remove();
+    const body = document.createElement('div'); body.className = 'st-body';
+    while (card.firstChild) body.appendChild(card.firstChild);
+    const head = document.createElement('button'); head.type = 'button'; head.className = 'st-head';
+    head.innerHTML = `<span class="st-ico">${esc(icon)}</span><span class="st-txt"><div class="st-ttl">${esc(name)}</div>${sub ? `<div class="st-sub">${esc(sub)}</div>` : ''}</span><span class="st-chev">▾</span>`;
+    head.setAttribute('aria-expanded', 'false');
+    head.onclick = () => {
+      const was = card.classList.contains('st-open');
+      grid.querySelectorAll(':scope > .st-open').forEach(c => { c.classList.remove('st-open'); c.querySelector('.st-head').setAttribute('aria-expanded', 'false'); });
+      _stOpen = was ? null : name;
+      if (!was) { card.classList.add('st-open'); head.setAttribute('aria-expanded', 'true'); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    };
+    card.append(head, body);
+    grid.appendChild(card);
+    if (_stOpen === name) { card.classList.add('st-open'); head.setAttribute('aria-expanded', 'true'); }
+  });
+}
