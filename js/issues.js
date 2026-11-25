@@ -1422,12 +1422,13 @@ async function recAdsBanner() {
 <b>${esc(r.title)}</b>
 <input type="file" id="recUp${a.id}" class="hidden" accept="image/*,application/pdf" onchange="recAdQuickUpload(${a.id})">
 <button class="btn btn-sm" onclick="document.getElementById('recUp${a.id}').click()">⬆ העלאת קובץ</button>
+<button class="btn btn-sm btn-ghost" title="חומרים (כמה קבצים) לעיצוב/עימוד אצל הגרפיקאית" onclick="recAdToGraphics(${a.id}, ${r.id})">🎨 לגרפיקאית</button>
 ${typeof openAdCard === 'function' ? `<button class="btn btn-sm btn-ghost" onclick="openAdCard(${a.id})">כרטיס</button>` : ''}
 </span>`;
   }).join(' ');
   box.innerHTML = `<div class="card card-pad" style="border-right:4px solid var(--warn);margin-bottom:14px">
 <b>🔁 מודעות קבועות ממתינות לקובץ — גיליון ${iss.issue_number}</b>
-<p class="muted" style="font-size:.78rem;margin:2px 0 6px">מודעות מתעדכנות צריכות קובץ חדש לכל גיליון. העלאת קובץ מאשרת את המודעה לשיבוץ.</p>
+<p class="muted" style="font-size:.78rem;margin:2px 0 6px">מודעות מתעדכנות צריכות קובץ חדש לכל גיליון. ⬆ קובץ מוכן — מאשר לשיבוץ · 🎨 חומרים לעיצוב — נשלחים לתור הגרפיקה.</p>
 <div>${items}</div></div>`;
 }
 
@@ -1444,6 +1445,55 @@ window.recAdQuickUpload = async function (adId) {
   const rp = await db.rpc('route_ad', { p_ad_id: adId, p_action: 'approve', p_note: 'הועלה קובץ — מודעה קבועה מתעדכנת' });
   if (rp.error) { try { await db.from('ads').update({ status: 'approved' }).eq('id', adId); } catch (e) { } }
   toast('✓ הקובץ הועלה והמודעה אושרה לשיבוץ');
+  openPage('issues');
+};
+
+/* שליחה לגרפיקאית מהבאנר: כמה קבצי חומרים (טקסט, תמונות...) + הנחיה →
+   ad_files (source) → תור הגרפיקה. בסיום העיצוב הגרפיקאית מאשרת לשיבוץ
+   (מודעה קבועה — בלי פרוף ללקוח, ר' gfxRecurringDone). */
+window.recAdToGraphics = function (adId, recId) {
+  const r = (_recAds || []).find(x => x.id === recId);
+  const title = r ? r.title : '';
+  document.getElementById('viewModal').innerHTML = `
+<h3>🎨 לגרפיקאית${title ? ' — ' + esc(title) : ''}</h3>
+<p class="muted" style="font-size:.83rem;margin-top:-6px">מעלים את כל החומרים של השבוע (אפשר כמה קבצים ביחד, כל סוג קובץ). המודעה עוברת לתור הגרפיקה, והמקום בעמוד נשמר.</p>
+<label>קבצים</label>
+<input type="file" id="recGfxFiles" multiple style="width:100%">
+<label style="display:block;margin-top:8px">הנחיה לגרפיקאית</label>
+<textarea id="recGfxNote" rows="2" style="width:100%" placeholder="למשל: לעמד כמו בשבוע שעבר, תמונה ראשית — הראשונה"></textarea>
+<div class="m-actions">
+<button class="btn" style="background:var(--ok)" id="recGfxSend" onclick="recAdToGraphicsSend(${adId})">✉️ שלח לגרפיקאית</button>
+<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="document.getElementById('viewBack').classList.remove('open')">ביטול</button>
+</div>`;
+  document.getElementById('viewBack').classList.add('open');
+  window._recGfxTitle = title;
+};
+
+window.recAdToGraphicsSend = async function (adId) {
+  const files = Array.from(document.getElementById('recGfxFiles').files || []);
+  const title = window._recGfxTitle || '';
+  const note = (document.getElementById('recGfxNote').value || '').trim() || ('עיצוב/עימוד' + (title ? ': ' + title : ''));
+  if (!files.length && !confirm('לא נבחרו קבצים. לשלוח לגרפיקאית בכל זאת?')) return;
+  const btn = document.getElementById('recGfxSend'); if (btn) btn.disabled = true;
+  let ok = 0;
+  for (const file of files) {
+    toast(`מעלה ${ok + 1}/${files.length}...`);
+    const path = `staff/${adId}/${Date.now()}_${safeKey(file.name)}`;
+    const { error } = await db.storage.from('ad-files').upload(path, file);
+    if (error) { toast('שגיאה בהעלאת ' + file.name + ': ' + error.message, true); continue; }
+    await run(db.from('ad_files').insert({ ad_id: adId, storage_path: path, file_name: file.name, kind: 'source', uploaded_by: profile.id }));
+    ok++;
+  }
+  if (files.length && !ok) { if (btn) btn.disabled = false; return; }
+  const sent = await adSendToGraphics(adId, note);
+  if (!sent) { if (btn) btn.disabled = false; return; }
+  // הודעה בקבוצת הצוות — הגרפיקאית רואה אותה (לא חוסם אם נכשל)
+  try {
+    await db.from('team_messages').insert({ channel: 'group', sender_user: profile.id,
+      body: `🎨 לעיצוב${title ? ': ' + title : ''} (${ok} קבצים)\n${note}\nבתור הגרפיקה` });
+  } catch (e) { }
+  document.getElementById('viewBack').classList.remove('open');
+  toast(`✓ נשלח לגרפיקאית${ok ? ' עם ' + ok + ' קבצים' : ''}`);
   openPage('issues');
 };
 

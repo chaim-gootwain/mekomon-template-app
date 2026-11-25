@@ -29,7 +29,7 @@ issIds.length ? run(db.from('issues').select('id,issue_number,ads_deadline').in(
 ids.length ? run(db.from('ad_files').select('ad_id,storage_path,file_name,kind').in('ad_id', ids)) : [],
 ]);
 const issMap = {}; issRows.forEach(i => issMap[i.id] = i);
-const srcMap = {}; srcFiles.forEach(f => { if (f.kind === 'source' && !srcMap[f.ad_id]) srcMap[f.ad_id] = f; });
+const srcMap = {}; srcFiles.forEach(f => { if (f.kind === 'source') (srcMap[f.ad_id] = srcMap[f.ad_id] || []).push(f); });
 
 // מיון: לפי queue_order (ריק בסוף), ואז לפי ותק בתור
 queue.sort((a, b) => {
@@ -54,11 +54,29 @@ renderTable(document.getElementById('gfxTable'), queue, [
 { h: 'גודל', f: r => esc(nameOf('priceList', r.price_item_id)) },
 { h: 'גיליון', f: r => r.issue_id && issMap[r.issue_id] ? 'גיליון ' + issMap[r.issue_id].issue_number : '<span class="muted">טרם</span>' },
 { h: 'דדליין', f: r => _gfxDeadlineCell(issMap[r.issue_id]) },
-{ h: 'מקור', f: r => srcMap[r.id] ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();adFileOpen('${esc(srcMap[r.id].storage_path)}')">📎 מקור</button>` : '<span class="muted">—</span>' },
+{ h: 'מקור', f: r => srcMap[r.id] ? (srcMap[r.id].length === 1
+  ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();adFileOpen('${esc(srcMap[r.id][0].storage_path)}')">📎 מקור</button>`
+  : srcMap[r.id].map(f => `<a href="#" style="display:block;font-size:.82rem;white-space:nowrap" onclick="event.preventDefault();event.stopPropagation();adFileOpen('${esc(f.storage_path)}')">📎 ${esc((f.file_name || 'קובץ').length > 22 ? (f.file_name || 'קובץ').slice(0, 22) + '…' : (f.file_name || 'קובץ'))}</a>`).join('')) : '<span class="muted">—</span>' },
 { h: 'הנחיה', f: r => esc(r.revision_note || r.graphics_note) || '—' },
-{ h: '', f: r => `<button class="btn btn-sm" style="background:var(--ok)" onclick="event.stopPropagation();proofReady(${r.id})">✓ פרוף מוכן</button>` +
+{ h: '', f: r => (r.recurring_id
+    ? `<button class="btn btn-sm" style="background:var(--ok)" title="מודעה קבועה של העיתון — בלי פרוף ללקוח" onclick="event.stopPropagation();gfxRecurringDone(${r.id})">✓ מוכן לשיבוץ</button>`
+    : `<button class="btn btn-sm" style="background:var(--ok)" onclick="event.stopPropagation();proofReady(${r.id})">✓ פרוף מוכן</button>`) +
   (profile.role === 'admin' ? ` <button class="btn btn-sm btn-ghost" title="אישור לשיבוץ בלי פרוף ובלי ועדה" onclick="event.stopPropagation();adApproveSkipProof(${r.id})">⏭ לשיבוץ</button>` : '') },
 ], { onRow: r => openAdCard(r.id), empty: 'התור ריק — כל הכבוד! 🎉' });
+}
+
+/* מודעה קבועה של העיתון (recurring_id) — אין לקוח לאשר פרוף: הגרפיקאית מעלה
+   את העיצוב ומאשרת ישר לשיבוץ (כמו "⬆ העלאת קובץ" בבאנר בעמוד הגיליונות). */
+async function gfxRecurringDone(id) {
+const designs = await run(db.from('ad_files').select('id').eq('ad_id', id).eq('kind', 'design').limit(1));
+if (!designs.length) { toast('העלי קודם את הקובץ המעוצב בכרטיס המודעה', true); return; }
+if (!confirm('לסמן שהעיצוב מוכן ולאשר לשיבוץ?')) return;
+// עם עמוד קבוע → שובצה; בלי → מאושרת לשיבוץ (אותו כלל כמו בעריכת מודעה בפלטפלן)
+const a = _gfxQueue.find(x => x.id === id) || {};
+await run(db.from('ads').update({ status: a.page_number ? 'placed' : 'approved', revision_note: null }).eq('id', id), 'אישור לשיבוץ');
+try { await addInteraction('ad', id, '✓ עוצב בגרפיקה ואושר לשיבוץ (מודעה קבועה)'); } catch (e) { }
+toast('✓ אושר לשיבוץ');
+openPage('graphics');
 }
 
 /* שינוי קדימות ידני — מספור מחדש ושמירה */
