@@ -376,6 +376,7 @@ ${canWrite ? `<div class="cc-toolbar">
 <button id="csBtn" class="btn" onclick="ccMenuClose();customerStatement(${id})">📄 כרטסת / דו"ח חוב</button>
 ${(typeof waRemindersOn === 'function' && waRemindersOn() && debt > 0) ? `<button class="btn" onclick="ccMenuClose();debtReminderSend(${id})">💬 שלח תזכורת חוב</button>` : ''}
 <button class="btn" onclick="ccMenuClose();custPayLinkOpen(${id})">💳 קישור לתשלום באשראי</button>
+${(profile.role === 'admin' && typeof crOpen === 'function') ? `<button class="btn" onclick="ccMenuClose();crOpen(${id})">🔁 חיוב אוטומטי חודשי (אשראי)</button>` : ''}
 </div>
 </div>
 <div class="cc-mwrap">

@@ -63,5 +63,9 @@ verify_jwt = true
 # קריאת cron — מאמתת בעצמה דרך CRON_SECRET, לא דרך JWT
 verify_jwt = false
 
+[functions.cardcom-recurring]
+# webhook של קארדקום מגיע בלי JWT; כל שאר הפעולות מאמתות מנהל / CRON_SECRET בעצמן
+verify_jwt = false
+
 [functions.voicenter-stats]
 verify_jwt = true

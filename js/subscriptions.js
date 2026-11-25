@@ -60,6 +60,7 @@ ${SUB_CADENCES.map(o => `<option value="${o.v}" ${o.v === cad ? 'selected' : ''}
 </div>
 <div class="field"><label>% עמלה מיוחד (ריק = לפי הסוכן)</label><input id="subComm" type="number" value="${c.commission_pct != null ? c.commission_pct : ''}" dir="ltr"></div>
 <div class="field"><label>הערות</label><textarea id="subNotes" rows="2">${esc(c.notes || '')}</textarea></div>
+${typeof crContractBoxHtml === 'function' ? crContractBoxHtml(existing ? c.id : null) : ''}
 <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="subActive" ${c.active === false ? '' : 'checked'}> פעיל</label>
 <label style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="subSkip" ${c.skip_next ? 'checked' : ''}> דלג על הגיליון הקרוב</label>
 <div class="m-actions" style="margin-top:12px">
@@ -154,6 +155,9 @@ toast(id ? 'נשמר' : 'החוזה נוצר');
 }
 if (res.error) { toast('שגיאה: ' + res.error.message, true); return; }
 const newId = id || (res.data && res.data.id);
+// חיוב חודשי אוטומטי באשראי (card-recurring.js) — חדש: בסוף פותחים את מסך הכרטיס/הקישור
+let _crNew = false;
+try { if (typeof crContractBoxSave === 'function') _crNew = await crContractBoxSave(newId, rec.customer_id, 'חיוב חודשי — ' + (nameOf('priceList', rec.price_item_id) || 'חוזה')); } catch (e) { console.error('card-recurring', e); }
 if (!id) { try { await addInteraction('customer', rec.customer_id, `נחתם חוזה: ${_subCadenceHe(cad)} — ${nameOf('priceList', rec.price_item_id)} × ${rec.total_inserts}`); } catch (e) { } }
 // חוזה חדש → פותח ישר את טופס "מודעה חדשה" עם פרטי החוזה ממולאים מראש,
 // כך שהמשתמש עצמו יזין את הנחיית העיצוב (וכל פרט אחר) — החוזה עצמו נשאר ללא שינוי.
@@ -180,6 +184,9 @@ document.getElementById('viewBack').classList.remove('open');
 if (_subPendingAdPrefill && typeof adAdd === 'function') {
 toast('החוזה נשמר — נא להשלים את פרטי המודעה הראשונה');
 setTimeout(() => adAdd(_subPendingAdPrefill), 50);
+if (_crNew) setTimeout(() => toast('💳 חיוב אוטומטי הוגדר — לשליחת קישור לשמירת כרטיס: כרטיס הלקוח → 🔁 חיוב אוטומטי חודשי'), 2500);
+} else if (_crNew && typeof crOpen === 'function') {
+openPage('contracts'); setTimeout(() => crOpen(rec.customer_id), 300);
 } else {
 openPage('contracts');
 }

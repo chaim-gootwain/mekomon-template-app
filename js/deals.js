@@ -77,7 +77,11 @@ function dealNew(customerId) {
       <div id="dlStandingCfg" class="hidden" style="margin-top:8px">
         <div class="field" style="margin:0;max-width:220px"><label style="font-size:.8rem">סכום חודשי (לפני מע"מ)</label>
         <input type="number" id="dlStandingAmt" min="1" dir="ltr"></div>
-        <p class="muted" style="font-size:.76rem;margin-top:4px">המערכת תיצור רשומת חיוב חודשית אוטומטית. הפקת מסמך וגבייה בפועל — ידניות כרגיל.</p>
+        <label style="display:${profile.role === 'admin' ? 'flex' : 'none'};gap:8px;align-items:center;cursor:pointer;margin-top:8px">
+          <input type="checkbox" id="dlStandingCard" onchange="dealStandingCardHint()" style="width:16px;height:16px">
+          💳 לחייב אוטומטית בכרטיס האשראי של הלקוח (כל חודש)
+        </label>
+        <p id="dlStandingHint" class="muted" style="font-size:.76rem;margin-top:4px">המערכת תיצור רשומת חיוב חודשית אוטומטית. הפקת מסמך וגבייה בפועל — ידניות כרגיל.</p>
       </div>
     </div>
 
@@ -162,6 +166,13 @@ function dealStandingToggle() {
     amt.value = p ? Number(p.amount) : (_dealState.total || '');
   }
 }
+function dealStandingCardHint() {
+  const on = document.getElementById('dlStandingCard')?.checked;
+  const h = document.getElementById('dlStandingHint');
+  if (h) h.textContent = on
+    ? 'בכל חודש הכרטיס השמור של הלקוח יחויב בסכום + מע"מ, תופק חשבונית מס-קבלה והתשלום יירשם בכרטסת. אם אין ללקוח כרטיס שמור — אחרי השמירה תוכל לשלוח לו קישור.'
+    : 'המערכת תיצור רשומת חיוב חודשית אוטומטית. הפקת מסמך וגבייה בפועל — ידניות כרגיל.';
+}
 function _dealCollectDates() {
   return [...document.querySelectorAll('.dlIssChk:checked')].map(c => c.value).filter(Boolean).sort();
 }
@@ -197,20 +208,30 @@ async function dealSave() {
     payment_plan: _dealState.plan,
     notes: [DEAL_TYPES.find(t => t.v === type).t, discDesc].filter(Boolean).join(' · '),
   };
-  let { error } = await saveContractSafe(payload);
+  const standingCard = standing && !!document.getElementById('dlStandingCard')?.checked;
+  let { data: saved, error } = await saveContractSafe(payload, standingCard);
   if (error) { toast('שגיאה: ' + error.message, true); return; }
   await addInteraction('customer', _dealState.customerId, `נוצרה עסקה: ${money(_dealState.total)} (${payload.notes})`);
   toast('העסקה נשמרה ✓');
+  // הוראת קבע בחיוב אוטומטי באשראי → חיוב חודשי קבוע מקושר לחוזה
+  if (standingCard && typeof crCreateForContract === 'function') {
+    const ctId = saved && (Array.isArray(saved) ? saved[0] && saved[0].id : saved.id);
+    const pkg = (typeof nameOf === 'function' && item) ? nameOf('priceList', Number(item)) : '';
+    if (ctId && await crCreateForContract(ctId, _dealState.customerId, standingAmt, 'הוראת קבע חודשית' + (pkg ? ' — ' + pkg : ''))) {
+      if (typeof crOpen === 'function') { crOpen(_dealState.customerId); return; }
+    } else if (!ctId) toast('החוזה נשמר, אבל לא התקבל מזהה — הגדר את החיוב האוטומטי מכרטיס הלקוח', true);
+  }
   openCustomerCard(_dealState.customerId);
 }
 
 /* שמירה בטוחה: אם עמודות חדשות עדיין לא קיימות ב-DB — נשמר בלי לשבור */
-async function saveContractSafe(payload) {
-  let res = await db.from('contracts').insert(payload);
+async function saveContractSafe(payload, wantId) {
+  const ins = x => wantId ? db.from('contracts').insert(x).select('id') : db.from('contracts').insert(x);
+  let res = await ins(payload);
   if (res.error && /standing_order/i.test(res.error.message || '')) {
     const { is_standing_order, standing_order_amount, ...rest } = payload;
     if (is_standing_order) { toast('עמודות הוראת הקבע חסרות — יש להריץ את המיגרציה standing_orders', true); }
-    res = await db.from('contracts').insert(rest);
+    res = await ins(rest);
   }
   if (res.error && /payment_plan|cadence|selected_dates|column/i.test(res.error.message || '')) {
     const { payment_plan, cadence, selected_dates, is_standing_order, standing_order_amount, ...safe } = payload;
@@ -219,7 +240,7 @@ async function saveContractSafe(payload) {
     if (payment_plan || (selected_dates && selected_dates.length)) {
       toast('העסקה נשמרה בלי לוח תשלומים/תאריכים — עמודות חסרות במסד, יש להריץ את המיגרציה המתאימה', true);
     }
-    res = await db.from('contracts').insert(safe);
+    res = await ins(safe);
   }
   return res;
 }
@@ -366,7 +387,11 @@ async function standingOrdersRun(ym, silent) {
       .ilike('description', '%[הו"ק חוזה %'));
   } catch (e) { }
 
+  // חוזים שנגבים אוטומטית באשראי (card-recurring) — החיוב נרשם שם, לא כאן (אחרת חוב כפול)
+  let cardCt = new Set();
+  try { cardCt = new Set(((await db.from('recurring_card_charges').select('contract_id').not('contract_id', 'is', null)).data || []).map(r => r.contract_id)); } catch (e) { }
   for (const ct of contracts) {
+    if (cardCt.has(ct.id)) { out.skipped++; continue; }
     if (existing.some(ch => (ch.description || '').includes(_soMark(ct.id)))) { out.skipped++; continue; }
     const amt = Number(ct.standing_order_amount) || 0;
     if (!(amt > 0)) { out.missing_amount++; continue; }
