@@ -214,6 +214,9 @@ else if (a.status === 'placed') routeButtons = (profile.role === 'admin'
 // מנהל: דילוג על פרוף/ועדה — מודעה חוזרת או שהלקוח כבר אישר
 if (profile.role === 'admin' && ['in_graphics', 'proof', 'committee'].includes(a.status))
 routeButtons += `<button class="btn btn-sm" style="background:var(--ok)" onclick="adApproveSkipProof(${id})">✓ אישור לשיבוץ (בלי פרוף)</button>`;
+// כבר בגרפיקה / פרוף / ועדה — הוספת תיקון לגרפיקאית (בפרוף/ועדה: חוזרת לגרפיקה)
+if (['in_graphics', 'proof', 'committee'].includes(a.status))
+routeButtons += `<button class="btn btn-sm btn-ghost" onclick="adSendToGraphicsCard(${id})">✏️ ${a.status === 'in_graphics' ? 'הוספת הנחיה לגרפיקאית' : 'תיקון — חזרה לגרפיקה'}</button>`;
 if (!['published', 'cancelled', 'rejected'].includes(a.status))
 routeButtons += `<button class="btn btn-sm btn-danger-ghost" onclick="adRoute(${id},'cancel',true)">ביטול</button>`;
 }
@@ -305,7 +308,7 @@ async function adApproveSkipProof(id) {
    הגיליון והעמוד בפלטפלן נשמרים; ההנחיה נשמרת כ"תיקון" (revision_note) ומוצגת בתור.
    אחרי עיצוב → פרוף → אישור, המודעה חוזרת למקומה (ר' _fpHealPlaced ב-issues.js). */
 async function adSendToGraphics(id, note) {
-  if (!['admin', 'sales'].includes(profile.role)) return false;
+  if (!['admin', 'sales', 'editor'].includes(profile.role)) return false;
   if (note == null) {
     const r = prompt('מה לעצב / לתקן? (הנחיה לגרפיקאית)');
     if (r === null) return false;
