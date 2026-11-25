@@ -27,6 +27,7 @@ const NAV = [
 { id: 'committee', title: 'ועדה', icon: '🕮', roles: ['admin', 'committee'], group: 'עיתון' },
 { id: 'issues', title: 'גיליונות ופלטפלן', icon: '🗞️', roles: ['admin', 'editor', 'graphics'], group: 'עיתון' },
 { id: 'articles', title: 'תוכן וכתבות', icon: '✍️', roles: ['admin', 'editor'], group: 'עיתון' },
+{ id: 'layout', title: 'כתבות לעימוד', icon: '📰', roles: ['admin', 'editor', 'graphics'], group: 'עיתון' },
 { id: 'archive', title: 'ארכיון', icon: '🗄️', roles: ['admin', 'sales', 'editor', 'graphics'], group: 'עיתון' },
 { id: 'finhub', title: 'מרכז כספים', icon: '💰', roles: ['admin'], group: 'כספים' },
 { id: 'billing', title: 'גבייה', icon: '💳', roles: ['admin', 'sales'], group: 'כספים' },
