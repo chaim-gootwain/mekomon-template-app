@@ -21,7 +21,7 @@
 //
 // Secrets (Supabase → Edge Functions → Secrets), לכל מופע:
 //   CARDCOM_TERMINAL, CARDCOM_API_NAME  (חובה) · CARDCOM_API_PASSWORD (אם המסוף דורש לחיוב בטוקן)
-//   CRON_SECRET (לריצה היומית) · EZCOUNT_API_KEY_PROD / EZCOUNT_DEVELOPER_EMAIL (כמו ezcount-doc)
+//   CRON_SECRET או CARD_CRON_SECRET (לריצה היומית) · EZCOUNT_API_KEY_PROD / EZCOUNT_DEVELOPER_EMAIL (כמו ezcount-doc)
 // verify_jwt=false (ב-config.toml) — כי קארדקום קוראת ל-webhook בלי JWT; כל שאר
 // הפעולות מאמתות מנהל בעצמן.
 // -----------------------------------------------------------------------------
@@ -292,8 +292,11 @@ Deno.serve(async (req) => {
     const action = String(body?.action || "");
 
     // ----- אימות: cron (רק run) או מנהל מחובר -----
+    // מפתח cron: CRON_SECRET הכללי, או CARD_CRON_SECRET ייעודי (נקבע ע"י pg_cron של המופע)
     const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
-    const isCron = !!CRON_SECRET && timingSafeEqual(req.headers.get("x-cron-secret") || "", CRON_SECRET);
+    const CARD_CRON_SECRET = Deno.env.get("CARD_CRON_SECRET") || "";
+    const givenCron = req.headers.get("x-cron-secret") || "";
+    const isCron = (!!CRON_SECRET && timingSafeEqual(givenCron, CRON_SECRET)) || (!!CARD_CRON_SECRET && timingSafeEqual(givenCron, CARD_CRON_SECRET));
     let uid: string | null = null;
     if (!(isCron && action === "run")) {
       const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
@@ -305,7 +308,7 @@ Deno.serve(async (req) => {
       ACTOR = uid;
     }
 
-    if (action === "probe") return json({ ok: true, configured: ccConfigured(), cron: !!CRON_SECRET });
+    if (action === "probe") return json({ ok: true, configured: ccConfigured(), cron: !!(CRON_SECRET || CARD_CRON_SECRET) });
 
     if (action === "token_link") {
       if (!ccConfigured()) return json({ ok: false, error: "קארדקום לא מוגדרת במופע — יש להגדיר CARDCOM_TERMINAL ו-CARDCOM_API_NAME ב-Secrets של Supabase" });
