@@ -41,7 +41,9 @@ function tcChannels() {
     const dm = tcMyDmChannel();
     if (dm) out.push({ id: dm, name: 'מנהל', icon: '👤' });
   }
-  // עורך/גרפיקה: הערוץ הקבוצתי בלבד (ערוץ אישי הוא מנהל↔סוכן)
+  // ערוץ "בעיות לתיקון": עורך/גרפיקה מדווחים למנהל על תקלות ושיפורים במערכת
+  // (מיגרציה 2026-11-25_team_chat_fixes_channel.sql)
+  if (['admin', 'editor', 'graphics'].includes(profile.role)) out.push({ id: 'fixes', name: 'בעיות לתיקון', icon: '🛠' });
   return out;
 }
 
@@ -159,7 +161,7 @@ async function tcLoadThread(scrollDown) {
   // רינדור מחדש רק כשיש הודעה חדשה — שלא נקפיץ את הגלילה בכל פולינג
   if (!scrollDown && Number(log.dataset.lastId || -1) === lastId) return;
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 120;
-  const showWho = _tcChannel === 'group' || profile.role === 'admin';
+  const showWho = _tcChannel === 'group' || _tcChannel === 'fixes' || profile.role === 'admin';
   log.innerHTML = msgs.length ? msgs.map(m => {
     const mine = m.sender_user === profile.id;
     const sys = !m.sender_user; // הודעת מערכת (ברכת הבוקר וכד') — בועה ממורכזת

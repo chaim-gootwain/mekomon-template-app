@@ -216,6 +216,7 @@ return sp;
 function _fpPaint() {
 const el = document.getElementById('content'); if (!el || !_fpIssue) return;
 const canEdit = ['admin', 'editor'].includes(profile.role);
+const canProduce = ['admin', 'editor', 'graphics'].includes(profile.role);
 const soldAmount = _fpAds.reduce((s, a) => s + Number(a.price) - Number(a.discount), 0);
 const placedAds = _fpAds.filter(a => a.page_number);
 const unplacedAds = _fpAds.filter(a => !a.page_number && ['approved', 'placed'].includes(a.status));
@@ -266,12 +267,13 @@ ${_fpToolbarMenu('fpMenuEntry', 'מודעות ושיבוץ', [
     : `<button class="btn" onclick="ccMenuClose();fpAutoArrange()">🧩 סידור אוטומטי</button>`) : ''
 ], canEdit && _fpDealsN ? _fpDealsN : 0)}
 ${_fpToolbarMenu('fpMenuPrint', 'הפקה ודפוס', [
+  // canProduce: בדיקה לפני דפוס, עמודי כתבות, PDF לאישור והרכבה לדפוס — גם לגרפיקה
   `<button class="btn" onclick="ccMenuClose();fpPrint()">🖨 הדפסה</button>`,
   `<button class="btn" onclick="ccMenuClose();fpEmailToGraphics()">✉️ שלח לגרפיקאית</button>`,
   typeof fpDownloadAllAds === 'function' ? `<button class="btn" onclick="ccMenuClose();fpDownloadAllAds()">🔗 קישור לכל המודעות</button>` : '',
-  canEdit ? `<button class="btn" onclick="ccMenuClose();openPreprintCheck(${_fpIssue.id})">✅ בדיקה לפני דפוס</button>` : '',
+  canProduce ? `<button class="btn" onclick="ccMenuClose();openPreprintCheck(${_fpIssue.id})">✅ בדיקה לפני דפוס</button>` : '',
   canEdit ? `<button class="btn" onclick="ccMenuClose();openPrintVerify(${_fpIssue.id})">🔍 אמת מול מודפס</button>` : '',
-  canEdit && typeof fpBuildPrintPdf === 'function' && typeof pibConfig === 'function' && pibConfig().master_path ? `<button class="btn" onclick="ccMenuClose();fpEditorialShow()">📰 עמודי כתבות (PDF אחד)</button><button class="btn" onclick="ccMenuClose();fpBuildPrintPdf(true)">📝 PDF לאישור (קובץ קל)</button><button class="btn" onclick="ccMenuClose();fpBuildPrintPdf()">📄 הרכבת PDF לדפוס</button>` : ''
+  canProduce && typeof fpBuildPrintPdf === 'function' && typeof pibConfig === 'function' && pibConfig().master_path ? `<button class="btn" onclick="ccMenuClose();fpEditorialShow()">📰 עמודי כתבות (PDF אחד)</button><button class="btn" onclick="ccMenuClose();fpBuildPrintPdf(true)">📝 PDF לאישור (קובץ קל)</button><button class="btn" onclick="ccMenuClose();fpBuildPrintPdf()">📄 הרכבת PDF לדפוס</button>` : ''
 ])}
 ${_fpToolbarMenu('fpMenuMoney', 'כספים', [
   ['admin','sales'].includes(profile.role) ? `<button class="btn" onclick="ccMenuClose();openIssueCosts(${_fpIssue.id})">💸 עלויות הגיליון</button>` : '',
