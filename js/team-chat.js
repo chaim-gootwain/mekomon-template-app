@@ -41,9 +41,9 @@ function tcChannels() {
     const dm = tcMyDmChannel();
     if (dm) out.push({ id: dm, name: 'מנהל', icon: '👤' });
   }
-  // ערוץ "בעיות לתיקון": עורך/גרפיקה מדווחים למנהל על תקלות ושיפורים במערכת
-  // (מיגרציה 2026-11-25_team_chat_fixes_channel.sql)
-  if (['admin', 'editor', 'graphics'].includes(profile.role)) out.push({ id: 'fixes', name: 'בעיות לתיקון', icon: '🛠' });
+  // ערוץ "בעיות לתיקון": עורך/גרפיקה/סוכנים מדווחים למנהל על תקלות ושיפורים במערכת
+  // (מיגרציות 2026-11-25_team_chat_fixes_channel.sql + 2026-11-25_fixes_channel_sales.sql)
+  if (['admin', 'editor', 'graphics', 'sales'].includes(profile.role)) out.push({ id: 'fixes', name: 'בעיות לתיקון', icon: '🛠' });
   return out;
 }
 
