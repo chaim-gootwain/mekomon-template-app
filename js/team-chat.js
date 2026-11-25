@@ -200,6 +200,20 @@ function tcRenderSide() {
     </button>`).join('');
 }
 
+/* ערוץ "בעיות לתיקון": כל הודעה נשלחת גם במייל (ברקע — כשל במייל לא מפיל את הצ'אט).
+   הנושא קבוע ("[בעיות לתיקון]") כדי שאפשר יהיה לסנן/לחפש את המיילים. */
+function tcFixesNotify(body) {
+  try {
+    const to = String((cache.settings || {}).fixes_notify_email || '').trim() || '@@PAPER_EMAIL@@';
+    const who = profile.full_name || 'משתמש';
+    const subject = '[בעיות לתיקון] @@PAPER_NAME@@ — ' + who;
+    const text = `דיווח חדש בערוץ "בעיות לתיקון"\nמאת: ${who}\nזמן: ${new Date().toLocaleString('he-IL')}\n\n${body}`;
+    db.functions.invoke('send-email', { body: { to, subject, body: text } })
+      .then(r => { if (r && r.error) console.warn('fixes email', r.error); })
+      .catch(e => console.warn('fixes email', e));
+  } catch (e) { console.warn('fixes email', e); }
+}
+
 /* ---------- שליחה ---------- */
 async function tcSend() {
   const inp = document.getElementById('tcInput');
@@ -214,6 +228,7 @@ async function tcSend() {
       channel: _tcChannel, sender_user: profile.id, body,
     }), 'שליחת ההודעה נכשלה');
     inp.value = '';
+    if (_tcChannel === 'fixes') tcFixesNotify(body);
     await tcLoadThread(true);
     await tcMarkRead(_tcChannel);
   } catch (e) { /* toast הוצג ע"י run */ }
