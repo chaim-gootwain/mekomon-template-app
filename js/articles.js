@@ -61,8 +61,6 @@ renderTable(document.getElementById('artTable'), rows, [
 { h: 'דדליין', f: r => r.deadline && r.deadline < today() && r.status !== 'published'
 ? `<span class="pill red">${heDate(r.deadline)}</span>` : heDate(r.deadline) },
 { h: 'סטטוס', f: r => pill('article', r.status) },
-{ h: 'עימוד', f: r => layoutPill(r.layout_status) },
-{ h: '', f: r => `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();articleFiles(${r.id})">📎 קבצים / לגרפיקה</button>` },
 ], { onRow: r => articleEdit(r.id), empty: 'אין כתבות' });
 }
 
