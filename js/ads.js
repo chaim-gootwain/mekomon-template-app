@@ -613,9 +613,12 @@ ${_adCopyState.cur.map(f => `<div style="display:flex;justify-content:space-betw
 const title = has ? '🔄 החלפת קובץ המודעה' : '📎 הוספת קובץ למודעה';
 // מודעה מאושרת/משובצת (למשל חוזה): אפשר לשלוח אותה לגרפיקה יחד עם הקובץ החדש
 const gfxHtml = (['approved', 'placed'].includes(a.status) && ['admin', 'sales'].includes(profile.role)) ? `<div class="field" style="border:1px dashed var(--line,#d1d5db);border-radius:10px;padding:8px 10px">
-<label style="display:flex;gap:6px;align-items:center;font-weight:600">
-<input type="checkbox" id="adCopyToGfx" onchange="document.getElementById('adCopyGfxNote').style.display=this.checked?'':'none'"> 🎨 לשלוח לגרפיקה לעיצוב / תיקונים</label>
-<input id="adCopyGfxNote" style="display:none;width:100%;margin-top:6px" placeholder="מה לעצב / לתקן? (למשל: לעצב מחדש לפי הקובץ, לעדכן מחיר)"></div>` : '';
+<label style="display:flex;gap:8px;align-items:center;justify-content:flex-start;font-weight:600;cursor:pointer">
+<input type="checkbox" id="adCopyToGfx" style="width:18px;height:18px;flex:0 0 auto;margin:0" onchange="document.getElementById('adCopyGfxBox').style.display=this.checked?'':'none'"> 🎨 לשלוח לגרפיקה לעיצוב / תיקונים</label>
+<div id="adCopyGfxBox" style="display:none;margin-top:6px">
+<input id="adCopyGfxNote" style="width:100%" placeholder="מה לעצב / לתקן? (למשל: לעצב מחדש, לעדכן מחיר)">
+<p class="muted" style="font-size:.78rem;margin:4px 0 6px">אפשר להעתיק/להעלות קובץ (ייצא לגרפיקה יחד איתו), או לשלוח בלי קובץ חדש:</p>
+<button class="btn btn-sm" onclick="adFileCopyGfxOnly()">🎨 שלח לגרפיקה בלי קובץ חדש</button></div></div>` : '';
 document.getElementById('viewModal').innerHTML = list.length ? `
 <h3>${title}</h3>
 <p class="muted" style="font-size:.85rem">${who} — ${list.length} פרסומים קודמים עם קובץ. אפשר להעתיק מאחד מהם או להעלות קובץ חדש.</p>
@@ -677,6 +680,17 @@ const box = document.getElementById('adCopyToGfx');
 if (!box || !box.checked) return;
 const n = (document.getElementById('adCopyGfxNote') || {}).value;
 await adSendToGraphics(s.adId, String(n || '').trim() || 'עיצוב / תיקון לפי הקובץ החדש');
+}
+
+/* שליחה לגרפיקה מחלון הקובץ בלי להוסיף/להחליף קובץ */
+async function adFileCopyGfxOnly() {
+const s = _adCopyState; if (!s) return;
+const n = String((document.getElementById('adCopyGfxNote') || {}).value || '').trim();
+if (!n) { toast('כתוב מה לעצב / לתקן', true); document.getElementById('adCopyGfxNote')?.focus(); return; }
+if (!(await adSendToGraphics(s.adId, n))) return;
+_adCopyState = null;
+document.getElementById('viewBack').classList.remove('open');
+s.onDone(false);
 }
 
 function adFileCopyClose() {
