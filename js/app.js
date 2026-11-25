@@ -89,6 +89,7 @@ setTimeout(async () => {
   try { if (typeof adStatusCheckPending === 'function') await adStatusCheckPending(); } catch (e) { }
   try { if (typeof weeklySummaryAutoCheck === 'function') await weeklySummaryAutoCheck(); } catch (e) { }
   try { if (typeof standingOrdersAutoCheck === 'function') await standingOrdersAutoCheck(); } catch (e) { }
+  try { if (typeof cardRecurringAutoCheck === 'function') await cardRecurringAutoCheck(); } catch (e) { }
   try { if (typeof icoCostsAutoCheck === 'function') await icoCostsAutoCheck(); } catch (e) { }
 }, 1200);
 }

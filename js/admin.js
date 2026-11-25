@@ -246,6 +246,8 @@ ${typeof pipSettingsCard === 'function' ? pipSettingsCard() : ''}
 
 ${typeof standingOrdersCard === 'function' ? standingOrdersCard() : ''}
 
+${typeof cardRecurringCard === 'function' ? cardRecurringCard() : ''}
+
 ${typeof agenciesCard === 'function' ? agenciesCard() : ''}
 
 ${typeof issueTypesCard === 'function' ? issueTypesCard() : ''}
