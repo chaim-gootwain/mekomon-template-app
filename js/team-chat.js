@@ -204,13 +204,19 @@ function tcRenderSide() {
    הנושא קבוע ("[בעיות לתיקון]") כדי שאפשר יהיה לסנן/לחפש את המיילים. */
 function tcFixesNotify(body) {
   try {
-    const to = String((cache.settings || {}).fixes_notify_email || '').trim() || '@@PAPER_EMAIL@@';
     const who = profile.full_name || 'משתמש';
     const subject = '[בעיות לתיקון] @@PAPER_NAME@@ — ' + who;
     const text = `דיווח חדש בערוץ "בעיות לתיקון"\nמאת: ${who}\nזמן: ${new Date().toLocaleString('he-IL')}\n\n${body}`;
     // תוצאה גלויה למשתמש — כשל שקט הסתיר תקלות במייל (25.11.2026)
     const fail = (m) => toast('ההודעה נשמרה, אבל המייל לא נשלח: ' + m, true);
-    db.functions.invoke('send-email', { body: { to, subject, body: text } })
+    // הכתובת נקראת מהשרת (get_fixes_notify_email, מיגרציה 2026-11-25_fixes_notify_email_rpc):
+    // לגרפיקה אין הרשאת קריאה להגדרות, והמייל נפל לכתובת העיתון במקום לכתובת שהוגדרה
+    let to = '';
+    const pick = async () => {
+      try { const { data, error } = await db.rpc('get_fixes_notify_email'); if (!error && data) to = String(data).trim(); } catch (_e) { }
+      if (!to) to = String((cache.settings || {}).fixes_notify_email || '').trim() || '@@PAPER_EMAIL@@';
+    };
+    pick().then(() => db.functions.invoke('send-email', { body: { to, subject, body: text } }))
       .then(async r => {
         if (r && r.error) {
           let m = r.error.message || 'שגיאה';

@@ -141,8 +141,11 @@ Deno.serve(async (req)=>{
        של 76 תווים — הקובץ מגיע פגום ("הטעינה של מסמך ה-PDF נכשלה").
        לכן מיילים עם צירופים נשלחים ב-SMTP גולמי עם MIME בנוי ידנית —
        אותו מנגנון מוכח של send-clip. בלי צירופים — הנתיב הקיים (denomailer).
-       בנתיב הזה html לא נתמך — גוף המייל נשלח כטקסט. */
-    if (atts.length) {
+       בנתיב הזה html לא נתמך — גוף המייל נשלח כטקסט.
+       גם מייל טקסט בלי html עובר כאן (25.11.2026): ה-quoted-printable של
+       denomailer שובר אותיות עבריות בשורות ארוכות ("ר7�חב" במקום "רוחב");
+       כאן הגוף מקודד ב-base64 ונשמר שלם. */
+    if (atts.length || !html) {
       const CRLF = String.fromCharCode(13, 10);
       const _b64s = (str)=>btoa(String.fromCharCode.apply(null, Array.from(new TextEncoder().encode(str))));
       const _wrap = (s)=>s.replace(/.{1,76}/g, (m)=>m + CRLF);
