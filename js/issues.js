@@ -196,11 +196,23 @@ el.innerHTML = '<div class="empty">טוען פלטפלן...</div>';
 run(db.from('ads').select('*').eq('issue_id', issueId).not('status', 'in', '("cancelled","rejected")')),
 run(db.from('articles').select('*').eq('issue_id', issueId).not('status', 'in', '("idea")')),
 ]);
+_fpHealPlaced();
 _fpFileKinds = typeof adFileKindsFor === 'function' ? await adFileKindsFor(_fpAds.map(a => a.id)) : {};
 _fpChecklist = await run(db.from('issue_checklist').select('*, checklist_template(label)').eq('issue_id', issueId).order('template_id'));
 _fpSelChip = null;
 _alPreview = null; // הצעת שיבוץ שלא אושרה לא שורדת טעינה מחדש (לא נכתב דבר)
 _fpPaint();
+}
+
+/* מודעה שחזרה מגרפיקה/פרוף ל"מאושרת" כשהיא עדיין יושבת בעמוד (למשל מודעת חוזה
+   שנשלחה לתיקונים) — מחזירים אותה ל"משובצת", אחרת הפרסום המרוכז של הגיליון
+   (publish_issue_ads, רק placed) ידלג עליה ולא ייווצר לה חיוב */
+function _fpHealPlaced() {
+  if (typeof profile === 'undefined' || !['admin', 'sales'].includes(profile.role)) return;
+  const fix = (_fpAds || []).filter(a => a.status === 'approved' && a.page_number);
+  if (!fix.length) return;
+  fix.forEach(a => { a.status = 'placed'; });
+  db.from('ads').update({ status: 'placed' }).in('id', fix.map(a => a.id)).eq('status', 'approved').then(() => { }, () => { });
 }
 
 /* עמודים מיוחדים (פרימיום) — שער / אחורי / כפולה אמצעית */

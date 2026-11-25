@@ -206,9 +206,11 @@ if (a.status === 'received') routeButtons = `
 <button class="btn btn-sm btn-danger-ghost" onclick="adRoute(${id},'reject',true)">✗ דחייה</button>`;
 else if (a.status === 'approved') routeButtons = `
 <button class="btn btn-sm" onclick="adAssignIssue(${id})">📌 שיבוץ לגיליון</button>
-<button class="btn btn-sm btn-ghost" onclick="adRoute(${id},'to_committee')">בכל זאת לוועדה</button>`;
-else if (a.status === 'placed') routeButtons = profile.role === 'admin'
-? `<button class="btn btn-sm" style="background:var(--ok)" onclick="adRoute(${id},'publish')">📣 סימון פורסמה (יוצר חיוב)</button>` : '';
+<button class="btn btn-sm btn-ghost" onclick="adRoute(${id},'to_committee')">בכל זאת לוועדה</button>
+<button class="btn btn-sm btn-ghost" onclick="adSendToGraphicsCard(${id})">🎨 לעיצוב / תיקונים</button>`;
+else if (a.status === 'placed') routeButtons = (profile.role === 'admin'
+? `<button class="btn btn-sm" style="background:var(--ok)" onclick="adRoute(${id},'publish')">📣 סימון פורסמה (יוצר חיוב)</button>` : '')
++ `<button class="btn btn-sm btn-ghost" onclick="adSendToGraphicsCard(${id})">🎨 לעיצוב / תיקונים</button>`;
 // מנהל: דילוג על פרוף/ועדה — מודעה חוזרת או שהלקוח כבר אישר
 if (profile.role === 'admin' && ['in_graphics', 'proof', 'committee'].includes(a.status))
 routeButtons += `<button class="btn btn-sm" style="background:var(--ok)" onclick="adApproveSkipProof(${id})">✓ אישור לשיבוץ (בלי פרוף)</button>`;
@@ -296,6 +298,34 @@ async function adApproveSkipProof(id) {
   }
   toast('✓ המודעה אושרה לשיבוץ');
   document.getElementById('viewBack')?.classList.remove('open');
+  openPage(currentPage);
+}
+
+/* מודעה מאושרת/משובצת (למשל מודעת חוזה שהלקוח מחליף) → חזרה לתור הגרפיקה לעיצוב/תיקונים.
+   הגיליון והעמוד בפלטפלן נשמרים; ההנחיה נשמרת כ"תיקון" (revision_note) ומוצגת בתור.
+   אחרי עיצוב → פרוף → אישור, המודעה חוזרת למקומה (ר' _fpHealPlaced ב-issues.js). */
+async function adSendToGraphics(id, note) {
+  if (!['admin', 'sales'].includes(profile.role)) return false;
+  if (note == null) {
+    const r = prompt('מה לעצב / לתקן? (הנחיה לגרפיקאית)');
+    if (r === null) return false;
+    note = r;
+  }
+  note = String(note || '').trim();
+  if (!note) { toast('נא לכתוב הנחיה לגרפיקאית', true); return false; }
+  try {
+    await run(db.from('ads').update({ status: 'in_graphics', revision_note: note, proof_mgmt_at: null, proof_mgmt_by: null, proof_cust_at: null }).eq('id', id));
+  } catch (e) { return false; }
+  try { await addInteraction('ad', id, '🎨 נשלחה לגרפיקה לעיצוב/תיקונים: ' + note); } catch (e) { }
+  // פלטפלן פתוח — עדכון העותק המקומי כדי שהסטטוס יוצג מיד
+  try { if (typeof _fpAds !== 'undefined' && Array.isArray(_fpAds)) { const x = _fpAds.find(y => y.id === id); if (x) { x.status = 'in_graphics'; x.revision_note = note; if (typeof _fpPaint === 'function' && document.getElementById('fpGrid')) _fpPaint(); } } } catch (e) { }
+  toast('🎨 נשלחה לתור הגרפיקה — המקום בעמוד נשמר');
+  return true;
+}
+async function adSendToGraphicsCard(id) {
+  if (!(await adSendToGraphics(id))) return;
+  document.getElementById('viewBack').classList.remove('open');
+  if (document.getElementById('fpGrid') && typeof _fpPaint === 'function') return;
   openPage(currentPage);
 }
 
@@ -558,13 +588,13 @@ await addInteraction('ad', adId, `הועתק קובץ מ${c.issue ? 'גיליו�
 let _adCopyState = null;
 // onDone — מה לעשות אחרי העתקה/ביטול (ברירת מחדל: חזרה לכרטיס המודעה)
 async function adFileCopyOpen(adId, onDone) {
-const a = await run(db.from('ads').select('id,customer_id,title').eq('id', adId).single());
+const a = await run(db.from('ads').select('id,customer_id,title,status').eq('id', adId).single());
 if (!a) return;
 const [list, cur] = await Promise.all([
 a.customer_id ? _adPrevFiles([a.customer_id], [adId]) : [],
 run(db.from('ad_files').select('*').eq('ad_id', adId).in('kind', ['design', 'source']).order('created_at', { ascending: false })),
 ]);
-_adCopyState = { adId, list, cur: cur || [], onDone: onDone || (() => openAdCard(adId)) };
+_adCopyState = { adId, list, cur: cur || [], status: a.status, onDone: onDone || (() => openAdCard(adId)) };
 const has = _adCopyState.cur.length > 0;
 const close = `<button class="btn btn-sm btn-ghost" style="margin-right:auto" onclick="adFileCopyClose()">ביטול</button>`;
 const upload = `<input type="file" id="adCopyUpload" class="hidden" onchange="adFileCopyUpload()">
@@ -578,10 +608,16 @@ ${_adCopyState.cur.map(f => `<div style="display:flex;justify-content:space-betw
 <label style="display:flex;gap:6px;align-items:center;font-weight:normal;margin-top:4px">
 <input type="checkbox" id="adCopyReplace" checked> להסיר את הקובץ הנוכחי אחרי ההוספה (החלפה)</label></div>` : '';
 const title = has ? '🔄 החלפת קובץ המודעה' : '📎 הוספת קובץ למודעה';
+// מודעה מאושרת/משובצת (למשל חוזה): אפשר לשלוח אותה לגרפיקה יחד עם הקובץ החדש
+const gfxHtml = (['approved', 'placed'].includes(a.status) && ['admin', 'sales'].includes(profile.role)) ? `<div class="field" style="border:1px dashed var(--line,#d1d5db);border-radius:10px;padding:8px 10px">
+<label style="display:flex;gap:6px;align-items:center;font-weight:600">
+<input type="checkbox" id="adCopyToGfx" onchange="document.getElementById('adCopyGfxNote').style.display=this.checked?'':'none'"> 🎨 לשלוח לגרפיקה לעיצוב / תיקונים</label>
+<input id="adCopyGfxNote" style="display:none;width:100%;margin-top:6px" placeholder="מה לעצב / לתקן? (למשל: לעצב מחדש לפי הקובץ, לעדכן מחיר)"></div>` : '';
 document.getElementById('viewModal').innerHTML = list.length ? `
 <h3>${title}</h3>
 <p class="muted" style="font-size:.85rem">${who} — ${list.length} פרסומים קודמים עם קובץ. אפשר להעתיק מאחד מהם או להעלות קובץ חדש.</p>
 ${curHtml}
+${gfxHtml}
 <div class="field"><label>מאיזה גיליון?</label>
 <select id="adCopyPick" style="width:100%">
 ${list.map((c, i) => `<option value="${i}">${i === 0 ? '⭐ הפרסום האחרון — ' : ''}${esc(_adPrevLabel(c))}</option>`).join('')}
@@ -596,6 +632,7 @@ ${close}
 <h3>${title}</h3>
 <p>${a.customer_id ? `ללקוח ${who} אין מודעות קודמות עם קובץ.` : 'למודעה אין לקוח, ולכן אין פרסומים קודמים להעתקה.'} אפשר להעלות קובץ חדש.</p>
 ${curHtml}
+${gfxHtml}
 <div class="m-actions">${upload}${close}</div>`;
 document.getElementById('viewBack').classList.add('open');
 }
@@ -624,10 +661,19 @@ await run(db.from('ad_files').insert({ ad_id: s.adId, storage_path: path, file_n
 await addInteraction('ad', s.adId, `הועלה קובץ: ${file.name}`);
 const warn = await _adCopyDropOld(s);
 toast((replacing ? 'הקובץ הוחלף' : 'הקובץ הועלה') + warn, !!warn);
+await _adCopyMaybeGfx(s);
 _adCopyState = null;
 document.getElementById('viewBack').classList.remove('open');
 const left = replacing && !warn ? [] : s.cur;
 s.onDone(true, left.some(f => f.kind === 'design') ? 'design' : kind);
+}
+
+/* סומן "לשלוח לגרפיקה" בחלון הקובץ — אחרי שהקובץ נשמר */
+async function _adCopyMaybeGfx(s) {
+const box = document.getElementById('adCopyToGfx');
+if (!box || !box.checked) return;
+const n = (document.getElementById('adCopyGfxNote') || {}).value;
+await adSendToGraphics(s.adId, String(n || '').trim() || 'עיצוב / תיקון לפי הקובץ החדש');
 }
 
 function adFileCopyClose() {
@@ -643,6 +689,7 @@ const replacing = s.cur.length && document.getElementById('adCopyReplace')?.chec
 await _adCopyFile(s.adId, s.list[i]);
 const warn = await _adCopyDropOld(s);
 toast((replacing ? 'הקובץ הוחלף' : 'הקובץ הועתק') + warn, !!warn);
+await _adCopyMaybeGfx(s);
 _adCopyState = null;
 document.getElementById('viewBack').classList.remove('open');
 // אם לא הוחלף ונשאר עיצוב — הסימון נשאר עיצוב
